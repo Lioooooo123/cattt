@@ -26,6 +26,7 @@
     "vitest": "^5.0.0"
   },
   "scripts": {
+    "eval:memory": "vitest run --silent=false --no-file-parallelism test/memory-eval.test.ts",
     "dev": "pnpm run --parallel \"/^dev:/\"",
     "dev:api": "tsx watch src/api.ts",
     "dev:worker": "tsx watch src/worker.ts",

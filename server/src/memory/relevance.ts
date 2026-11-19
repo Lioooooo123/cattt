@@ -8,7 +8,7 @@ const stop = new Set(['用户', '自己', '喜欢', '事情', '东西', '现在'
 const topics = [
   ['最后怎么样', '最后怎样', '后来怎么样', '后来怎样', '结果如何', '结果', '结局'],
   ['晚饭', '晚餐', '午餐', '午饭', '早餐', '吃饭', '饭菜', '菜品', '饮食', '食物', '口味', '忌口', '香菜', '素食', '辣椒', '辛辣', '海鲜'],
-  ['饮料', '喝点', '喝什么', '咖啡', '拿铁', '美式', '茶饮', '奶茶', '饮品', '无咖啡因'],
+  ['饮料', '喝点', '喝什么', '喝的', '清水', '白开水', '饮水', '咖啡', '拿铁', '美式', '茶饮', '奶茶', '饮品', '无咖啡因'],
   ['看书', '读书', '阅读', '书籍', '小说', '作家', '文学', '科幻', '图书'],
   ['电影', '影片', '影院', '观影'],
   ['运动', '锻炼', '健身', '跑步', '游泳', '骑行'],
@@ -49,30 +49,53 @@ export function boundaryOverlaps(item: RecallItem, topic: string) {
 }
 export function rankMemories<T extends RecallItem>(items: T[], query: string, expanded: string[] = []) {
   const direct = recallTokens(query);
+  const normalizedQuery = normalizeRecall(query);
   const extra = [...new Set([...localRecallTerms(query), ...expanded.flatMap(recallTokens)])]
     .filter(t => !direct.includes(t));
   const documents = items.map(item => ({ item, text: normalizeRecall(`${item.subject} ${item.predicate} ${item.value}`) }));
   const weights = new Map([...direct, ...extra].map(t => [t, 1 + Math.log(1 + items.length / (1 + documents.filter(d => d.text.includes(t)).length))]));
-  return documents.map(({ item, text }) => {
+  const now = Date.now();
+  const candidates = documents.map(({ item, text }) => {
     const hits = direct.filter(t => text.includes(t));
     const semantic = extra.filter(t => text.includes(t));
     // 敏感记忆不能仅因扩词被找到：当前问题必须直接点到对应内容。
     const permitted = item.sensitivity !== 'high' || (item.explicit && hits.length > 0);
-    const relevance = hits.reduce((sum, t) => sum + weights.get(t)!, 0)
-      + Math.min(3, semantic.reduce((sum, t) => sum + weights.get(t)! * .45, 0));
+    const lexical = hits.reduce((sum, t) => sum + weights.get(t)!, 0);
+    // 分词漏掉的查询原词仍可准入，但不能再作为扩词获得第二票。
+    const expansion = semantic.filter(t => !normalizedQuery.includes(t)).reduce((sum, t) => sum + weights.get(t)!, 0);
     const essential = item.explicit && /^(回答方式|沟通偏好|称呼|回复长度|表达方式)$/.test(item.predicate);
     const eligible = permitted && (hits.length > 0 || semantic.length > 0 || essential);
-    // 明确要求和新近确认只用于已有相关性的排序，不能让无关内容入选。
-    const recent = Math.max(0, 1 - (Date.now() - item.lastConfirmedAt.getTime()) / (90 * 86400000));
-    return { item, score: eligible ? relevance + (essential ? .3 : 0) + (item.explicit ? .2 : 0) + recent * .1 : 0 };
-  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score
-    || b.item.revision - a.item.revision || b.item.lastConfirmedAt.getTime() - a.item.lastConfirmedAt.getTime() || a.item.id.localeCompare(b.item.id));
+    // 半衰期 90 天、按 UTC 日计龄，同天确认不因写入毫秒差而分出先后。
+    const ageDays = Math.max(0, Math.floor(now / 86400000) - Math.floor(item.lastConfirmedAt.getTime() / 86400000));
+    const recent = Math.exp(-Math.LN2 * ageDays / 90);
+    return { item, lexical, expansion, recent, eligible };
+  }).filter(row => row.eligible);
+  const fused = new Map(candidates.map(row => [row.item.id, 0]));
+  for (const key of ['lexical', 'expansion', 'recent'] as const) {
+    const list = candidates.filter(row => row[key] > 0).sort((a, b) => b[key] - a[key] || newestFirst(a.item, b.item));
+    let rank = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (i === 0 || list[i]![key] !== list[i - 1]![key]) rank = i + 1;
+      const id = list[i]!.item.id;
+      fused.set(id, fused.get(id)! + 1 / (60 + rank));
+    }
+  }
+  return candidates.map(({ item }) => ({ item, score: fused.get(item.id)! }))
+    .sort((a, b) => b.score - a.score || newestFirst(a.item, b.item));
+}
+function newestFirst(a: RecallItem, b: RecallItem) {
+  return b.revision - a.revision || b.lastConfirmedAt.getTime() - a.lastConfirmedAt.getTime() || a.id.localeCompare(b.id);
 }
 export function selectMemories<T extends RecallItem>(ranked: { item: T; score: number }[], maxCount = 8, maxChars = 2400): T[] {
   const result: T[] = []; const seen = new Set<string>(); let chars = 0;
+  const newest = new Map<string, T>();
+  for (const { item } of ranked) {
+    const prior = newest.get(item.fingerprint);
+    if (!prior || newestFirst(item, prior) < 0) newest.set(item.fingerprint, item);
+  }
   for (const { item } of ranked) {
     const size = item.subject.length + item.predicate.length + item.value.length + 24;
-    if (seen.has(item.fingerprint) || chars + size > maxChars) continue;
+    if (newest.get(item.fingerprint) !== item || seen.has(item.fingerprint) || chars + size > maxChars) continue;
     seen.add(item.fingerprint); result.push(item); chars += size;
     if (result.length >= maxCount) break;
   }

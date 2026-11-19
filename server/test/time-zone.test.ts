@@ -8,7 +8,6 @@ import { cats, conversations, users } from '../src/db/schema.ts';
 import { buildTurnContext } from '../src/runtime/context.ts';
 import { catTools } from '../src/runtime/tools.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 let userId: string, catId: string, conversationId: string;
 const token = randomUUID();
 const request = (body: unknown, authorization = 'Bearer ' + token) => app.request('/v1/me/time-zone', {
@@ -19,7 +18,7 @@ beforeAll(async () => {
   const [cat] = await db.insert(cats).values({ userId, name: '团子', appearance: 'orange', temperament: 'slow', traits: { energy: 1, initiative: 1, directness: 1, closeness: 1 } }).returning(); catId = cat!.id;
   const [conv] = await db.insert(conversations).values({ catId }).returning(); conversationId = conv!.id;
 });
-afterAll(async () => { await db.delete(users).where(eq(users.id, userId)); await closeQueues(); await redis.quit(); await sql.end(); });
+afterAll(async () => { await db.delete(users).where(eq(users.id, userId)); await closeQueues();  await sql.end(); });
 it('时区缺省为上海，合法上报只更新当前用户', async () => {
   expect((await db.select().from(users).where(eq(users.id, userId)))[0]!.timeZone).toBe('Asia/Shanghai');
   const [other] = await db.insert(users).values({}).returning();

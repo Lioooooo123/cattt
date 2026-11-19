@@ -1,38 +1,30 @@
-import { redis } from '../redis.ts';
+import { sql } from '../db/client.ts';
 
 type Listener = (message: string) => void;
 const listeners = new Map<string, Set<Listener>>();
-let subscriber: ReturnType<typeof redis.duplicate> | undefined;
-let pending = Promise.resolve();
+let pending: Promise<unknown> | undefined;
 
-/** 通知只负责加速；断线期间由调用方的低频读取兜底。 */
+/** 固定频道避免标识符长度限制；逻辑频道共享一条专用连接。 */
 export async function subscribe(channel: string, listener: Listener): Promise<() => void> {
-  if (!subscriber) {
-    subscriber = redis.duplicate({ lazyConnect: true });
-    subscriber.on('error', () => {});
-    subscriber.on('message', (name, message) => {
-      for (const notify of listeners.get(name) ?? []) notify(message);
-    });
-    redis.once('end', () => subscriber?.disconnect());
-  }
-  const conn = subscriber;
   const group = listeners.get(channel) ?? new Set<Listener>();
   listeners.set(channel, group);
   group.add(listener);
-  pending = pending.then(async () => {
-    if (conn.status === 'wait') await conn.connect();
-    await conn.subscribe(channel);
-  }).catch(() => {});
-  await pending;
+  pending ??= sql.listen('turn_updates', payload => {
+    try {
+      const { channel, message } = JSON.parse(payload);
+      for (const notify of listeners.get(channel) ?? []) notify(message);
+    } catch {}
+  }).catch(error => { pending = undefined; throw error; });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, 1000); })]);
+  } catch { /* 定时读取兜底 */ }
+  finally { clearTimeout(timer); }
   let registered = true;
   return () => {
     if (!registered) return;
     registered = false;
     group.delete(listener);
-    if (group.size) return;
-    listeners.delete(channel);
-    pending = pending.then(async () => {
-      if (!listeners.has(channel)) await conn.unsubscribe(channel);
-    }).catch(() => {});
+    if (!group.size && listeners.get(channel) === group) listeners.delete(channel);
   };
 }

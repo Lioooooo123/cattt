@@ -34,7 +34,6 @@ const schema = z
     MODEL_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(2000000),
     AGENT_ENABLED: z.enum(['true','false']).default('true'),
     DATABASE_URL: z.string().default('postgres://maomao:maomao@localhost:5432/maomao'),
-    REDIS_URL: z.string().default('redis://localhost:6379'),
     PORT: z.coerce.number().int().default(8787),
     HOST: z.string().default('127.0.0.1'),
     LAN_HTTPS_HOST: z.string().default('0.0.0.0'),
@@ -131,7 +130,7 @@ export function describeModelConfig(): string {
 
 /** 回复多久没心跳算卡住（生成时每 5 秒一次心跳） */
 export const STALE_TURN_MS = 30_000;
-/** 回复结束后，续传用的事件在 Redis 里留多久 */
+/** 回复结束后，续传用的事件在 PG 里留多久 */
 export const TURN_EVENTS_TTL_S = 10 * 60;
 /** 带进上下文的最近消息条数 */
 export const CONTEXT_MESSAGES = 30;

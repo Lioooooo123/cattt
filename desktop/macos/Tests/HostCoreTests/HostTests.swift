@@ -24,7 +24,7 @@ final class HostTests: XCTestCase {
         }
         XCTAssertEqual(try XCTUnwrap(Host.newestRegularBackup(in: dir)).timeIntervalSince1970, old.timeIntervalSince1970, accuracy: 1)
         let env = dir.appendingPathComponent("env")
-        try Data("# 保留\nMODEL_PROVIDER=mock\nREDIS_URL=redis://127.0.0.1:56379\nOTHER=' a b '\n".utf8).write(to: env)
+        try Data("# 保留\nMODEL_PROVIDER=mock\nPORT=8787\nOTHER=' a b '\n".utf8).write(to: env)
         XCTAssertThrowsError(try Host.writeDeepSeekConfiguration("", in: dir))
         XCTAssertThrowsError(try Host.writeDeepSeekConfiguration("x\ny", in: dir))
         try Host.writeDeepSeekConfiguration("sk-test", in: dir)
@@ -32,7 +32,7 @@ final class HostTests: XCTestCase {
         XCTAssertEqual(values["MODEL_PROVIDER"], "deepseek")
         XCTAssertEqual(values["MAOMAO_DEEPSEEK_API_KEY"], "sk-test")
         XCTAssertEqual(values["OTHER"], " a b ")
-        XCTAssertEqual(values["REDIS_URL"], "redis://127.0.0.1:56379")
+        XCTAssertEqual(values["PORT"], "8787")
         XCTAssertEqual((try fm.attributesOfItem(atPath: env.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
     func testEnv() throws {

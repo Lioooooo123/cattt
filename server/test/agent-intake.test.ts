@@ -8,7 +8,6 @@ import { scheduleFollowup, updateTicket, parseFollowupTime } from '../src/agent/
 import { catTools } from '../src/runtime/tools.ts';
 import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
-import { redis } from '../src/redis.ts';
 import { closeQueues } from '../src/queue.ts';
 
 const now = new Date('2026-11-17T04:00:00Z');
@@ -30,7 +29,7 @@ afterAll(async () => {
     await db.delete(users).where(eq(users.id, id));
   }
   await closeQueues();
-  await redis.quit();
+
   await sql.end();
 });
 async function message(text: string, role: 'user' | 'cat' = 'user') {

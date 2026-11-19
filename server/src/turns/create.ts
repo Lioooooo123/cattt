@@ -119,7 +119,7 @@ async function cancelPending(tx: Tx, conversationId: string, except: string): Pr
 }
 
 async function launch(turnId: string, userMessageId: string, cancelled: string[]) {
-  // 输入已落库，即使 Redis 发布失败也启动执行/失败收尾，不留无人认领的 queued。
+  // 输入已落库，即使 PG 发布失败也启动执行/失败收尾，不留无人认领的 queued。
   try {
     await publish(turnId, { event: 'accepted', data: { turn_id: turnId, user_message_id: userMessageId } });
     for (const id of cancelled) {

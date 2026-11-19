@@ -34,8 +34,7 @@ if (process.argv[2] === 'seed') {
     const { drainTurns } = await import('../src/turns/run.ts');
     await drainTurns(20000);
     const { closeQueues } = await import('../src/queue.ts');
-    const { redis } = await import('../src/redis.ts');
-    await closeQueues(); redis.disconnect(); await sql.end(); process.exit(0);
+await closeQueues();  await sql.end(); process.exit(0);
   };
   process.on('SIGTERM', close); process.on('SIGINT', close);
 } else { await sql.end(); throw new Error('只允许seed或serve'); }

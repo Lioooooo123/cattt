@@ -10,7 +10,6 @@ import { hashToken } from '../src/auth-token.ts';
 import { db, sql } from '../src/db/client.ts';
 import { asyncJobs, cats, conversations, mailboxLetters, messages, runs, tickets, users } from '../src/db/schema.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 
 const userIds: string[] = [];
 
@@ -42,7 +41,7 @@ afterAll(async () => {
     )`;
     await db.delete(users).where(eq(users.id, id));
   }
-  redis.disconnect();
+
   await sql.end();
 });
 

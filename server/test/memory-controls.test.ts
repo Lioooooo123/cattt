@@ -1,4 +1,4 @@
-/** 真 PG / Redis，合成账号；不调用付费模型。 */
+/** 真 PG，合成账号；不调用付费模型。 */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
@@ -11,7 +11,6 @@ import { adjustSoul, getSoul, setRuntimeState } from '../src/soul/service.ts';
 import { commitOutcome } from '../src/turns/store.ts';
 import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
-import { redis } from '../src/redis.ts';
 import { closeQueues } from '../src/queue.ts';
 const ids: string[] = [];
 const candidate = { subject: '用户', predicate: '咖啡偏好', value: '不喝咖啡', kind: 'preference' as const, confidence: .95, sensitivity: 'low' as const, explicit: true, correction: false };
@@ -30,7 +29,7 @@ beforeEach(async () => {
   const [conv] = await db.insert(conversations).values({ catId }).returning(); convId = conv!.id;
   sourceId = (await source()).id;
 });
-afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues(); await redis.quit(); await sql.end(); });
+afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
 it('列表返回真实原话，编辑后新值生效；旧候选迟到不覆盖', async () => {
   await applyCandidate(catId, sourceId, candidate);
   const late = await source('旧说法');

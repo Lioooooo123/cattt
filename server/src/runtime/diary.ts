@@ -2,7 +2,7 @@ import { generateText } from 'ai';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { cats } from '../db/schema.ts';
-import { chatSlot, recordModelCall } from './model.ts';
+import { catDiarySlot, recordModelCall } from './model.ts';
 import { compileBehavior } from './behavior.ts';
 import { TEMPERAMENTS, type Temperament } from './persona.ts';
 
@@ -51,7 +51,7 @@ export async function writeDiary(catId: string, facts: DiaryFacts) {
   facts = { ...facts, chatSnippet: undefined, fragmentSnippet: undefined };
   const temperament = (cat.temperament in TEMPERAMENTS ? cat.temperament : 'slow') as Temperament;
   const behavior = compileBehavior(temperament, cat.traits);
-  const slot = chatSlot('cat_diary');
+  const slot = catDiarySlot('chat');
   const started = Date.now();
   const { text, usage } = await generateText({
     model: slot.model,

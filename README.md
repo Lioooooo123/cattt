@@ -95,6 +95,12 @@ API 与 worker 通过 PostgreSQL 共用模型并发准入。同一 `OPENAI_COMPA
 
 也可以改用自带 key 的 DeepSeek（`MODEL_PROVIDER=deepseek`、`MAOMAO_DEEPSEEK_API_KEY=你的密钥`），或只给某个槽位换来源（如 `WORKER_PROVIDER=deepseek`）。`pnpm check:model` 检查连通，然后用 `pnpm dev` 启动。模型、数据库、身份与推送配置见 [server/.env.example](server/.env.example)，更多后端说明见 [server/README.md](server/README.md)。
 
+#### 聊天走 DeepSeek、记忆走本机模型
+
+在上面的本机配置基础上，设置 `CHAT_PROVIDER=deepseek`、`ROUTER_PROVIDER=deepseek`、`WORKER_PROVIDER=deepseek` 和 `MAOMAO_DEEPSEEK_API_KEY`，保留 `MODEL_PROVIDER=openai-compatible` 与 `OPENAI_COMPAT_MODEL`，不设置 `EXTRACT_PROVIDER`。聊天、路由和托付执行使用 DeepSeek；记忆提取、边界概括、召回扩词、日记读取与猫日记生成使用本机模型。每日猫日记的事件筛选仍属于 router 槽位。完整注释预设见 [server/.env.example](server/.env.example)。
+
+`pnpm --dir server check:model` 会检查所有槽位用到的来源、模型与思考模式（相同组合只检查一次）。`model:setup` 更新本机模型时保留各槽位的 `*_PROVIDER` 与 `*_MODEL` 覆盖；已有覆盖请自行核对。此配置不代表记忆或日记绝不出本机：经许可选入聊天或托付上下文的内容仍可能发往 DeepSeek。
+
 ### 运行网页展示页
 
 ```bash

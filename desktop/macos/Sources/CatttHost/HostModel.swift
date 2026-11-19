@@ -71,7 +71,7 @@ final class HostModel: ObservableObject {
             catch { self.publish(error: String(describing: error)) }
         }
     }
-    func saveKey(_ key: String) { perform { try host.configureDeepSeek(key); return "模型配置已保存，服务正在启动" } }
+    func saveKey(_ key: String) { perform { try host.configureDeepSeek(key); return "" } }
     func checkOllama(_ completion: @escaping (Bool) -> Void) {
         queue.async {
             guard let env = try? host.modelSetupEnvironment(), let request = ModelSetupRunner.ollamaRequest(env) else {

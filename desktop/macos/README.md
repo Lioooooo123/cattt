@@ -18,6 +18,7 @@ bash desktop/macos/scripts/smoke-host.sh
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
 当前构建为 ad-hoc 签名，下载副本会被 Gatekeeper 拦截。确认来源可信后可右键打开，或对应用执行 `xattr -dr com.apple.quarantine /path/to/Cattt.app`。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。
+烟测不启动或依赖 Redis；运行前要求没有 `redis-server` 进程，并验证健康 JSON 中 `ok=true`、`db=true` 且无 `redis` 字段。它使用自己的新数据目录，但仍需空闲的 8787、8788 和 54329 端口；不要与运行中的宿主同时执行。
 
 首次启动无需模型密钥：API 和 worker 照常运行，不内置开发者密钥，也不会自动切换 mock。未设置 `MODEL_PROVIDER` 时与服务端一致使用 `openai-compatible`，默认 `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1`（Ollama，也可指向 LM Studio 等兼容服务）。填 `OPENAI_COMPAT_MODEL` 设置共用模型名，聊天槽位的 `CHAT_MODEL` 优先；`MAOMAO_OPENAI_COMPAT_API_KEY` 可选，本机服务通常不需要。
 

@@ -3,11 +3,25 @@ import XCTest
 
 final class HostTests: XCTestCase {
     func testModelConfigurationWarning() {
-        XCTAssertTrue(Host.needsModelConfiguration([:]))
-        XCTAssertTrue(Host.needsModelConfiguration(["MODEL_PROVIDER": "deepseek"]))
-        XCTAssertFalse(Host.needsModelConfiguration(["MAOMAO_DEEPSEEK_API_KEY": "test"]))
-        XCTAssertFalse(Host.needsModelConfiguration(["MODEL_PROVIDER": "mock"]))
-        XCTAssertFalse(Host.needsModelConfiguration(["MODEL_PROVIDER": "openai-compatible"]))
+        XCTAssertEqual(Host.modelStatus([:]), "本地 · 127.0.0.1:11434/未配置模型名")
+        XCTAssertEqual(Host.modelStatus(["MAOMAO_DEEPSEEK_API_KEY": "test"]), Host.modelStatus([:]))
+        XCTAssertEqual(Host.modelStatus(["MODEL_PROVIDER": "deepseek"]), "DeepSeek · 未配置密钥")
+        XCTAssertEqual(Host.modelStatus(["MODEL_PROVIDER": "deepseek", "MAOMAO_DEEPSEEK_API_KEY": "test"]), "DeepSeek · 已配置")
+        XCTAssertEqual(Host.modelStatus(["MODEL_PROVIDER": "mock"]), "测试模式")
+        let env = ["MODEL_PROVIDER": "openai-compatible", "OPENAI_COMPAT_BASE_URL": "http://localhost:1234/v1/", "OPENAI_COMPAT_MODEL": "local-model", "MAOMAO_OPENAI_COMPAT_API_KEY": "test"]
+        XCTAssertEqual(Host.modelStatus(env, httpStatus: 200), "本地 · localhost:1234/local-model")
+        XCTAssertEqual(Host.modelStatus(env, httpStatus: 0), "本地服务未启动 · localhost:1234/local-model")
+        XCTAssertEqual(Host.modelStatus(env, httpStatus: 401), "本地服务返回错误（401） · localhost:1234/local-model")
+        XCTAssertEqual(Host.modelStatus(env.merging(["CHAT_MODEL": "chat-model"]) { _, new in new }), "本地 · localhost:1234/chat-model")
+        XCTAssertEqual(Host.modelStatus(["OPENAI_COMPAT_BASE_URL": "bad"]), "本地 · 服务地址无效")
+        XCTAssertEqual(Host.modelStatus(["MODEL_PROVIDER": "invalid"]), "来源无效")
+        let request = Host.modelHealthRequest(env)
+        XCTAssertEqual(request?.url?.absoluteString, "http://localhost:1234/v1/models")
+        XCTAssertEqual(request?.value(forHTTPHeaderField: "Authorization"), "Bearer test")
+        XCTAssertEqual(request?.timeoutInterval, 2)
+        XCTAssertNil(Host.modelHealthRequest(["MODEL_PROVIDER": "deepseek"]))
+        XCTAssertNil(Host.modelHealthRequest(["MODEL_PROVIDER": "mock"]))
+        XCTAssertNil(Host.modelHealthRequest([:])?.value(forHTTPHeaderField: "Authorization"))
     }
     func testBackupFreshnessAndKeyFile() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

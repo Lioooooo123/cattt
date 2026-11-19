@@ -16,12 +16,14 @@ import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
 import { registerDevice, processPush } from '../src/push/service.ts';
 import { closeQueues } from '../src/queue.ts';
+import { config } from '../src/config.ts';
 
 const day = new Date().toISOString().slice(0, 10);
 const now = new Date(day + 'T12:00:00Z');
 const owners: string[] = [];
 let userId: string, catId: string, conversationId: string, sourceId: string, token: string;
 beforeEach(async () => {
+  config.REMOTE_PUSH_ENABLED = 'false';
   token = randomUUID();
   const [u] = await db.insert(users).values({ devTokenHash: hashToken(token), timeZone: 'UTC' }).returning();
   userId = u!.id; owners.push(userId);
@@ -236,6 +238,7 @@ it('新执行从持久输入恢复，可由另一个worker进程接续', async (
 }, 20000);
 
 it('只认当前执行的waiting推送，旧执行同名工具回执不会恢复旧问题', async () => {
+  config.REMOTE_PUSH_ENABLED = 'true';
   await registerDevice(userId, { token: randomUUID().replaceAll('-', '').repeat(2), environment: 'sandbox', topic: 'local.test.cat' }, 'local.test.cat');
   const t = await failed();
   const wait = new MockLanguageModelV4({ doGenerate: async () => ({ content: [{ type: 'tool-call', toolCallId: 'same-call', toolName: 'report', input: JSON.stringify({ status: 'waiting', question: '想待在家吗？' }) }], finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } }, warnings: [] }) });

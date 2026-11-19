@@ -2,15 +2,10 @@ import Foundation
 @main struct IdentityLogicTests {
  static func check(_ condition:Bool){precondition(condition)}
  static func main() throws {
-  let a=AccountSession(accountID:"account-a",token:"first",appleUserID:"apple-a",expiresAt:Date().addingTimeInterval(1000))
-  let refresh=AccountSession(accountID:"account-a",token:"next",appleUserID:"apple-a",expiresAt:Date().addingTimeInterval(1000))
-  check(a.storageIdentity(origin:"https://test.invalid")==refresh.storageIdentity(origin:"https://test.invalid"))
-  let b=AccountSession(accountID:"account-b",token:"second",appleUserID:"apple-b",expiresAt:Date().addingTimeInterval(1000))
-  check(a.storageIdentity(origin:"https://test.invalid") != b.storageIdentity(origin:"https://test.invalid"))
   check(CredentialPersistencePolicy.maySaveDeveloperToken(mode:"local",accountID:nil))
   check(!CredentialPersistencePolicy.maySaveDeveloperToken(mode:"mock",accountID:"account-a"))
   check(!CredentialPersistencePolicy.maySaveDeveloperToken(mode:"local",accountID:"account-a"))
-  check(!CredentialPersistencePolicy.maySaveDeveloperToken(mode:"service",accountID:"account-a"))
+  check(!CredentialPersistencePolicy.maySaveDeveloperToken(mode:"paired",accountID:"account-a"))
   let source=UUID().uuidString
   check(AgreementNotificationGate.accepted(sourceID:source,savedSources:[source]))
   check(!AgreementNotificationGate.accepted(sourceID:nil,savedSources:[source]))
@@ -45,6 +40,6 @@ import Foundation
   check(paired.storageIdentity == "paired:" + fp + "\nphone")
   check(paired.url(host:"home.local").absoluteString == "https://home.local:8788")
   print("手机配对逻辑：深链、地址、指纹格式与匹配、稳定分区检查通过")
-  print("正式身份逻辑：会话轮换稳定分区、账号隔离、通知等待登录与真实ID检查通过")
+  print("配对身份逻辑：开发token只在本机模式保存、通知只对同一配对账号生效与真实ID检查通过")
  }
 }

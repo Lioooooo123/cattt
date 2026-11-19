@@ -293,9 +293,6 @@ final class AppStore: ObservableObject {
     var pairedProbeTask: Task<Void, Never>?
     var lastPairProbe = Date.distantPast
     @Published var identityError: String?
-    @Published var identityBusy = false
-    @Published var appleLoginNonce: String?
-    var appleLoginURL: URL?
     var registeredNotificationDeviceID: String?
     var resolvingNotification = false
     @Published var notificationMessageID: String?

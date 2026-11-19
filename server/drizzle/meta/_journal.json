@@ -176,6 +176,13 @@
       "when": 1795073668497,
       "tag": "0024_model_admissions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795074725856,
+      "tag": "0025_drop_apple_identity",
+      "breakpoints": true
     }
   ]
 }

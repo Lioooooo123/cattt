@@ -37,8 +37,6 @@ export const modelAdmissions = pgTable('model_admissions', {
 export const users = pgTable('users', {
   id: id(),
   devTokenHash: text('dev_token_hash').unique(),
-  /** 以后接 Sign in with Apple 时填 */
-  appleSub: text('apple_sub').unique(),
   name: text('name'),
   hostOwner: boolean('host_owner').notNull().default(false),
   timeZone: text('time_zone').notNull().default('Asia/Shanghai'),
@@ -387,9 +385,6 @@ export const diaryCalendars = pgTable('diary_calendars', {
   nextScanAt: timestamp('next_scan_at', { withTimezone: true }).notNull().default(sql`'epoch'::timestamptz`),
 }, t => [index('diary_calendar_due').on(t.nextScanAt, t.catId)]);
 
-/** 正式身份只保存不可逆会话摘要；Apple sub不会按邮箱合并。 */
-export const authNonces = pgTable('auth_nonces', { hash:text('hash').primaryKey(), expiresAt:timestamp('expires_at',{withTimezone:true}).notNull(), usedAt:timestamp('used_at',{withTimezone:true}) });
-export const sessions = pgTable('sessions', { id:id(),userId:uuid('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),tokenHash:text('token_hash').notNull().unique(),expiresAt:timestamp('expires_at',{withTimezone:true}).notNull(),revokedAt:timestamp('revoked_at',{withTimezone:true}),createdAt:createdAt() });
 export const devices = pgTable('devices', { id:id(),userId:uuid('user_id').notNull().references(()=>users.id,{onDelete:'cascade'}),token:text('token').notNull(),environment:text('environment').notNull(),topic:text('topic').notNull(),invalidAt:timestamp('invalid_at',{withTimezone:true}),updatedAt:timestamp('updated_at',{withTimezone:true}).notNull().defaultNow() },t=>[uniqueIndex('devices_identity').on(t.token,t.environment,t.topic)]);
 export type PushProof={messageIds:string[];diaries:{id:string;revision:number}[];usedMemories:boolean;memoryRevision?:number;content:string;callId?:string;runId?:string};
 export const pushNotifications = pgTable('push_notifications', {id:id(),catId:uuid('cat_id').notNull().references(()=>cats.id,{onDelete:'cascade'}),outboxId:uuid('outbox_id').notNull().unique().references(()=>outbox.id,{onDelete:'cascade'}),ticketIds:uuid('ticket_ids').array().notNull(),reason:text('reason').notNull(),payload:jsonb('payload').$type<Record<string,unknown>>().notNull(),proof:jsonb('proof').$type<PushProof>().notNull(),status:text('status').notNull().default('pending'),budgetDay:text('budget_day'),createdAt:createdAt() });

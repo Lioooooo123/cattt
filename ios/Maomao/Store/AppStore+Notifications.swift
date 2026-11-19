@@ -49,7 +49,7 @@ extension AppStore {
                     refreshInbox(); openMailbox(anchor: mailboxAnchor); notificationLetterID = id
                 } else { throw APIError.badResponse }
                 NotificationBridge.pending = nil
-            } catch { identityError = "登录并同步后，再打开这条消息" }
+            } catch { identityError = "连上家里的电脑并同步后，再打开这条消息" }
         }
     }
 }

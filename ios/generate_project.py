@@ -332,8 +332,6 @@ def main():
         ("CODE_SIGN_STYLE", "Automatic"),
         ("CODE_SIGN_ENTITLEMENTS", "Maomao/Maomao.entitlements"),
         ("CATTT_APNS_ENVIRONMENT", "development"),
-        ("CATTT_API_URL", '""'),
-        ("INFOPLIST_KEY_CatttAPIURL", '"$(CATTT_API_URL)"'),
         ("CURRENT_PROJECT_VERSION", "1"),
         ("ENABLE_PREVIEWS", "YES"),
         ("ENABLE_USER_SCRIPT_SANDBOXING", "NO"),

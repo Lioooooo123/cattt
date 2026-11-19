@@ -84,7 +84,29 @@ it('含糊更正返回澄清，不虚构保存结果', async () => {
   const f = await fixture(); const a = await f.add('那个不是这样的');
   extractor({ memories: [], clarification: '你想改的是哪件事？' });
   const result = await extractSource(f.catId, a, randomUUID());
-  expect(result).toEqual({ remembered: false, note: '你想改的是哪件事？' });
+  expect(result).toEqual({ remembered: false, note: '本次没有保存记忆，不能说已经记住或改好。模型提供的澄清内容（不是保存凭证）："你想改的是哪件事？"' });
+  expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
+});
+it.each(['用户明确表示不喝咖啡。', '已经记住了。', ''])('空提取不能把澄清内容当成保存凭证：%s', async clarification => {
+  const f = await fixture(); const source = await f.add('记住，我不喝咖啡');
+  extractor({ memories: [], clarification });
+  const result = await extractSource(f.catId, source, randomUUID());
+  expect(result.remembered).toBe(false);
+  expect(result.note).toMatch(/^本次没有保存记忆，不能说已经记住或改好。/);
+  expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
+});
+it('候选未被写入时，澄清内容也不能成为保存凭证', async () => {
+  const f = await fixture(); const source = await f.add('我不喝咖啡');
+  extractor({ memories: [{ ...base, explicit: false, confidence: .2 }], clarification: '用户不喝咖啡。' });
+  const result = await extractSource(f.catId, source, randomUUID());
+  expect(result.remembered).toBe(false);
+  expect(result.note).toMatch(/^本次没有保存记忆，不能说已经记住或改好。/);
+  expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
+});
+it('提取结果不符合结构时拒绝保存，不生成成功凭证', async () => {
+  const f = await fixture(); const source = await f.add('记住，我不喝咖啡');
+  extractor({ memories: 'invalid', clarification: '已经记住了。' });
+  await expect(extractSource(f.catId, source, randomUUID())).rejects.toThrow('模型输出不是合法 JSON 或不符合结构');
   expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
 });
 it('关闭整理或停用原话后，连提取模型也不调用', async () => {

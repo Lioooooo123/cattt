@@ -126,7 +126,7 @@ export async function extractSource(catId: string, sourceId: string, turnId: str
       remembered ||= candidate.explicit;
     }
   }
-  return { remembered, note: saved.length ? `已成功保存到长期记忆：${saved.join('；')}` : output.clarification || '本次没有保存记忆，不能说已经记住或改好。' };
+  return { remembered, note: saved.length ? `已成功保存到长期记忆：${saved.join('；')}` : `本次没有保存记忆，不能说已经记住或改好。${output.clarification ? `模型提供的澄清内容（不是保存凭证）：${JSON.stringify(output.clarification)}` : ''}` };
 }
 
 /**

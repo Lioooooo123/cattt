@@ -103,7 +103,7 @@ async function runTurn(turnId: string) {
     if (!messageAllowed(input)) { await fail(turnId, 'source_withdrawn', '原话已停止使用', false); return; }
     let memoryNote = '没有本轮成功保存的凭证，不要说记下了或改好了。';
     if (input && /记住|记一下|记下来|更正|改成|说错|其实|不再|不是|以后.*记/.test(input.text)) {
-      try { memoryNote = (await extractSource(conv.catId, input.id, turnId, undefined, abort.signal)).note; }
+      try { memoryNote = (await extractSource(conv.catId, input.id, turnId, undefined, abort.signal, true)).note; }
       catch { memoryNote = '本次保存未成功，明确告诉对方没有记好，可以稍后重试。'; }
     }
     await getSoul(conv.catId);

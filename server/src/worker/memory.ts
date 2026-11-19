@@ -90,7 +90,7 @@ async function precedingCatMessage(reader: typeof db | Tx, source: typeof messag
 }
 
 /** 每条原话单独提取，来源不会误挂在同轮最后一句上。回复前的明确记忆操作也走同一写入门。 */
-export async function extractSource(catId: string, sourceId: string, turnId: string, jobId?: string, signal?: AbortSignal) {
+export async function extractSource(catId: string, sourceId: string, turnId: string, jobId?: string, signal?: AbortSignal, foreground = false) {
   const [cat] = await db.select().from(cats).where(eq(cats.id, catId));
   const [source] = await db.select().from(messages).innerJoin(conversations, eq(conversations.id, messages.conversationId))
     .where(and(eq(messages.id, sourceId), eq(conversations.catId, catId)));
@@ -109,7 +109,7 @@ export async function extractSource(catId: string, sourceId: string, turnId: str
     .orderBy(desc(memories.lastConfirmedAt)).limit(60) : [];
   const existingBlock = existing.map(({ memories: x }) => `- ${x.subject}｜${x.predicate}｜${x.value}`).join('\n') || '（还没有，或已有记忆已停止参考）';
   const previous = await precedingCatMessage(db, m, cat.learnAfterSeq);
-  const slot = extractSlot();
+  const slot = extractSlot(foreground ? 'memory_extract_chat' : 'memory_extract');
   const started = Date.now();
   const { output, usage } = await generateText({
     model: slot.model, instructions: `${EXTRACT_INSTRUCTIONS}\n今天是${new Intl.DateTimeFormat('zh-CN', { timeZone: await userTimeZone(catId), dateStyle: 'full' }).format(m.createdAt)}。\n已有记忆：\n${existingBlock}`,

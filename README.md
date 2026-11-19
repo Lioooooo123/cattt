@@ -85,7 +85,12 @@ MODEL_PROVIDER=mock pnpm dev
 MODEL_PROVIDER=openai-compatible
 OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1
 OPENAI_COMPAT_MODEL=qwen3:8b
+MODEL_LOCAL_CONCURRENCY=1
+MODEL_CLOUD_CONCURRENCY=0
+MODEL_MOCK_CONCURRENCY=0
 ```
+
+API 与 worker 通过 PostgreSQL 共用模型并发准入。同一 `OPENAI_COMPAT_BASE_URL` 的槽位共用 `MODEL_LOCAL_CONCURRENCY`（默认 1）；DeepSeek 与 mock 分别用 `MODEL_CLOUD_CONCURRENCY`、`MODEL_MOCK_CONCURRENCY`（默认 0，关闭准入且不访问准入表）。空位优先给聊天、同步记忆检索和本轮明确记忆保存；不抢占正在生成的后台调用。
 
 也可以改用自带 key 的 DeepSeek（`MODEL_PROVIDER=deepseek`、`MAOMAO_DEEPSEEK_API_KEY=你的密钥`），或只给某个槽位换来源（如 `WORKER_PROVIDER=deepseek`）。`pnpm check:model` 检查连通，然后用 `pnpm dev` 启动。模型、数据库、身份与推送配置见 [server/.env.example](server/.env.example)，更多后端说明见 [server/README.md](server/README.md)。
 

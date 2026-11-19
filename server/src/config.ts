@@ -31,6 +31,9 @@ const schema = z
     APNS_TEAM_ID: z.string().optional(), APNS_KEY_ID: z.string().optional(),
     APNS_PRIVATE_KEY_FILE: z.string().optional(), APNS_TOPIC: z.string().optional(),
     MODEL_DAILY_CALL_LIMIT: z.coerce.number().int().positive().default(120),
+    MODEL_LOCAL_CONCURRENCY: z.coerce.number().int().min(0).default(1),
+    MODEL_CLOUD_CONCURRENCY: z.coerce.number().int().min(0).default(0),
+    MODEL_MOCK_CONCURRENCY: z.coerce.number().int().min(0).default(0),
     MODEL_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(2000000),
     AGENT_ENABLED: z.enum(['true','false']).default('true'),
     DATABASE_URL: z.string().default('postgres://maomao:maomao@localhost:5432/maomao'),
@@ -83,6 +86,11 @@ export type SlotSpec = { name: SlotName; provider: ModelSource | 'mock'; model: 
 type ModelConfig = Pick<typeof config, 'MODEL_PROVIDER' | 'OPENAI_COMPAT_MODEL' | `${'CHAT' | 'EXTRACT' | 'ROUTER' | 'WORKER'}_${'PROVIDER' | 'MODEL' | 'THINKING'}`>;
 const slotKeys = { chat: 'CHAT', extract: 'EXTRACT', router: 'ROUTER', worker: 'WORKER' } as const;
 export const slotNames = Object.keys(slotKeys) as SlotName[];
+
+export function slotAdmission(spec: SlotSpec, c: Pick<typeof config, 'OPENAI_COMPAT_BASE_URL' | 'MODEL_LOCAL_CONCURRENCY' | 'MODEL_CLOUD_CONCURRENCY' | 'MODEL_MOCK_CONCURRENCY'> = config) {
+  if (spec.provider === 'openai-compatible') return { resource: `openai-compatible:${c.OPENAI_COMPAT_BASE_URL}`, limit: c.MODEL_LOCAL_CONCURRENCY };
+  return { resource: spec.provider, limit: spec.provider === 'deepseek' ? c.MODEL_CLOUD_CONCURRENCY : c.MODEL_MOCK_CONCURRENCY };
+}
 
 /** 槽位的来源与模型名：槽位自己的设置优先，其次全局默认；DeepSeek 默认 deepseek-flash，兼容来源默认 OPENAI_COMPAT_MODEL */
 export function slotSpec(name: SlotName, c: ModelConfig = config): SlotSpec {

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
-import { config, modelConfigProblems, slotSpec } from '../src/config.ts';
-import { OPENAI_COMPAT_NAME, thinkingOptions } from '../src/runtime/model.ts';
+import { config, describeModelConfig, modelConfigProblems, slotAdmission, slotNames, slotSpec } from '../src/config.ts';
+import { catDiarySlot, diarySlot, recallSlot, OPENAI_COMPAT_NAME, thinkingOptions } from '../src/runtime/model.ts';
 import { runCatAgent, type RuntimeTool } from '../src/runtime/agent.ts';
 
 const base = {
@@ -15,6 +15,31 @@ const base = {
 } satisfies Parameters<typeof modelConfigProblems>[0];
 
 describe('模型来源配置', () => {
+  it('聊天、路由和托付走 DeepSeek，记忆与日记留在本机', () => {
+    const mixed = { ...base, CHAT_PROVIDER: 'deepseek', ROUTER_PROVIDER: 'deepseek', WORKER_PROVIDER: 'deepseek', MAOMAO_DEEPSEEK_API_KEY: 'test-key' } as const;
+    for (const name of slotNames) {
+      expect(slotSpec(name, mixed)).toEqual({ name, provider: name === 'extract' ? 'openai-compatible' : 'deepseek', model: name === 'extract' ? 'qwen3:8b' : 'deepseek-flash', thinking: name === 'worker' ? 'enabled' : 'disabled' });
+      expect(slotAdmission(slotSpec(name, mixed), { OPENAI_COMPAT_BASE_URL: 'http://localhost:11434/v1', MODEL_LOCAL_CONCURRENCY: 1, MODEL_CLOUD_CONCURRENCY: 3, MODEL_MOCK_CONCURRENCY: 0 })).toEqual(name === 'extract' ? { resource: 'openai-compatible:http://localhost:11434/v1', limit: 1 } : { resource: 'deepseek', limit: 3 });
+    }
+    expect(modelConfigProblems(mixed)).toEqual([]);
+    expect(modelConfigProblems({ ...mixed, MAOMAO_DEEPSEEK_API_KEY: undefined })).toEqual([expect.stringContaining('MAOMAO_DEEPSEEK_API_KEY')]);
+    expect(modelConfigProblems({ ...mixed, OPENAI_COMPAT_MODEL: undefined })).toEqual([expect.stringContaining('EXTRACT_MODEL')]);
+    const original = { ...config };
+    try {
+      Object.assign(config, mixed);
+      expect(describeModelConfig()).toContain('extract=qwen3:8b@');
+      expect(describeModelConfig()).toContain('chat=deepseek-flash@deepseek');
+      for (const slot of [diarySlot(), recallSlot(), catDiarySlot('chat'), catDiarySlot('worker')]) expect(slot.modelId).toBe('qwen3:8b');
+      expect(catDiarySlot('worker').thinking).toBe('enabled');
+      expect(catDiarySlot('chat').thinking).toBe('disabled');
+      config.MAOMAO_DEEPSEEK_API_KEY = undefined;
+      expect(diarySlot().modelId).toBe('qwen3:8b');
+      config.MODEL_PROVIDER = 'mock';
+      expect(diarySlot().modelId).toBe('mock-diary');
+      expect(catDiarySlot('chat').modelId).toBe('mock-chat');
+      expect(catDiarySlot('worker').modelId).toBe('mock-worker');
+    } finally { Object.assign(config, original); }
+  });
   it('兼容来源各槽位默认共用 OPENAI_COMPAT_MODEL，槽位可单独改来源与模型', () => {
     expect(slotSpec('chat', base)).toEqual({ name: 'chat', provider: 'openai-compatible', model: 'qwen3:8b', thinking: 'disabled' });
     const mixed = { ...base, WORKER_PROVIDER: 'deepseek', EXTRACT_MODEL: 'qwen3:4b', MAOMAO_DEEPSEEK_API_KEY: 'sk-test' } as const;

@@ -120,8 +120,13 @@ export function recallSlot(): ModelSlot {
 }
 
 export function diarySlot(): ModelSlot {
-  const slot = chatSlot('diary_read');
-  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: wrapSlotModel(mockDiaryModel(), slotSpec('chat'), 'diary_read'), modelId: 'mock-diary' } : slot;
+  const slot = extractSlot('diary_read');
+  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: wrapSlotModel(mockDiaryModel(), slotSpec('extract'), 'diary_read'), modelId: 'mock-diary' } : slot;
+}
+
+export function catDiarySlot(writer: 'chat' | 'worker'): ModelSlot {
+  const spec = slotSpec(config.MODEL_PROVIDER === 'mock' ? writer : 'extract');
+  return slotFrom(spec, 'cat_diary', writer === 'worker' ? config.WORKER_THINKING : config.CHAT_THINKING);
 }
 
 export function routerSlot(): ModelSlot {

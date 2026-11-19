@@ -152,8 +152,8 @@ export async function processErrand(runId:string,options:ExecutorOptions={}):Pro
  for(const ref of deps.diaries){const [d]=await tx.select().from(diaryEntries).where(eq(diaryEntries.id,ref.id));if(!d?.catAllowed||d.revision!==ref.revision)throw new SourceChanged();}
  });
  return {messages:budgetMessages(instructions,requestMessages,{...toolSchemas(definitions),report:{description:reportDescription,inputSchema:z.toJSONSchema(reportSchema)}},true)};},
- // DeepSeek 思考模式拒绝 required；auto 下的普通文字仍只进检查点，只有 report 可交给前台。
- tools,toolChoice:slot.providerOptions.deepseek.thinking.type==='enabled'?'auto':'required',stopWhen:isStepCount(1),maxRetries:0,maxOutputTokens:Math.min(1600,8000-current.r.outputTokens),
+ // DeepSeek 思考模式拒绝 required（本机推理模型同样按思考开关处理）；auto 下的普通文字仍只进检查点，只有 report 可交给前台。
+ tools,toolChoice:slot.thinking==='enabled'?'auto':'required',stopWhen:isStepCount(1),maxRetries:0,maxOutputTokens:Math.min(1600,8000-current.r.outputTokens),
  });
  let result:Awaited<ReturnType<typeof agent.generate>>|undefined;
  for(let retry=0;retry<=3;retry++){

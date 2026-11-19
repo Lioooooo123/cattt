@@ -23,7 +23,7 @@ function extractor(output: object, inspect?: (prompt: string) => void) {
     return { content: [{ type: 'text', text: JSON.stringify(output) }], finishReason: { unified: 'stop', raw: 'stop' },
       usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } }, warnings: [] };
   } });
-  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
 }
 afterEach(() => vi.restoreAllMocks());
 afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
@@ -104,7 +104,7 @@ it('提取期间撤回原话，迟到的模型结果不能写入', async () => {
     return { content: [{ type: 'text', text: JSON.stringify({ memories: [base] }) }], finishReason: { unified: 'stop', raw: 'stop' },
       usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }, warnings: [] };
   } });
-  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
   expect((await extractSource(f.catId, a, randomUUID())).remembered).toBe(false);
   expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
 });

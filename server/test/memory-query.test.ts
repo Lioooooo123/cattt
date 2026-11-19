@@ -16,7 +16,7 @@ beforeEach(() => {
 afterAll(async () => { vi.useRealTimers(); config.MEMORY_RECALL_MODE = original.mode; config.MEMORY_RECALL_TIMEOUT_MS = original.timeout; await sql.end(); });
 function slot(doGenerate: (options: LanguageModelV4CallOptions) => Promise<ReturnType<typeof result>>) {
   const model = new MockLanguageModelV4({ doGenerate });
-  const spy = vi.spyOn(models, 'recallSlot').mockReturnValue({ model, modelId: 'query-test', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+  const spy = vi.spyOn(models, 'recallSlot').mockReturnValue({ model, modelId: 'query-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
   return spy;
 }
 function result(text: string) {

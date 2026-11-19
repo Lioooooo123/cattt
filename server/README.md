@@ -25,6 +25,8 @@
 
 2026-11-17：聊天工具与 App 的约定／托付写入统一经过 `agent/engine.ts` 和 `agent/intake.ts`，在一次事务内保存来源、事项变更、决定和收据。补充／改期／取消 HTTP 请求可带 `Idempotency-Key`，重试复用同一键返回原收据，换内容返回 `409 conflict`；不带键仍兼容现有客户端。无新数据库迁移，未部署；实现范围与验证见[统一指令入口](../docs/决策/2026-11-17-Agent统一指令入口.md)。
 
+2026-11-19：模型来源（[本地优先重塑](../docs/决策/2026-11-19-本地优先.md)批次 B）。`MODEL_PROVIDER` 新增并默认 `openai-compatible`：接本机 Ollama / LM Studio / llama.cpp server 等 `/v1/chat/completions`（`OPENAI_COMPAT_BASE_URL`，默认 Ollama），各槽位默认共用 `OPENAI_COMPAT_MODEL`；DeepSeek 改为自带 key 的可选来源。chat / extract / router / worker 四个槽位可用 `*_PROVIDER`、`*_MODEL` 单独指定来源与模型，`mock` 仍全局生效。关思考按 `OPENAI_COMPAT_THINKING_PARAM` 传 `reasoning_effort: none` 或 `chat_template_kwargs.enable_thinking`；结构化输出走 `json_schema`，流式带用量供预算与账本使用。兼容测试见 `test/model-provider.test.ts`（工具循环、终答 `tool_choice: none`、思考内容不进正文、结构化输出、`required`）。已在本机 Ollama + qwen3:0.6b 上跑通 `check:model` 与一轮聊天；模型选型与并发准入（批次 C、I）未做。无数据库迁移。
+
 方案见 `docs/方案/后端-开发者版-方案-2026-09-11.md`。这一版只在本机跑，不部署。
 
 ## 第一次跑
@@ -34,7 +36,7 @@
 ```bash
 cd server
 pnpm install
-cp .env.example .env          # 填 MAOMAO_DEEPSEEK_API_KEY；没有 key 就把 MODEL_PROVIDER 改成 mock
+cp .env.example .env          # 填 OPENAI_COMPAT_MODEL（本机 Ollama 等）或改用 deepseek；都没有就把 MODEL_PROVIDER 改成 mock
 docker compose up -d --wait   # PG，只绑 127.0.0.1
 pnpm db:migrate
 pnpm create-dev-user 你的名字  # 打印 token，只显示这一次
@@ -66,7 +68,7 @@ pnpm smoke                     # 逐条走验收：流式、续传、作废、�
 |---|---|
 | `src/api/` | 路由、SSE、token 校验 |
 | `src/turns/` | 一轮回复：建轮次、生成、PG 事件流、停止与作废、对话锁 |
-| `src/runtime/` | 模型适配（DeepSeek / 假模型）、性格、上下文组装 |
+| `src/runtime/` | 模型适配（OpenAI 兼容 / DeepSeek / 假模型）、性格、上下文组装 |
 | `src/worker/` | 记忆提取、边界整理、清理卡住的回复 |
 | `src/db/` | 表定义；迁移 SQL 在 `drizzle/` |
 
@@ -93,7 +95,7 @@ docker compose exec postgres psql -U maomao -c \
 
 本机后端受控验证118项测试通过；10-20真实模型本地凭证配置已修正，认证通过但余额不足，用户选择充值后继续；公网部署经用户确认另做。当前证据见[模型连接排查](../outputs/model-connection-review/验收报告.md)。详见[本轮报告](../outputs/diary-sync-review/验收报告.md)。
 
-真实模型检查：`MODEL_PROVIDER=deepseek pnpm check:model`。只发送固定测试文字；认证、余额或生成失败均返回非零状态，不回退模拟模型。
+真实模型检查：`pnpm check:model`（用 `.env` 里的来源；MODEL_PROVIDER=mock 时拒绝）。只发送固定测试文字，每个不同的槽位来源与模型各验一次；兼容来源先查服务能否连上、模型是否已下载，DeepSeek 先查认证与余额；失败均返回非零状态，不回退模拟模型。
 
 ## 2026-11-11 异步 Agent 第一段底座
 

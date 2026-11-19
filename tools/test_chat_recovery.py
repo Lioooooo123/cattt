@@ -1,4 +1,4 @@
-"""真实模拟器客户端的重启恢复契约测试；隔离 HTTP/SSE，不代替 PG/Redis 集成测试。"""
+"""真实模拟器客户端的重启恢复契约测试；隔离 HTTP/SSE，不代替 PG 集成测试。"""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import json, subprocess, threading, time, uuid

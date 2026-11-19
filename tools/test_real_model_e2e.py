@@ -1,4 +1,4 @@
-"""真实模型→本机正式HTTP/SSE/worker→隔离PG/Redis→实际iOS客户端。
+"""真实模型→本机正式HTTP/SSE/worker→隔离PG→实际iOS客户端。
 只使用固定合成输入，不读取或重置已有账号；凭据和原始日志仅留0600临时目录。
 """
 import hashlib
@@ -22,7 +22,6 @@ RUN = 'real-' + uuid.uuid4().hex[:8]
 TEMP = Path(tempfile.mkdtemp(prefix='maomao-' + RUN + '-'))
 os.chmod(TEMP, 0o700)
 DBNAME = 'maomao_memory_review_real_e2e_' + str(int(time.time()))
-REDIS_NAME = 'maomao-real-e2e-' + RUN
 ENV = dict(os.environ)
 ENV.pop('MAOMAO_DEEPSEEK_API_KEY', None)
 ENV.update(MODEL_PROVIDER='deepseek', DATABASE_URL='postgres://maomao:maomao@127.0.0.1:5432/' + DBNAME,
@@ -187,10 +186,6 @@ def main():
     REPORT['sourceSHA256'] = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in sources}
     created = command(['docker', 'exec', 'maomao-postgres-1', 'createdb', '-U', 'maomao', DBNAME])
     if created.returncode: raise RuntimeError('创建隔离库失败')
-    redis = command(['docker', 'run', '--rm', '-d', '--name', REDIS_NAME, '-p', '127.0.0.1::6379', 'redis:7.4-alpine'])
-    if redis.returncode: raise RuntimeError('创建临时Redis失败')
-    port = command(['docker', 'port', REDIS_NAME, '6379/tcp']).stdout.strip().split(':')[-1]
-    ENV['REDIS_URL'] = 'redis://127.0.0.1:' + port
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); api_port = sock.getsockname()[1]
     ENV['PORT'] = str(api_port); BASE = f'http://127.0.0.1:{api_port}'
@@ -206,7 +201,7 @@ def main():
     until(lambda: urlopen(BASE + '/healthz', timeout=2).status == 200, '隔离API启动', 20)
     app = ACCOUNTS['app']
     container = Path(sim('get_app_container', DEVICE, APP, 'data')); DOCUMENTS = container / 'Documents'
-    print('真实API/worker与隔离PG/Redis就绪。', flush=True)
+    print('真实API/worker与隔离PG就绪。', flush=True)
     # App实际发送、SSE接收、明确记忆保存与纠正。
     app_send(app, '记住，我不喝咖啡。', 'remember')
     mem = api(app, 'memories')['memories']; assert any('咖啡' in m['value'] for m in mem)
@@ -295,4 +290,3 @@ finally:
             try:p.wait(timeout=30)
             except subprocess.TimeoutExpired:p.kill();p.wait()
     for log in LOGS:log.close()
-    command(['docker','stop',REDIS_NAME])

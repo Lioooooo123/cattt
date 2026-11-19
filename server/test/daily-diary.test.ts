@@ -14,7 +14,6 @@ import { hashToken } from '../src/auth-token.ts';
 import { closeQueues } from '../src/queue.ts';
 import { executeJob } from '../src/jobs/store.ts';
 import { cancelTicket } from '../src/agent/tickets.ts';
-import { redis } from '../src/redis.ts';
 let catId:string,convId:string,userId:string,token:string;
 const accounts:string[]=[];
 const at=new Date('2026-11-13T00:05:00Z');
@@ -25,7 +24,7 @@ beforeEach(async()=>{
 });
 afterAll(async()=>{
  for(const id of accounts){await sql`delete from async_jobs where source_id in (select t.id from triggers t join cats c on c.id=t.cat_id where c.user_id=${id})`;await db.delete(users).where(eq(users.id,id));}
- await closeQueues();await redis.quit();await sql.end();
+ await closeQueues();await sql.end();
 });
 it('日历保存扫描进度，空闲时跳过；积压超过32天后可继续补齐', async () => {
   const later = new Date('2026-12-22T01:00:00Z');

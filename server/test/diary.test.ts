@@ -11,7 +11,6 @@ import { executeJob } from '../src/jobs/store.ts';
 import { buildTurnContext } from '../src/runtime/context.ts';
 import { commitOutcome } from '../src/turns/store.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 
 const accounts: { userId: string; catId: string; convId: string; token: string }[] = [];
 let owner: typeof accounts[number];
@@ -37,7 +36,7 @@ afterAll(async () => {
     if (ids.length) await db.delete(asyncJobs).where(inArray(asyncJobs.sourceId, ids));
     await db.delete(users).where(eq(users.id, a.userId));
   }
-  await closeQueues(); await redis.quit(); await sql.end();
+  await closeQueues();  await sql.end();
 });
 it('增量游标可跨页和空轮询；旧日记的留言和撤回均可见', async () => {
   const original = input({ cat_allowed: true });

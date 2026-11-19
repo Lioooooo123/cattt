@@ -10,7 +10,6 @@ import { UnrecoverableError } from '../src/jobs/errors.ts';
 import { extractMemories } from '../src/worker/memory.ts';
 import { summarizeBoundary } from '../src/worker/boundary.ts';
 import { readDiary } from '../src/worker/diary.ts';
-import { redis } from '../src/redis.ts';
 const jobs: string[] = [], accounts: string[] = [];
 const actions = new Map<string, () => Promise<void>>();
 const run = async (id: string) => {
@@ -30,7 +29,7 @@ afterAll(async () => {
   await closeQueues();
   if (jobs.length) await db.delete(asyncJobs).where(inArray(asyncJobs.id, jobs));
   for (const id of accounts) await db.delete(users).where(eq(users.id, id));
-  redis.disconnect(); await sql.end();
+  await sql.end();
 });
 it('pg-boss 正常投递，重复投递只认领一次', async () => {
   let calls = 0; const job = await pending(async () => { calls++; });
@@ -65,8 +64,7 @@ it('投递失败保留 PG 待办，恢复扫描可以补投', async () => {
   await recoverJobs(['boundary']);
   await vi.waitFor(async () => expect((await state(job.id)).state).toBe('done'), { timeout: 10000 });
 });
-it('三类真实处理器经 pg-boss 完成；可在 Redis 停止时独立复验', async () => {
-  if (process.env.EXPECT_REDIS_DOWN === '1') expect(await redis.ping().then(() => true, () => false)).toBe(false);
+it('三类真实处理器经 pg-boss 完成', async () => {
   const [user] = await db.insert(users).values({ name: '队列验收' }).returning(); accounts.push(user!.id);
   const [cat] = await db.insert(cats).values({ userId: user!.id, name: '团子', appearance: 'orange', temperament: 'slow', traits: { energy: 1, initiative: 1, directness: 1, closeness: 1 } }).returning();
   const [conv] = await db.insert(conversations).values({ catId: cat!.id }).returning();
@@ -79,7 +77,7 @@ it('三类真实处理器经 pg-boss 完成；可在 Redis 停止时独立复验
     { kind: 'boundary' as const, sourceId: boundary!.id, objectId: boundary!.id, version: 'v1', nextAttemptAt: new Date(0) },
     { kind: 'diary_read' as const, sourceId: entry!.id, objectId: entry!.id, version: String(entry!.revision), nextAttemptAt: new Date(0) },
   ]).returning(); jobs.push(...queued.map(j => j.id));
-  // 此用例只验证 Redis 不参与投递；同猫记忆写入会正常使进行中的日记快照失效，故按顺序等待。
+  // 同猫记忆写入会使进行中的日记快照失效，故按顺序等待。
   for (const job of queued) {
     await dispatchJob(job);
     await vi.waitFor(async () => expect((await state(job.id)).state).toBe('done'), { timeout: 10000 });

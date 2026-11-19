@@ -10,7 +10,6 @@ import { scheduleFollowup } from '../src/agent/tickets.ts';
 import { scanFollowups, processFollowup } from '../src/agent/followup.ts';
 import { acquireConversationLock, releaseConversationLock } from '../src/turns/events.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { config } from '../src/config.ts';
 config.MODEL_PROVIDER = 'mock';
 const accounts: string[] = [];
@@ -28,7 +27,7 @@ afterAll(async () => {
     await sql`delete from async_jobs where object_id in (select r.id from runs r join tickets t on t.id=r.ticket_id join cats c on c.id=t.cat_id where c.user_id=${id}) or source_id in (select t.id from triggers t join cats c on c.id=t.cat_id where c.user_id=${id})`;
     await db.delete(users).where(eq(users.id, id));
   }
-  await closeQueues(); await redis.quit(); await sql.end();
+  await closeQueues();  await sql.end();
 });
 it('后台完成只落盘汇报，不取得聊天锁、不直接写聊天或信箱', async () => {
   const f = await fixture();

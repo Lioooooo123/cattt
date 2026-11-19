@@ -9,7 +9,6 @@ import { extractSource } from '../src/worker/memory.ts';
 import { changeSettings, lockMemory, withdrawSources } from '../src/memory/control.ts';
 import * as models from '../src/runtime/model.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 const ids: string[] = [];
 async function fixture() {
   const [u] = await db.insert(users).values({ name: 'extract-test' }).returning(); ids.push(u!.id);
@@ -27,7 +26,7 @@ function extractor(output: object, inspect?: (prompt: string) => void) {
   vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
 }
 afterEach(() => vi.restoreAllMocks());
-afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues(); await redis.quit(); await sql.end(); });
+afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
 const base = { subject: '用户', predicate: '咖啡偏好', value: '不喝咖啡', kind: 'preference', confidence: .95, sensitivity: 'low', explicit: true, correction: false };
 it('模型提取保存真实来源，更正沿用同方面并让旧值失效', async () => {
   const f = await fixture(); const a = await f.add('记住，我不喝咖啡');

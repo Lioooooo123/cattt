@@ -408,3 +408,26 @@ export const workerReports = pgTable('worker_reports', {
   payload: jsonb('payload').$type<WorkerReportPayload>().notNull(),
   createdAt: createdAt(),
 }, t => [uniqueIndex('worker_reports_source_version').on(t.sourceId,t.version)]);
+
+/** 聊天续传与临时控制状态。 */
+export const turnEvents = pgTable('turn_events', {
+  turnId: uuid('turn_id').notNull(),
+  seq: bigint('seq', { mode: 'bigint' }).notNull(),
+  event: text('event').notNull(),
+  data: jsonb('data').notNull(),
+  createdAt: createdAt(),
+}, t => [uniqueIndex('turn_events_turn_seq').on(t.turnId, t.seq), index('turn_events_created').on(t.createdAt)]);
+
+export const turnControls = pgTable('turn_controls', {
+  turnId: uuid('turn_id').primaryKey(),
+  cancelReason: text('cancel_reason'),
+  cancelExpiresAt: timestamp('cancel_expires_at', { withTimezone: true }),
+  visibleLength: integer('visible_length'),
+  visibleExpiresAt: timestamp('visible_expires_at', { withTimezone: true }),
+});
+
+export const conversationLocks = pgTable('conversation_locks', {
+  conversationId: uuid('conversation_id').primaryKey(),
+  token: text('token').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});

@@ -1,4 +1,4 @@
-/** 正式HTTP/SSE与常驻worker，隔离PG/Redis和受控模型。 */
+/** 正式HTTP/SSE与常驻worker，隔离PG和受控模型。 */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -49,5 +49,5 @@ const sim = await createDevUser('diary-simulator-review');
 const [simCat] = await db.select().from(cats).where(eq(cats.userId, sim.userId));
 const [simConv] = await db.select().from(conversations).where(eq(conversations.catId, simCat!.id));
 await writeFile('/tmp/maomao-diary-sync-account.json', JSON.stringify({ ...sim, catId: simCat!.id, conversationId: simConv!.id }), { mode: 0o600 });
-await writeFile(new URL('../../outputs/diary-sync-review/HTTP检查.json', import.meta.url), JSON.stringify({ evidence: '正式HTTP/SSE+常驻worker+真实PG/Redis，模型为受控mock', passed: checks.length, checks }, null, 2));
+await writeFile(new URL('../../outputs/diary-sync-review/HTTP检查.json', import.meta.url), JSON.stringify({ evidence: '正式HTTP/SSE+常驻worker+真实PG，模型为受控mock', passed: checks.length, checks }, null, 2));
 console.log(JSON.stringify({ passed: checks.length, checks })); await sql.end();

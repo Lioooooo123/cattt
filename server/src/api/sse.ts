@@ -19,7 +19,7 @@ export function streamTurn(c: Context, turnId: string, afterId: string) {
       else await write(stream, ev.id, ev);
       next = await events.next();
     }
-    // Redis 里的事件已过期（结束超过 10 分钟）：按库里的结果补发
+    // PG 里的事件已过期（结束超过 10 分钟）：按库里的结果补发
     if (next.value === 'missing') await replayFromDb(stream, turnId, afterId !== '0', c.req.header('x-maomao-snapshot') === '1');
   });
 }
@@ -61,7 +61,7 @@ async function replayFromDb(stream: SSEStreamingApi, turnId: string, resuming: b
       await write(stream, 'db-1', { event: 'superseded', data: { turn_id: turn.id } });
       return;
     default:
-      // failed，或者进行中但事件丢了（Redis 被清空）
+      // failed，或者进行中但事件丢了（PG 被清空）
       await write(stream, 'db-1', { event: 'error', data: { code: 'lost', retryable: true } });
   }
 }

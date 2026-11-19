@@ -35,7 +35,6 @@ import {
 import { app } from "../src/api/app.ts";
 import { hashToken } from "../src/auth-token.ts";
 import { closeQueues } from "../src/queue.ts";
-import { redis } from "../src/redis.ts";
 import { config } from "../src/config.ts";
 const now = new Date("2026-11-12T12:00:00Z");
 let userId: string,
@@ -86,7 +85,7 @@ afterAll(async () => {
       .delete(proactiveRules)
       .where(inArray(proactiveRules.ruleId, rules));
   await closeQueues();
-  await redis.quit();
+
   await sql.end();
 });
 const source = async (

@@ -16,7 +16,7 @@ describe('恢复通道隔离', () => {
   });
   it('投递失败不阻止清理，下一轮仍可重试', async () => {
     let sweeps = 0; let errors = 0;
-    const scan = recoveryScanner(async () => { throw new Error('redis_down'); }, async () => { sweeps++; }, () => { errors++; });
+    const scan = recoveryScanner(async () => { throw new Error('queue_down'); }, async () => { sweeps++; }, () => { errors++; });
     await scan(); await scan();
     expect(sweeps).toBe(2); expect(errors).toBe(2);
   });

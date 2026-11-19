@@ -1,5 +1,6 @@
 import { historyTools } from './chat-history.ts';
-import { turns } from '../db/schema.ts';
+import { messages, turns } from '../db/schema.ts';
+import { db } from '../db/client.ts';
 import { and,eq } from 'drizzle-orm';
 import { config } from '../config.ts';
 import { dispatchTicketCommand, type TicketCommand } from '../agent/engine.ts';
@@ -39,8 +40,13 @@ export async function catTools(owner: { catId: string; turnId: string; userMessa
     execute:({when,about})=>agreement(()=>dispatch({kind:'schedule',when,about})),
   };
   tools.start_errand = {
-    description:'用户明确托付一件事，保存后交给后台安静地想。不能联网检索、外部文档或执行代码。成功凭证才可承诺；queued时说“这件我先记着，前面那件办完再来”。',
-    inputSchema:z.object({goal:z.string().trim().min(1).max(60)}),execute:({goal})=>agreement(()=>dispatch({kind:'start',goal})),
+    description:'只用于用户明确托付的耗时思考、整理。记住、保存或更正用户信息属于本轮记忆保存，绝不是托付；保存失败或不完整也不能交给后台重试。不能联网检索、外部文档或执行代码。成功凭证才可承诺；queued时说“这件我先记着，前面那件办完再来”。',
+    inputSchema:z.object({goal:z.string().trim().min(1).max(60)}),execute:({goal})=>agreement(async()=>{
+      const [source] = await db.select({text:messages.text}).from(messages).where(eq(messages.id,owner.userMessageId));
+      if (source && /记住|记一下|记下来|以后.*记/.test(source.text))
+        throw new TicketError(400,'记忆请求由本轮记忆保存处理，不能创建托付；请按本轮实际保存结果回应。');
+      return dispatch({kind:'start',goal});
+    }),
   };
   tools.list_tickets = {
     description:'读取用户未结束的约定、托付，以及失败或受阻的托付与 ticket_id。用户说改期、取消或继续那件事时先读，按聊天所指直达 update_ticket/cancel_ticket；无法唯一判断就澄清，不另建一件。失败或受阻只在用户明确继续或补充后恢复。',

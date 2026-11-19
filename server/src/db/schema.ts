@@ -26,8 +26,27 @@ export const users = pgTable('users', {
   /** 以后接 Sign in with Apple 时填 */
   appleSub: text('apple_sub').unique(),
   name: text('name'),
+  hostOwner: boolean('host_owner').notNull().default(false),
   timeZone: text('time_zone').notNull().default('Asia/Shanghai'),
   createdAt: createdAt(),
+}, t => [uniqueIndex('users_single_host_owner').on(t.hostOwner).where(sql`${t.hostOwner} = true`)]);
+
+export const pairingCodes = pgTable('pairing_codes', {
+  codeHash: text('code_hash').primaryKey(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  burnedAt: timestamp('burned_at', { withTimezone: true }),
+});
+
+export const pairedDevices = pgTable('paired_devices', {
+  id: id(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: createdAt(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
 });
 
 /** 四条特征的档位：0 低 / 1 中 / 2 高 */

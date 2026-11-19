@@ -142,7 +142,7 @@ extension AppStore {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                if client.config.mode == .service {
+                if client.config.mode == .service || client.config.mode == .paired {
                     let account = try await client.account()
                     guard backend == client.config else { return }
                     applyServerProfile(account.cat)
@@ -162,7 +162,7 @@ extension AppStore {
                 resolveNotificationIntent()
             } catch {
                 guard historyGeneration == generation, backend == client.config else { return }
-                backendStatus = "连不上：\(error.localizedDescription)"
+                backendStatus = backend.mode == .paired ? "团子在家里的电脑上" : "连不上：\(error.localizedDescription)"
             }
         }
     }
@@ -375,7 +375,7 @@ extension AppStore {
         } else {
             showRemoteFailure(code: "network", catLocalID: nil)
         }
-        if let error { backendStatus = "发送失败：\(error.localizedDescription)" }
+        if let error { backendStatus = backend.mode == .paired ? "团子在家里的电脑上" : "发送失败：\(error.localizedDescription)" }
     }
 
     /// 回复没成：撤掉说到一半的气泡，换成「它走神了 · 再试一次」。
@@ -467,7 +467,7 @@ extension AppStore {
     /// 创建流程走完：名字、外观、气质、四条特征写到服务端。
     func remoteUpdateCat() {
         // 正式身份档案以服务器为准；登录不能把演示/创建草稿自动覆盖上去。
-        guard backend.mode != .service else { return }
+        guard backend.mode != .service && backend.mode != .paired else { return }
         let traits = Dictionary(uniqueKeysWithValues: traitLevels.map { ($0.key.rawValue, $0.value) })
         let (name, appearance, temperament) = (catName, pickedAppearance, temperament.rawValue)
         let client = api

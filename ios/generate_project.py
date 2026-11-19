@@ -14,6 +14,7 @@ byte-identical file and diffs stay readable.
 import hashlib
 import os
 import re
+import plistlib
 
 PROJECT = "Maomao"
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -319,6 +320,7 @@ def main():
         ("CURRENT_PROJECT_VERSION", "1"),
         ("ENABLE_PREVIEWS", "YES"),
         ("GENERATE_INFOPLIST_FILE", "YES"),
+        ("INFOPLIST_FILE", "Maomao/Info.plist"),
         ("INFOPLIST_KEY_UIApplicationSceneManifest_Generation", "YES"),
         ("INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents", "YES"),
         # 冷启动先显示与 3D 院子原生兜底相同的天空色，避免 SwiftUI 首帧前闪白。
@@ -388,4 +390,10 @@ def main():
 
 
 if __name__ == "__main__":
+    with open(os.path.join(ROOT, SOURCE_DIR, "Info.plist"), "wb") as info:
+        plistlib.dump({
+            "CFBundleURLTypes": [{"CFBundleURLName": "com.maomao.pair", "CFBundleURLSchemes": ["maomao"]}],
+            "NSLocalNetworkUsageDescription": "连接家里电脑上的团子，在同一个局域网里聊天和同步日记。",
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+        }, info)
     main()

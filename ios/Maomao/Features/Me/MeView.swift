@@ -42,7 +42,11 @@ struct MeView: View {
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionTitle(text: "和团子的账号")
-            if store.backend.mode == .service, !store.backend.token.isEmpty {
+            if store.backend.mode == .paired {
+                Text("已连接家里的电脑").font(Typo.sans(14)).foregroundStyle(Palette.ink2)
+                if let status = store.backendStatus { Text(status).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
+                TextLink(text: "解除配对", size: 13) { store.unpairHost() }
+            } else if store.backend.mode == .service, !store.backend.token.isEmpty {
                 Text("已登录").font(Typo.sans(14)).foregroundStyle(Palette.ink2)
                 TextLink(text: "退出登录", size: 13) { store.signOut() }
             } else if store.appleLoginNonce != nil {
@@ -55,6 +59,7 @@ struct MeView: View {
                 TextLink(text: store.identityBusy ? "正在连接…" : "用 Apple 登录", size: 14) { store.prepareAppleLogin() }
                     .disabled(store.identityBusy)
             }
+            if store.backend.mode != .paired { TextLink(text: "连接家里的电脑", size: 14) { store.openPairing() } }
             if let error = store.identityError { Text(error).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
         }
     }

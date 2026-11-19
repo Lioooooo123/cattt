@@ -1,5 +1,12 @@
 # 猫猫后端 · 开发者版
 
+## 手机局域网配对
+
+启动 API 前先运行 `pnpm db:migrate`。API 默认监听回环 HTTP `127.0.0.1:8787` 和局域网 HTTPS `0.0.0.0:8788`（`LAN_HTTPS_PORT=0` 关闭后者）。
+`pnpm pair` 直接签发十分钟一次性配对码，打印链接、CA 短指纹和终端二维码。手机与电脑在同一局域网，扫码配对；手动输入时核对指纹。
+宿主从 `CATTT_DATA_DIR/host-admin.token` 读取管理口令，以 Bearer 调用回环 `/host/pairing-codes`、`/host/devices`、`/host/status`；局域网监听不挂载管理接口。
+开发数据目录默认 `.local/`，可设置 `CATTT_DATA_DIR`。其中的 CA 和私钥必须持久保存并随宿主备份；不要删除 CA，否则手机需要重新配对。API 每分钟检查地址和证书有效期，自动重签并热更新服务端证书。
+
 2026-11-17：失败或受阻的托付可在用户补充后继续原事项。聊天 `list_tickets` 会包含这些事项，`update_ticket {text}` 与 HTTP `PATCH /v1/tickets/:id {text}` 共用准入；HTTP 成功续办额外返回 `resumed: true`、`queued`。也可取消失败事项；已取消、完成或丢弃的事项不恢复。原 run 与检查点保留，新 run 独立执行；每猫最多 2 件在办、每日最多 5 次开工，续办计入日额度。默认 `GET /v1/tickets` 仍只查 open，`status=all` 保持原义。部署前须停旧 API/worker 并应用 `0019_errand_resume`，不可与单 run 的旧代码混跑。验证与边界见[失败托付续办](../docs/决策/2026-11-17-失败托付续办.md)。本批已获用户授权合入 main 并推送，交付以 Git 记录为准；未部署。
 
 2026-11-17：聊天工具与 App 的约定／托付写入统一经过 `agent/engine.ts` 和 `agent/intake.ts`，在一次事务内保存来源、事项变更、决定和收据。补充／改期／取消 HTTP 请求可带 `Idempotency-Key`，重试复用同一键返回原收据，换内容返回 `409 conflict`；不带键仍兼容现有客户端。无新数据库迁移，未部署；实现范围与验证见[统一指令入口](../docs/决策/2026-11-17-Agent统一指令入口.md)。

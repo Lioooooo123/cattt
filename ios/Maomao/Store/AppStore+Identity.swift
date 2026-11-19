@@ -38,7 +38,7 @@ extension AppStore {
         }
     }
     func applyServerProfile(_ profile: APICatProfile) {
-        guard backend.mode == .service, let id = UUID(uuidString: profile.id), let created = APITicket.parseDate(profile.createdAt) else { return }
+        guard backend.mode == .service || backend.mode == .paired, let id = UUID(uuidString: profile.id), let created = APITicket.parseDate(profile.createdAt) else { return }
         restoringCreation = true
         creationArchive = CreationArchive(profile: CatProfile(id: id, name: profile.name, appearance: profile.appearance,
             temperament: profile.temperament, traits: profile.traits, createdAt: created, meeting: []))

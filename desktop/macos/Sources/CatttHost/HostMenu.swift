@@ -21,7 +21,7 @@ private struct HostMenuContent: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Text(model.summary)
-        ForEach(["数据库", "API", "worker", "局域网 HTTPS"], id: \.self) { name in
+        ForEach(["数据库", "API", "worker", "局域网 HTTPS", "模型"], id: \.self) { name in
             Text("\(name)：\(model.status[name] ?? "启动中")")
         }
         if !model.error.isEmpty { Text(model.error) }

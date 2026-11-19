@@ -62,20 +62,19 @@ if (!parsed.success) {
 
 export const config = parsed.data;
 
-/** api 和 worker 启动时调；建账号之类的脚本用不到模型，不检查 */
+/** 模型配置不阻断 API、配对和后台服务启动。 */
 export function assertModelConfig() {
   if (config.MODEL_PROVIDER === 'deepseek' && !config.MAOMAO_DEEPSEEK_API_KEY) {
-    console.error(
-      'MODEL_PROVIDER=deepseek 需要 MAOMAO_DEEPSEEK_API_KEY（填在 server/.env）。没有 key 就先用 MODEL_PROVIDER=mock。',
+    console.warn(
+      '模型：未配置。请填写 MAOMAO_DEEPSEEK_API_KEY；模型调用暂不可用，其他服务继续运行。',
     );
-    process.exit(1);
   }
 }
 
 /** 启动日志里的一行：用的哪个模型、哪把 key（只露后 4 位），以及有没有被环境变量盖掉 .env */
 export function describeModelConfig(): string {
   const key = config.MAOMAO_DEEPSEEK_API_KEY;
-  const model = config.MODEL_PROVIDER === 'mock' ? 'mock' : `deepseek（key …${key?.slice(-4)}）`;
+  const model = config.MODEL_PROVIDER === 'mock' ? 'mock' : key ? `deepseek（key …${key.slice(-4)}）` : '未配置';
   const shadow =
     shadowedEnvKeys.length > 0 ? `\n  注意：环境变量盖掉了 .env 里的 ${shadowedEnvKeys.join('、')}` : '';
   return `模型：${model}${shadow}`;

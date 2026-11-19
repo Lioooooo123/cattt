@@ -17,7 +17,7 @@ if [ -z "${REDIS_URL:-}" ]; then
   REDIS_PID=$!
   export REDIS_URL=redis://127.0.0.1:56379
 fi
-printf 'MODEL_PROVIDER=mock\nREDIS_URL=%s\n' "$REDIS_URL" > "$DATA/env"
+printf 'REDIS_URL=%s\n' "$REDIS_URL" > "$DATA/env"
 chmod 600 "$DATA/env"
 start() {
   "$BIN" --headless --data-dir "$DATA" >"$DATA/stdout.log" 2>&1 & PID=$!
@@ -30,6 +30,12 @@ start() {
 }
 db() { PGPASSWORD=$(cat "$DATA/pg-password") "$PG/psql" -h 127.0.0.1 -p 54329 -U cattt -d cattt -v ON_ERROR_STOP=1 "$@"; }
 start
+test -z "$(rg 'MODEL_PROVIDER|API_KEY' "$DATA/env" || true)"
+pgrep -P "$PID" -fl 'api.mjs|worker.mjs'
+test -n "$(pgrep -P "$PID" -f worker.mjs)"
+cat "$DATA/health.json"
+echo
+echo '无模型 key / 无 MODEL_PROVIDER：API 和 worker 已启动，/healthz 200'
 if "$BIN" --headless --data-dir "$DATA" --backup >"$DATA/duplicate.log" 2>&1; then echo '单实例保护失效'; exit 1; fi
 rg '宿主已经运行' "$DATA/duplicate.log"
 lsof -nP -iTCP:54329 -sTCP:LISTEN | tee "$DATA/listen.txt"

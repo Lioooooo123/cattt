@@ -17,14 +17,12 @@ final class HostModel: ObservableObject {
     private var quitting = false
     var icon: String {
         if !error.isEmpty { return "exclamationmark.triangle.fill" }
-        if status.values.contains("需要配置模型") { return "key.fill" }
         if status.values.contains(where: { $0.contains("退出") || $0 == "未就绪" }) { return "exclamationmark.triangle.fill" }
         if busy || status["API"] != "正常" { return "clock" }
         return "cat.fill"
     }
     var summary: String {
         if !error.isEmpty { return "团子需要帮助" }
-        if status.values.contains("需要配置模型") { return "需要配置模型" }
         return status["API"] == "正常" ? "团子在这台电脑上" : "团子正在启动…"
     }
     func start() {

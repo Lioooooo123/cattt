@@ -179,9 +179,7 @@ public final class Host {
         throw HostError("数据库启动超时")
     }
     private func startServices() throws {
-        guard !Self.needsModelConfiguration(environment) else {
-            status["API"] = "需要配置模型"; status["worker"] = "需要配置模型"; return
-        }
+        status["模型"] = Self.needsModelConfiguration(environment) ? "未配置" : "已配置"
         for name in ["api", "worker"] where children[name]?.isRunning != true {
             children[name] = try launch(resources.appendingPathComponent("node/bin/node"), [resources.appendingPathComponent("server/\(name).mjs").path], name: name)
             status[name == "api" ? "API" : name] = "启动中"
@@ -217,10 +215,6 @@ public final class Host {
         if Date().timeIntervalSince(lastHealth) >= 5 { lastHealth = Date(); pollHealth() }
     }
     private func pollHealth() {
-        if status["API"] == "需要配置模型" {
-            status["局域网 HTTPS"] = "需要配置模型"
-            return
-        }
         for endpoint in ["healthz", "host/status"] {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:8787/\(endpoint)")!); request.timeoutInterval = 2
             if endpoint == "host/status", let token = try? String(contentsOf: path("host-admin.token")) {

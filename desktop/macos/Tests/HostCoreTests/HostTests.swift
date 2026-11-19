@@ -2,7 +2,7 @@ import XCTest
 @testable import HostCore
 
 final class HostTests: XCTestCase {
-    func testModelConfigurationGate() {
+    func testModelConfigurationWarning() {
         XCTAssertTrue(Host.needsModelConfiguration([:]))
         XCTAssertTrue(Host.needsModelConfiguration(["MODEL_PROVIDER": "deepseek"]))
         XCTAssertFalse(Host.needsModelConfiguration(["MAOMAO_DEEPSEEK_API_KEY": "test"]))

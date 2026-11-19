@@ -71,6 +71,3 @@ outputs/yard-expansion-review/originals/
 
 outputs/yard-layout-review/originals/
 outputs/yard-depth-review/originals/
-
-# 本机/测试部署挂载的密钥文件，不进镜像或仓库。
-server/deploy/secrets/

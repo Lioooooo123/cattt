@@ -36,6 +36,7 @@
     "dev:worker": "tsx watch src/worker.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "check:model": "tsx scripts/check-model.ts",
+    "model:setup": "tsx scripts/model-setup.ts",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -88,6 +88,7 @@
 		C403929B3DF3B8300FB1DAA3 /* WorldEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D07AFB04CB27D28BE4EDDB /* WorldEngine.swift */; };
 		199C9FB89D40333C264807F0 /* WorldTextureCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A600C043C42381CD9773F1B8 /* WorldTextureCache.swift */; };
 		A6070B9CF28E71610AA267AE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A790BB479B2477E3A634A1EB /* Assets.xcassets */; };
+		0B986C876E3EC44800452396 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C45E8EE69BEC76964CA40C2E /* PrivacyInfo.xcprivacy */; };
 		E1AAACFB012B3DDE66976AC7 /* rain-loop.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D842326EFD32B9EF70D0D126 /* rain-loop.m4a */; };
 		C98E9DD78A30B4C8F05CF0BE /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = E01356F5129F32EF8608068C /* LaunchScreen.storyboard */; };
 		938754087F1D6D75F9782657 /* world-v2-bed-front.png in Resources */ = {isa = PBXBuildFile; fileRef = B7701392AB463B4BC0225487 /* world-v2-bed-front.png */; };
@@ -220,6 +221,7 @@
 		54D07AFB04CB27D28BE4EDDB /* WorldEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldEngine.swift; sourceTree = "<group>"; };
 		A600C043C42381CD9773F1B8 /* WorldTextureCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldTextureCache.swift; sourceTree = "<group>"; };
 		A790BB479B2477E3A634A1EB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C45E8EE69BEC76964CA40C2E /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		D842326EFD32B9EF70D0D126 /* rain-loop.m4a */ = {isa = PBXFileReference; lastKnownFileType = audio.m4a; path = rain-loop.m4a; sourceTree = "<group>"; };
 		E01356F5129F32EF8608068C /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		B7701392AB463B4BC0225487 /* world-v2-bed-front.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = world-v2-bed-front.png; sourceTree = "<group>"; };
@@ -563,6 +565,7 @@
 				43BBA464C0395F7D2308BAD6 /* Resources */,
 				58028F200655078E589966B9 /* Store */,
 				A790BB479B2477E3A634A1EB /* Assets.xcassets */,
+				C45E8EE69BEC76964CA40C2E /* PrivacyInfo.xcprivacy */,
 			);
 			path = Maomao;
 			sourceTree = "<group>";
@@ -576,6 +579,7 @@
 			buildPhases = (
 				F2AB5FB218DA8B84623F4557 /* Sources */,
 				4F6F5CC3FCCF73F75AE9CCF4 /* Frameworks */,
+				3E87E7E77D0E54F6EBCA9E77 /* Build YardWeb */,
 				55B558C7EF820E6E00E5993B /* Resources */,
 			);
 			buildRules = (
@@ -626,6 +630,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A6070B9CF28E71610AA267AE /* Assets.xcassets in Resources */,
+				0B986C876E3EC44800452396 /* PrivacyInfo.xcprivacy in Resources */,
 				E1AAACFB012B3DDE66976AC7 /* rain-loop.m4a in Resources */,
 				C98E9DD78A30B4C8F05CF0BE /* LaunchScreen.storyboard in Resources */,
 				938754087F1D6D75F9782657 /* world-v2-bed-front.png in Resources */,
@@ -677,6 +682,19 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		3E87E7E77D0E54F6EBCA9E77 /* Build YardWeb */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			name = "Build YardWeb";
+			outputPaths = ("$(SRCROOT)/Maomao/Resources/YardWeb",);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "sh \"$SRCROOT/build_yard_web.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		F2AB5FB218DA8B84623F4557 /* Sources */ = {
@@ -836,7 +854,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Maomao/Info.plist;
 				INFOPLIST_KEY_CatttAPIURL = "$(CATTT_API_URL)";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用大致位置让院子跟着你那里的天气下雨或放晴。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -866,7 +886,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Maomao/Info.plist;
 				INFOPLIST_KEY_CatttAPIURL = "$(CATTT_API_URL)";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用大致位置让院子跟着你那里的天气下雨或放晴。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

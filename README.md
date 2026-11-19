@@ -49,10 +49,9 @@ pnpm --dir server install --frozen-lockfile
 
 ### 运行 iOS App
 
-先打包内嵌小院，再打开 Xcode 工程：
+安装依赖后打开 Xcode 工程；每次构建会自动打包内嵌小院：
 
 ```bash
-pnpm --dir web build:ios
 open ios/Maomao.xcodeproj
 ```
 
@@ -115,7 +114,7 @@ pnpm --dir web build
 pnpm --dir server typecheck
 ```
 
-iOS 增删源文件后，在 `ios/` 目录运行 `python3 generate_project.py` 更新工程；修改小院网页后，重新运行 `pnpm --dir web build:ios` 再构建 App。
+iOS 增删源文件后，在 `ios/` 目录运行 `python3 generate_project.py` 更新工程；小院网页由 Xcode 构建阶段自动打包。版本号、跳过网页构建与归档命令见 [iOS 构建说明](ios/README.md#release-与-testflight-归档准备)。
 
 ## 目录结构
 

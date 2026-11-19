@@ -1,10 +1,18 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { generateText, LoadAPIKeyError } from 'ai';
-import { assertModelConfig, config, describeModelConfig } from '../src/config.ts';
+import { assertModelConfig, config, describeModelConfig, slotAdmission, slotSpec } from '../src/config.ts';
 import { classifyModelError } from '../src/runtime/model.ts';
 
 const original = { provider: config.MODEL_PROVIDER, key: config.MAOMAO_DEEPSEEK_API_KEY };
+test('准入按来源共享资源，不按槽位或模型拆分', () => {
+  const c = { OPENAI_COMPAT_BASE_URL: 'http://localhost:11434/v1', MODEL_LOCAL_CONCURRENCY: 1, MODEL_CLOUD_CONCURRENCY: 3, MODEL_MOCK_CONCURRENCY: 0 };
+  const spec = slotSpec('chat');
+  expect(slotAdmission({ ...spec, provider: 'openai-compatible' }, c)).toEqual({ resource: 'openai-compatible:http://localhost:11434/v1', limit: 1 });
+  expect(slotAdmission({ ...spec, name: 'worker', model: 'another', provider: 'openai-compatible' }, c)).toEqual(slotAdmission({ ...spec, provider: 'openai-compatible' }, c));
+  expect(slotAdmission({ ...spec, provider: 'deepseek' }, c)).toEqual({ resource: 'deepseek', limit: 3 });
+  expect(slotAdmission({ ...spec, provider: 'mock' }, c)).toEqual({ resource: 'mock', limit: 0 });
+});
 afterEach(() => {
   config.MODEL_PROVIDER = original.provider;
   config.MAOMAO_DEEPSEEK_API_KEY = original.key;

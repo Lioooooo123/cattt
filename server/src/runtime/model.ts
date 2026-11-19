@@ -1,9 +1,10 @@
 import { budgetModel } from './budget.ts';
+import { admissionModel } from './admission.ts';
 import { createDeepSeek } from '@ai-sdk/deepseek';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { SharedV4ProviderOptions } from '@ai-sdk/provider';
 import { APICallError, LoadAPIKeyError, type LanguageModel, type LanguageModelUsage, RetryError } from 'ai';
-import { config, slotSpec, type SlotSpec } from '../config.ts';
+import { config, slotSpec, slotAdmission, type SlotSpec } from '../config.ts';
 import { db } from '../db/client.ts';
 import { modelCalls } from '../db/schema.ts';
 import { mockChatModel, mockExtractModel, mockRecallModel, mockDiaryModel, mockRouterModel, mockWorkerModel } from './mock.ts';
@@ -44,7 +45,12 @@ const mocks = { chat: mockChatModel, extract: mockExtractModel, router: mockRout
 export function slotFrom(spec: SlotSpec, purpose: string, thinking: Thinking = spec.thinking): ModelSlot {
   const base = spec.provider === 'mock' ? mocks[spec.name]()
     : spec.provider === 'deepseek' ? deepseek(spec.model!) : openaiCompatible.chatModel(spec.model!);
-  return { model: budgetModel(base, purpose), modelId: spec.model!, thinking, providerOptions: thinkingOptions(spec.provider, thinking) };
+  return { model: wrapSlotModel(base, spec, purpose), modelId: spec.model!, thinking, providerOptions: thinkingOptions(spec.provider, thinking) };
+}
+
+function wrapSlotModel(model: LanguageModel, spec: SlotSpec, purpose: string): LanguageModel {
+  const { resource, limit } = slotAdmission(spec);
+  return admissionModel(budgetModel(model, purpose), purpose, resource, limit);
 }
 
 export function chatSlot(purpose = 'chat'): ModelSlot {
@@ -110,12 +116,12 @@ export async function recordModelCall(entry: {
 /** 查询扩词独立用途，mock 也独立，避免误走记忆写入提取；扩词要快，总是关思考。 */
 export function recallSlot(): ModelSlot {
   const slot = slotFrom(slotSpec('extract'), 'memory_recall', 'disabled');
-  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: budgetModel(mockRecallModel(),'memory_recall'), modelId: 'mock-recall' } : slot;
+  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: wrapSlotModel(mockRecallModel(), slotSpec('extract'), 'memory_recall'), modelId: 'mock-recall' } : slot;
 }
 
 export function diarySlot(): ModelSlot {
   const slot = chatSlot('diary_read');
-  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: budgetModel(mockDiaryModel(),'diary_read'), modelId: 'mock-diary' } : slot;
+  return config.MODEL_PROVIDER === 'mock' ? { ...slot, model: wrapSlotModel(mockDiaryModel(), slotSpec('chat'), 'diary_read'), modelId: 'mock-diary' } : slot;
 }
 
 export function routerSlot(): ModelSlot {

@@ -20,6 +20,20 @@ import {
 const id = () => uuid('id').primaryKey().defaultRandom();
 const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
 
+export const modelAdmissions = pgTable('model_admissions', {
+  id: id(),
+  resource: text('resource').notNull(),
+  lane: text('lane').notNull(),
+  purpose: text('purpose').notNull(),
+  state: text('state').notNull(),
+  leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+}, t => [
+  check('model_admissions_lane_check', sql`${t.lane} in ('chat', 'background')`),
+  check('model_admissions_state_check', sql`${t.state} in ('waiting', 'running')`),
+  index('model_admissions_queue_idx').on(t.resource, t.state, t.lane, t.createdAt),
+]);
+
 export const users = pgTable('users', {
   id: id(),
   devTokenHash: text('dev_token_hash').unique(),

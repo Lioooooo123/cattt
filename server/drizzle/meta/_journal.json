@@ -162,6 +162,13 @@
       "when": 1795070769745,
       "tag": "0022_lan_pairing",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795073288552,
+      "tag": "0023_model_admissions",
+      "breakpoints": true
     }
   ]
 }

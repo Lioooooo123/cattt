@@ -27,6 +27,8 @@
 
 2026-11-19：模型来源（[本地优先重塑](../docs/决策/2026-11-19-本地优先.md)批次 B）。`MODEL_PROVIDER` 新增并默认 `openai-compatible`：接本机 Ollama / LM Studio / llama.cpp server 等 `/v1/chat/completions`（`OPENAI_COMPAT_BASE_URL`，默认 Ollama），各槽位默认共用 `OPENAI_COMPAT_MODEL`；DeepSeek 改为自带 key 的可选来源。chat / extract / router / worker 四个槽位可用 `*_PROVIDER`、`*_MODEL` 单独指定来源与模型，`mock` 仍全局生效。关思考按 `OPENAI_COMPAT_THINKING_PARAM` 传 `reasoning_effort: none` 或 `chat_template_kwargs.enable_thinking`；结构化输出走 `json_schema`，流式带用量供预算与账本使用。兼容测试见 `test/model-provider.test.ts`（工具循环、终答 `tool_choice: none`、思考内容不进正文、结构化输出、`required`）。已在本机 Ollama + qwen3:0.6b 上跑通 `check:model` 与一轮聊天；模型选型与并发准入（批次 C、I）未做。无数据库迁移。
 
+2026-11-19：C 批 PG 共享模型准入已实施。本机 `MODEL_LOCAL_CONCURRENCY=1`；DeepSeek 的 `MODEL_CLOUD_CONCURRENCY=0` 与 mock 的 `MODEL_MOCK_CONCURRENCY=0` 默认不准入（不访问准入表）。同一兼容服务 URL 的全部槽位共用资源，等待者按聊天优先、同车道先到先服务；运行中的后台调用不被抢占。聊天、同步扩词与本轮明确记忆保存走聊天车道，其余用途走后台。先迁移 `0023_model_admissions` 再启动 API 与 worker；每次调用准入后才预留日预算，Agent 每步调用后释放，再保存检查点。
+
 方案见 `docs/方案/后端-开发者版-方案-2026-09-11.md`。这一版只在本机跑，不部署。
 
 ## 第一次跑

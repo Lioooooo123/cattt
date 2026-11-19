@@ -19,7 +19,7 @@
 - Apple：[APNs 令牌认证](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[HTTP/2 请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应与失效时间](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)。使用 ES256、kid/iss/iat，provider token 缓存 50 分钟；410 清理以设备更新时间和供应商失效时间比较，不使更新后的登记被旧响应停用。
 - [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 `jwtVerify/createRemoteJWKSet/createLocalJWKSet/SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
 
-这些是现存协议实现的参考，不代表已经完成真实 Apple/APNs 验收。
+这些是现存协议实现的参考，不代表已经完成真实 Apple/APNs 验收。远程 APNs 默认关闭（`REMOTE_PUSH_ENABLED=false`），不创建新的推送待办，也不发送遗留待办；设备登记接口仍保留。手机同步亲口约定后排本机通知，打开 App 拉取信箱。`GET /v1/tickets` 额外返回 `mandate_kind`，供手机区分亲口约定与推断事项。
 
 2026-11-17：失败或受阻的托付可在用户补充后继续原事项。聊天 `list_tickets` 会包含这些事项，`update_ticket {text}` 与 HTTP `PATCH /v1/tickets/:id {text}` 共用准入；HTTP 成功续办额外返回 `resumed: true`、`queued`。也可取消失败事项；已取消、完成或丢弃的事项不恢复。原 run 与检查点保留，新 run 独立执行；每猫最多 2 件在办、每日最多 5 次开工，续办计入日额度。默认 `GET /v1/tickets` 仍只查 open，`status=all` 保持原义。部署前须停旧 API/worker 并应用 `0019_errand_resume`，不可与单 run 的旧代码混跑。验证与边界见[失败托付续办](../docs/决策/2026-11-17-失败托付续办.md)。本批已获用户授权合入 main 并推送，交付以 Git 记录为准；未部署。
 

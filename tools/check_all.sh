@@ -32,3 +32,4 @@ pnpm --dir server typecheck
 echo '全部通过。'
 
 sh tools/check_identity_logic.sh
+sh tools/check_followup_notifications.sh

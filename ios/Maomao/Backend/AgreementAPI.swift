@@ -1,36 +1,6 @@
 import Foundation
 import CryptoKit
 
-struct APITicket: Decodable, Identifiable {
-    let id: String
-    let kind: String
-    let goal: String
-    let sourceMessageId: String?
-    let status: String
-    let stage: String
-    let dueAt: String?
-    let timeZone: String?
-
-    var stageText: String {
-        switch stage {
-        case "queued": return "在等前面的事"
-        case "thinking": return "我在想"
-        case "waiting", "quiet_waiting": return "在等你"
-        case "ready": return "好了"
-        case "failed", "blocked": return "没办成"
-        case "cancelled": return "已取消"
-        case "dropped": return "先放下了"
-        default: return "约好了"
-        }
-    }
-    var date: Date? { dueAt.flatMap(Self.parseDate) }
-    static func parseDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
-}
-
 struct APIMailboxLetter: Decodable, Identifiable {
     let id: String
     let seq: Int

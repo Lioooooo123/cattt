@@ -196,10 +196,10 @@ it('模型故障或结构复核失败用模板，explicit不能被模型否决',
   await fire(new Date(now.getTime() + 60000), async () => ({ decision: 'ignore' }));
   expect(await said()).toHaveLength(2);
 });
-it('超过24小时只进信箱，不补聊天提问', async () => {
+it.each([2,25])('电脑停机%s小时后扫描补跑，超过24小时只进信箱', async (hours) => {
   await schedule();
-  await fire(new Date('2026-11-13T04:00:01Z'));
-  expect(await said()).toHaveLength(0);
+  await fire(new Date(+now + hours * 3600000));
+  expect(await said()).toHaveLength(hours > 24 ? 0 : 1);
   expect(await db.select().from(mailboxLetters).where(eq(mailboxLetters.catId, owner.catId))).toHaveLength(1);
 });
 it('接口列表、改时、取消、信箱、已读归属鉴权与分页，别人的事项404', async () => {

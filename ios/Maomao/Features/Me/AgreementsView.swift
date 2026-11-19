@@ -86,6 +86,7 @@ struct AgreementsView: View {
             let loaded = try await client.tickets()
             guard store.backend == client.config else { return }
             tickets = loaded; error = nil
+            await store.reconcileFollowupNotifications(loaded, config: client.config)
         } catch { self.error = "没能读取，点此重试" }
         loading = false
     }
@@ -95,6 +96,7 @@ struct AgreementsView: View {
         do {
             if ticket.kind == "errand" { try await store.api.addTicketInput(ticket.id, text: inputText) }
             else { try await store.api.changeTicket(ticket.id, to: selectedDate) }
+            FollowupNotifications.remove(ticket.id)
             editing = nil; await load(); store.flash(ticket.kind == "errand" ? "这句话交给团子了" : "时间改好了")
         }
         catch { store.flash("没能改好，请稍后再试") }
@@ -102,7 +104,7 @@ struct AgreementsView: View {
     private func cancel(_ ticket: APITicket) async {
         saving = true
         defer { saving = false }
-        do { try await store.api.cancelTicket(ticket.id); await load(); store.flash("这件事取消了") }
+        do { try await store.api.cancelTicket(ticket.id); FollowupNotifications.remove(ticket.id); await load(); store.flash("这件事取消了") }
         catch { store.flash("没能取消，请稍后再试") }
     }
 }

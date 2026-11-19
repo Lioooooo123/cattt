@@ -34,7 +34,7 @@ private struct HostMenuContent: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Text(model.summary)
-        ForEach(["数据库", "API", "worker", "局域网 HTTPS", "模型"], id: \.self) { name in
+        ForEach(["数据库", "API", "worker", "局域网 HTTPS", "本地模型", "DeepSeek"], id: \.self) { name in
             Text("\(name)：\(model.status[name] ?? "启动中")")
         }
         if !model.error.isEmpty { Text(model.error) }
@@ -61,7 +61,7 @@ private struct ModelKeyView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("填写 DeepSeek key").font(.headline)
-            Text("密钥仅保存在这台电脑上，保存后将重新启动 API 和 worker。").foregroundStyle(.secondary)
+            Text("密钥仅保存在这台电脑上，不会删除本地模型配置。已有本地模型时，记忆默认用本地；聊天、路由和后台处理用 DeepSeek。保存后重启 API 和 worker。").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             SecureField("DeepSeek API key", text: $key).textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()

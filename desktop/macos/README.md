@@ -22,11 +22,23 @@ bash desktop/macos/scripts/smoke-host.sh
 
 首次启动无需模型密钥：API 和 worker 照常运行，不内置开发者密钥，也不会自动切换 mock。未设置 `MODEL_PROVIDER` 时与服务端一致使用 `openai-compatible`，默认 `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1`（Ollama，也可指向 LM Studio 等兼容服务）。填 `OPENAI_COMPAT_MODEL` 设置共用模型名，聊天槽位的 `CHAT_MODEL` 优先；`MAOMAO_OPENAI_COMPAT_API_KEY` 可选，本机服务通常不需要。
 
-菜单显示默认来源的地址与聊天模型名；现有后台健康轮询会请求 `<base>/models`（2 秒超时，带可选 Bearer key），连接失败显示“本地服务未启动”，HTTP 错误显示状态码。可达不代表模型已下载或推理成功；缺模型名时明确显示“未配置模型名”。`MODEL_PROVIDER=deepseek` 时按 `MAOMAO_DEEPSEEK_API_KEY` 是否存在显示配置状态，菜单填写 DeepSeek key 会同时设置该 provider；`MODEL_PROVIDER=mock` 显示“测试模式”。这些状态不阻止服务启动。烟测使用全新数据目录、不设置模型 provider 或密钥，验证服务进程和健康接口。
+菜单分别显示“本地模型”和“DeepSeek”，并在对应行标出全局默认来源。本地行显示共用模型名、在线／未启动／服务错误；配置了本地模型时，无论全局 provider 是什么，后台都会请求 `<base>/models`（2 秒超时，带可选 Bearer key）。可达不代表模型已下载或推理成功；DeepSeek“已配置”只表示已保存 key，不代表远程验证通过。`MODEL_PROVIDER=mock` 会标为默认测试模式。这些状态不阻止服务启动。烟测使用全新数据目录、不设置模型 provider 或密钥，验证服务进程和健康接口。
+
+保存 DeepSeek key 或本地模型设置成功后，宿主会重新计算 `<data>/env` 的分工并重启 API/worker，不需要切换模式：
+
+| 已配置来源 | 宿主写入规则 |
+|---|---|
+| 本地模型与 DeepSeek key 都有 | `MODEL_PROVIDER=openai-compatible`，保留 `OPENAI_COMPAT_MODEL` 与当前 `OPENAI_COMPAT_BASE_URL`（未设则为 `http://127.0.0.1:11434/v1`），保留 `MAOMAO_DEEPSEEK_API_KEY`；写 `CHAT_PROVIDER=deepseek`、`ROUTER_PROVIDER=deepseek`、`WORKER_PROVIDER=deepseek` |
+| 只有本地模型 | `MODEL_PROVIDER=openai-compatible`，保留本地模型与地址；清除上述三个 provider 覆盖 |
+| 只有 DeepSeek key | `MODEL_PROVIDER=deepseek`；清除上述三个 provider 覆盖 |
+
+记忆提取、边界摘要和模型辅助回忆走 EXTRACT，默认继承全局本地来源；聊天、路由和后台处理用 DeepSeek。宿主在这两种保存操作中管理 CHAT/ROUTER/WORKER 的 provider（旧覆盖会被替换或清除），**不改任何槽位的 `*_MODEL`、`EXTRACT_PROVIDER`、思考或并发参数**；用户已有覆盖仍优先，菜单角色标签按实际 provider 显示。填 key 不会删除本地模型，设置本地模型不会删除 key，env 权限保持 0600。两者均未配置时继续使用服务端默认语义，不内置 key。
+
+双来源与单来源转换、保留覆盖、状态和写入权限由 `ModelConfigurationTests` 覆盖。可选的 `testBundledMixedConfiguration` 会用占位 key 启动实际随附服务，并验证两种保存路径重启后的健康状态；需先重建应用，将 `scripts/model-config-probe.ts` 按服务端相同的 esbuild 参数打包，再设置 `CATTT_HYBRID_CHECK_RESOURCES`（应用 Resources）、`CATTT_HYBRID_MODEL_PROBE`（探针 bundle）与 `CATTT_HYBRID_CHECK_DATA_ROOT`（新的烟测数据父目录）运行该测试。探针直接调用服务端 `modelConfigProblems` 与 `slotSpec`，不发起收费模型请求。端口要求与烟测相同；数据目录路径须足够短，以容纳 PostgreSQL 的 Unix socket。
 
 “设置本地模型…”会先检测硬件，显示 Qwen2.5 推荐标签与下载量，再由用户点击“下载并测试”明确同意。首次没有本地模型名和 DeepSeek key 时自动打开一次（`host-state.json` 的 `modelSetupPrompted`，升级保留）；缺配置或本地服务未启动时菜单标为推荐入口。Ollama 必须自行从 https://ollama.com/download 安装并启动，窗口可重新检测；宿主不会安装或捆绑 Ollama。
 
-打包包含 `Resources/server/model-setup.mjs`，由随附 Node 运行 `--json --env-file <data>/env`，确认下载后才加 `--yes --model <推荐标签>`。子进程继承当前数据目录配置和密钥，PATH 包含 `/usr/sbin:/sbin` 以识别 Apple Silicon。窗口显示下载进度及中文回复／工具调用烟测结果；仅收到“配置已保存”才重载配置并重启 API/worker，退出码 0 本身不代表切换成功。设置只修改全局 provider 和共用模型名，原有槽位级覆盖仍优先。取消或关闭运行中的设置窗口会终止子进程并恢复原 env（已下载的数据可由 Ollama 缓存），不会自动换模型；失败可改用 DeepSeek。下载独立于宿主监督队列，退出应用会先取消设置再停服务。
+打包包含 `Resources/server/model-setup.mjs`，由随附 Node 运行 `--json --env-file <data>/env`，确认下载后才加 `--yes --model <推荐标签>`。子进程继承当前数据目录配置和密钥，PATH 包含 `/usr/sbin:/sbin` 以识别 Apple Silicon。窗口显示下载进度及中文回复／工具调用烟测结果；仅收到“配置已保存”才按上表计算分工、重载配置并重启 API/worker，退出码 0 本身不代表切换成功。取消或关闭运行中的设置窗口会终止子进程并恢复原 env（已下载的数据可由 Ollama 缓存），不会自动换模型；失败可填写 DeepSeek key。下载独立于宿主监督队列，退出应用会先取消设置再停服务。
 
 默认数据在 `~/Library/Application Support/Cattt`，可以 `--data-dir` 或 `CATTT_DATA_DIR` 覆盖。`env` 是权限 0600 的 `KEY=VALUE` 文件（支持整行注释及引号，不执行 shell）；修改后重启宿主，或用菜单切换到 DeepSeek。测试可用 `MODEL_PROVIDER=mock`。
 

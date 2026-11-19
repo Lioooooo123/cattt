@@ -101,7 +101,7 @@ final class HostModel: ObservableObject {
                         }
                         self.queue.async {
                             do {
-                                if result == .saved { try host.reloadModelConfiguration(); self.publish() }
+                                if result == .saved { try host.completeLocalModelSetup(); self.publish() }
                                 finish(.success(result))
                             } catch { finish(.failure(error)) }
                         }

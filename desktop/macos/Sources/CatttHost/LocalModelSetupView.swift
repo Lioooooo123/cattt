@@ -74,10 +74,11 @@ struct LocalModelSetupView: View {
             }
             if let recommendation = model.recommendation {
                 Text(recommendation.kind == "local" ? "推荐：\(model.selectedModel ?? "")" : "建议使用 DeepSeek").font(.headline)
-                Text(recommendation.reason).font(.callout).foregroundStyle(.secondary)
+                Text(recommendation.reason).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if model.ollamaAvailable == false {
                 Text("需要安装并启动 Ollama。团子不会自动安装；已有服务请确认地址和访问密钥。")
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Link("下载 Ollama", destination: URL(string: "https://ollama.com/download")!)
                     Button("重新检测") { model.inspect(hostModel) }.disabled(model.running)
@@ -88,7 +89,7 @@ struct LocalModelSetupView: View {
             if let smoke = model.smoke {
                 Text("中文陪伴回复：\(smoke.chinese == true ? "通过" : "未通过")\n工具调用：\(smoke.correctTool == true ? "通过" : "未通过")").font(.callout)
             }
-            if !model.error.isEmpty { Text(model.error).foregroundStyle(.red).textSelection(.enabled) }
+            if !model.error.isEmpty { Text(model.error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             HStack {
                 if model.running {
                     Button("取消") { hostModel.cancelModelSetup() }.disabled(model.committing)
@@ -97,11 +98,13 @@ struct LocalModelSetupView: View {
                         Button("下载并测试（约 \(size.formatted()) GB）") { model.start(hostModel, consent: true) }
                             .disabled(model.ollamaAvailable != true || hostModel.setupRunning || hostModel.busy)
                     }
-                    Button("重新检测") { model.inspect(hostModel) }.disabled(hostModel.setupRunning || hostModel.busy)
+                    if model.ollamaAvailable != false {
+                        Button("重新检测") { model.inspect(hostModel) }.disabled(hostModel.setupRunning || hostModel.busy)
+                    }
                     Button("改用 DeepSeek key…") { openWindow(id: "model"); dismiss() }
                 }
             }
-        }.padding(24).frame(width: 500, alignment: .leading)
+        }.padding(24).frame(width: 500, alignment: .leading).frame(minHeight: 380, alignment: .topLeading)
             .task { model.inspect(hostModel) }
             .onDisappear { if model.running && !model.committing { hostModel.cancelModelSetup() } }
     }

@@ -15,7 +15,7 @@ const revisionFields = sql`c.persona_version, c.updated_at, c.memory_revision,
 
 export async function turnGuardSnapshot(catId: string, turnId: string, reader: Tx | typeof db = db) {
   const rows = await reader.execute(sql`select t.status, v.version,
-    (select string_agg(id::text, ',' order by id::text) from boundaries where cat_id = c.id) boundaries,
+    (select string_agg(id::text, ',' order by id::text collate "C") from boundaries where cat_id = c.id) boundaries,
     ${revisionFields} from turns t join conversations v on v.id = t.conversation_id
     join cats c on c.id = ${catId} where t.id = ${turnId}`);
   const row = rows[0];

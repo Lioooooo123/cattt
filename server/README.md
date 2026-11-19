@@ -32,10 +32,12 @@ pnpm 11 会把 `--env-file` 识别为 Node 自身参数，因此带此选项时�
 
 原云部署目录、容器构建配置、容器健康与镜像回退脚本已移除，本机初始化、升级前备份、恢复及重启保留数据改由宿主烟测覆盖。保留的 `docker-compose.yml` 仅用于以下源码开发流程的 PG，不用于发布。
 
-## 协议与 SDK 依据
+## 协议与实现依据
+
+模型协议、SSE 解析、重试、结构化输出、工具循环与上下文裁剪统一由 `src/llm/` 实现，不依赖外部模型框架。消息类型兼容已有 `run_steps.messages`，无需迁移检查点；槽位、思考参数、准入、每日预算与成本账本保持原有规则。五批交付范围见[自研模型层方案](../docs/方案/自研Agent循环与模型层-方案-2026-11-19.md)。
 
 - Apple：[APNs 令牌认证](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[HTTP/2 请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应与失效时间](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)。使用 ES256、kid/iss/iat，provider token 缓存 50 分钟；410 清理以设备更新时间和供应商失效时间比较，不使更新后的登记被旧响应停用。
-- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 APNs 用到的 `SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
+- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 APNs 用到的 `SignJWT/importPKCS8` 类型；没有手拼签名。模型准入与额度由 `ModelClient` 装饰器实现，流完成、出错、取消或提前退出时释放与结算。
 
 这些是现存协议实现的参考，不代表已经完成真实 APNs 验收。远程 APNs 默认关闭（`REMOTE_PUSH_ENABLED=false`），不创建新的推送待办，也不发送遗留待办；设备登记接口仍保留。手机同步亲口约定后排本机通知，打开 App 拉取信箱。`GET /v1/tickets` 额外返回 `mandate_kind`，供手机区分亲口约定与推断事项。手机身份只来自配对设备凭证，Sign in with Apple 已移除（见[本地优先决策](../docs/决策/2026-11-19-本地优先.md#g-批落地)）。
 
@@ -103,7 +105,7 @@ docker compose exec postgres psql -U maomao -c \
 
 ## 2026-09-12 本轮优化
 
-聊天已接 ToolLoopAgent，世界连接使用独立 SSE；新增每猫 Soul 与显式临时状态接口。后端与 iOS 协同变更、迁移顺序、验收结果和未完成能力见 [实施验收](../docs/方案/后端与Agent循环-实施与验收-2026-09-12.md)。现有开发库升级前先停旧 API/worker，再执行 `pnpm db:migrate`；本轮迁移已在隔离库验证。
+聊天已接自研 `llm/loop.ts` 工具循环，世界连接使用独立 SSE；新增每猫 Soul 与显式临时状态接口。后端与 iOS 协同变更、迁移顺序、验收结果和未完成能力见 [实施验收](../docs/方案/后端与Agent循环-实施与验收-2026-09-12.md)。现有开发库升级前先停旧 API/worker，再执行 `pnpm db:migrate`；本轮迁移已在隔离库验证。
 
 世界协议在前台小院和聊天都可运行，后台、引导和手动暂停不开放移动。get_weather 已接 Open-Meteo，必须明确城市、重名需消歧；当前天气为模型估算，附来源/时间/单位，总 3 秒超时，地理缓存 24 小时、天气缓存 10 分钟。公共端点仅用于本机非商业开发，商业服务需另配符合条款的方案。
 
@@ -133,7 +135,7 @@ docker compose exec postgres psql -U maomao -c \
 
 API 前台 Router 每30秒把到期约定写成 `clock:<ticket_id>:<due_at>` 事件和 PG 待办，经 pg-boss 投递。默认用户本地22:00–09:00安静，UTC时间不随用户换时区移动；发送时按当前时区复核。超过24小时只留信。事项、来源原话及“不要再提”在模型前和发布事务中都检查；Router失效时固定模板兜底。explicit 约定没有三次尝试后永久放弃的限制，临时故障和安静时段保留在 PG 重试。
 
-新增 `ROUTER_MODEL=deepseek-flash` / `ROUTER_THINKING=disabled`，成本用途 `route`。本段只有 `followup_due` 生效；其余主动规则仅预置版本与档位。模型只提供合并措辞，不能撤销用户亲口约定的发送授权。输入按中文每字约1 token、其他每4字符约1 token估算至多3000 token，保留最近6条聊天并逐条压短；使用SDK结构化输出。复核按ID覆盖、120字内单条文字、禁词与快照外时间/姓名的轻量启发式，不要求逐字复述主题。
+新增 `ROUTER_MODEL=deepseek-flash` / `ROUTER_THINKING=disabled`，成本用途 `route`。本段只有 `followup_due` 生效；其余主动规则仅预置版本与档位。模型只提供合并措辞，不能撤销用户亲口约定的发送授权。输入按中文每字约1 token、其他每4字符约1 token估算至多3000 token，保留最近6条聊天并逐条压短；使用自研 `generateObject` 与 zod 校验结构化输出。复核按ID覆盖、120字内单条文字、禁词与快照外时间/姓名的轻量启发式，不要求逐字复述主题。
 
 `GET /v1/tickets?status=open`、`PATCH /v1/tickets/:id`（`{when: ISO}`）、`POST /v1/tickets/:id/cancel`、`GET /v1/mailbox?after=seq`、`POST /v1/mailbox/:id/read` 均从鉴权账号取得归属。聊天历史新增 `ticket_id`；`GET /v1/messages?after=seq&limit=100` 由旧到新补拉，可连续翻页。世界流 `inbox` 只提示收据序号，聊天与信的内容仍从 PG 拉取。
 
@@ -148,7 +150,7 @@ pg-boss 连接的 `statement_timeout` 从2秒放宽到60秒，让大表维护查
 
 聊天工具 `start_errand {goal}` 保存60字内托付，成功返回 `ticket_id` 和 `queued`。每猫最多2件在办（等待回答也占一个），每个用户本地自然日至多5件进入在办；超出先以 `queued` 保存，30秒扫描按空位与本地新一天继续。日预算使用事项的 `local_day` 记实际准入日，取消/结束不返还当天名额。`list_tickets/cancel_ticket/update_ticket` 同时覆盖托付；补充用 `{ticket_id,text}`，直接保存 `ticket_inputs`，等待回答的同一run由此继续。HTTP `PATCH /v1/tickets/:id {text}` 同义；`GET /v1/tickets?status=all` 供iOS同一列表显示历史托付阶段，默认仍只查open。
 
-后台沿用 `async_jobs` 与pg-boss，处理并发2；业务run的45秒租约每10秒续租，以attempt隔离过期执行者。每次让ToolLoopAgent完成一步，完整模型消息/工具观察、用量和已消费补充同事务检查点；恢复从最后完整步继续，带“先核对已有观察，不重复外部动作”。仅有 `get_time/get_weather/recall_memories/read_permitted_diary/report`；记忆复用聊天的来源/轮次抑制及边界许可，日记只读cat_allowed。不会提供联网检索、执行代码、写记忆、移动或发消息工具。
+后台沿用 `async_jobs` 与pg-boss，处理并发2；业务run的45秒租约每10秒续租，以attempt隔离过期执行者。每次由 `runModelStep` 完成一步，完整模型消息/工具观察、用量和已消费补充同事务检查点；恢复从最后完整步继续，带“先核对已有观察，不重复外部动作”。仅有 `get_time/get_weather/recall_memories/read_permitted_diary/report`；记忆复用聊天的来源/轮次抑制及边界许可，日记只读cat_allowed。不会提供联网检索、执行代码、写记忆、移动或发消息工具。
 
 最多20步、累计8000输出token（含供应商计入output的思考token）、累计10分钟活动执行时间；等待回答和安静时段延期不占活动时间。崩溃后未完成步骤至恢复认领的时间保守计入预算，避免重启清零。408/429/5xx与明确网络错误在同一步递增退避重试3次，其余报failed；每次尝试入成本账本。report先按call_id存凭证再返回；progress不发布，ready写信+一句短通知，waiting只问一句，blocked/failed如实说明，dropped安静结束。等待问题按各次report凭证去重，同一最终用途只有一份收据。
 

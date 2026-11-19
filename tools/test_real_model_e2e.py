@@ -182,7 +182,7 @@ def main():
     cases_path = OUTPUT / '固定用例.json'
     cases = json.loads(cases_path.read_text())
     REPORT['casesSHA256'] = hashlib.sha256(cases_path.read_bytes()).hexdigest()
-    sources = ['server/src/runtime/persona.ts', 'server/src/worker/memory.ts', 'server/src/worker/diary.ts', 'server/src/runtime/context.ts', 'server/src/runtime/yard.ts', 'server/src/turns/run.ts', 'ios/Maomao/Store/AppStore+Remote.swift']
+    sources = ['server/src/llm/openai-compatible.ts', 'server/src/llm/loop.ts', 'server/src/llm/generate.ts', 'server/src/llm/context.ts', 'server/src/runtime/persona.ts', 'server/src/worker/memory.ts', 'server/src/worker/diary.ts', 'server/src/runtime/context.ts', 'server/src/runtime/yard.ts', 'server/src/turns/run.ts', 'ios/Maomao/Store/AppStore+Remote.swift']
     REPORT['sourceSHA256'] = {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in sources}
     created = command(['docker', 'exec', 'maomao-postgres-1', 'createdb', '-U', 'maomao', DBNAME])
     if created.returncode: raise RuntimeError('创建隔离库失败')
@@ -194,7 +194,8 @@ def main():
     seeded = command(['pnpm', 'exec', 'tsx', 'scripts/real-model-review-fixture.ts', 'seed'], cwd=ROOT / 'server', env=ENV)
     if seeded.returncode: raise RuntimeError('隔离账号准备失败')
     private = json.loads((TEMP / 'accounts.json').read_text()); ACCOUNTS = private.pop('accounts'); REPORT['configuration'] = private
-    for name in ['ai', '@ai-sdk/deepseek']:
+    REPORT['modelImplementation'] = 'server/src/llm'
+    for name in ['zod']:
         REPORT.setdefault('packages', {})[name] = json.loads((ROOT / 'server/node_modules' / name / 'package.json').read_text())['version']
     start_process(['node', '--import', 'tsx', 'scripts/real-model-review-fixture.ts', 'serve'], 'api')
     start_process(['node', '--import', 'tsx', 'src/worker.ts'], 'worker')

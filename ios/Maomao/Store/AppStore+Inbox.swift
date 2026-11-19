@@ -52,7 +52,7 @@ extension AppStore {
                 inboxError = nil
             } catch {
                 guard backend == client.config, !Task.isCancelled else { return }
-                inboxError = "信箱暂时没连上，点此重试"
+                inboxError = backend.mode == .paired ? "团子在家里的电脑上" : "信箱暂时没连上，点此重试"
             }
         }
     }

@@ -50,7 +50,7 @@ xcodebuild -project ios/Maomao.xcodeproj -scheme Maomao \
 
 `generate_project.py` 同时生成工程与 `Maomao/Info.plist`，后者声明 `ITSAppUsesNonExemptEncryption=false`。隐私清单作为应用资源复制：UserDefaults 用于本机设置和恢复（CA92.1）；`WorldEngine`、`WorldBridge` 等使用 `systemUptime` 计算时间间隔（35F9.1）。检索未发现文件时间戳、磁盘余量、键盘列表等其它必需理由 API。
 
-数据声明按现有远端路径覆盖：Apple 登录账号标识（`IdentityAPI`）、推送设备 token，以及聊天、日记、记忆和猫资料（`Backend` / `DiaryAPI`）用于 App 功能，关联账号且不用于跟踪。天气使用大致位置向 Open-Meteo 即时取天气，客户端不保存坐标；不将仅即时处理的位置声明为持久收集。无广告或分析 SDK。发布者仍需按实际服务端保留策略和第三方服务条款核对 App Store 隐私问卷；清单不代替该审核。
+数据声明按现有远端路径覆盖：Apple 登录账号标识（`IdentityAPI`），以及聊天、日记、记忆和猫资料（`Backend` / `DiaryAPI`）用于 App 功能，关联账号且不用于跟踪。约定提醒改为手机本机通知，不再登记 APNs token；只排已同步的未来亲口约定，按约定时区将安静时段顺延到九点，最多保留最近 64 条（为其它本机通知留出名额）。电脑断连时保留已排通知和已加载聊天、信件，打开 App 再尝试同步；未同步的改期或取消无法离线获知。天气使用大致位置向 Open-Meteo 即时取天气，客户端不保存坐标；不将仅即时处理的位置声明为持久收集。无广告或分析 SDK。发布者仍需按实际服务端保留策略和第三方服务条款核对 App Store 隐私问卷；清单不代替该审核。
 
 ### 文件列表变了怎么办
 

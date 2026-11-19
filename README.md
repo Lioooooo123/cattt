@@ -23,7 +23,7 @@
 | 服务端 | Node.js、TypeScript、Hono、AI SDK |
 | 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
 | 实时消息 | SSE、Redis |
-| 模型与资源 | DeepSeek / mock 模型、Blender 3D 资源 |
+| 模型与资源 | 本机 OpenAI 兼容模型（Ollama 等）/ 自带 key 的 DeepSeek / mock、Blender 3D 资源 |
 
 SwiftUI 承载原生页面，WKWebView 渲染小院，首页与聊天共享同一个世界。后端分为 API 和 worker 两个进程：API 处理聊天与最终回应，worker 执行后台托付、记忆提取和日记处理，再提交持久化汇报。API 发布前重新检查上下文、用户许可和安静时段。
 
@@ -75,14 +75,15 @@ MODEL_PROVIDER=mock pnpm dev
 
 已有 `.env` 时保留原文件。`create-dev-user` 会创建开发账号并输出一次 token，`pnpm dev` 同时启动 API 和 worker；API 默认地址为 `http://localhost:8787`。iOS 模拟器可直接连接此地址。
 
-上面的命令使用固定回复的 mock 模型，无需模型密钥。连接真实模型时，在 `server/.env` 中设置：
+上面的命令使用固定回复的 mock 模型，无需模型密钥。连接真实模型时，默认用本机的 OpenAI 兼容服务，例如 Ollama（`ollama pull qwen3:8b`），在 `server/.env` 中设置：
 
 ```dotenv
-MODEL_PROVIDER=deepseek
-MAOMAO_DEEPSEEK_API_KEY=你的密钥
+MODEL_PROVIDER=openai-compatible
+OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1
+OPENAI_COMPAT_MODEL=qwen3:8b
 ```
 
-然后用 `pnpm dev` 启动。模型、数据库、身份与推送配置见 [server/.env.example](server/.env.example)，更多后端说明见 [server/README.md](server/README.md)。
+也可以改用自带 key 的 DeepSeek（`MODEL_PROVIDER=deepseek`、`MAOMAO_DEEPSEEK_API_KEY=你的密钥`），或只给某个槽位换来源（如 `WORKER_PROVIDER=deepseek`）。`pnpm check:model` 检查连通，然后用 `pnpm dev` 启动。模型、数据库、身份与推送配置见 [server/.env.example](server/.env.example)，更多后端说明见 [server/README.md](server/README.md)。
 
 ### 运行网页展示页
 

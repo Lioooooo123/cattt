@@ -7,6 +7,20 @@
 宿主从 `CATTT_DATA_DIR/host-admin.token` 读取管理口令，以 Bearer 调用回环 `/host/pairing-codes`、`/host/devices`、`/host/status`；局域网监听不挂载管理接口。
 开发数据目录默认 `.local/`，可设置 `CATTT_DATA_DIR`。其中的 CA 和私钥必须持久保存并随宿主备份；不要删除 CA，否则手机需要重新配对。API 每分钟检查地址和证书有效期，自动重签并热更新服务端证书。
 
+## 电脑端运行
+
+正式运行形态是用户自己的 macOS 电脑，不运营云托管服务。应用构建、状态菜单、配对、配置、备份与恢复见 [macOS 宿主说明](../desktop/macos/README.md)。宿主打包 API、worker、迁移入口及 Node 22、PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
+
+原云部署目录、容器构建配置、容器健康与镜像回退脚本已移除，本机初始化、升级前备份、恢复及重启保留数据改由宿主烟测覆盖。保留的 `docker-compose.yml` 仅用于以下源码开发流程的 PG，不用于发布。
+
+## 协议与 SDK 依据
+
+- Apple：[验证身份 token](https://developer.apple.com/documentation/signinwithapple/verifying-a-user)、[原生登录流程](https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple)。服务端校验签名/JWKS、issuer、audience、exp、iat、一次性 nonce；原生会话默认 7 天（配置上限 30 天），不保存 Apple refresh token。iOS 回前台检查本机 Apple credential state；没有 Apple 授权码交换、服务端账户变更 webhook 或跨团队转移处理。
+- Apple：[APNs 令牌认证](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[HTTP/2 请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应与失效时间](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)。使用 ES256、kid/iss/iat，provider token 缓存 50 分钟；410 清理以设备更新时间和供应商失效时间比较，不使更新后的登记被旧响应停用。
+- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 `jwtVerify/createRemoteJWKSet/createLocalJWKSet/SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
+
+这些是现存协议实现的参考，不代表已经完成真实 Apple/APNs 验收。
+
 2026-11-17：失败或受阻的托付可在用户补充后继续原事项。聊天 `list_tickets` 会包含这些事项，`update_ticket {text}` 与 HTTP `PATCH /v1/tickets/:id {text}` 共用准入；HTTP 成功续办额外返回 `resumed: true`、`queued`。也可取消失败事项；已取消、完成或丢弃的事项不恢复。原 run 与检查点保留，新 run 独立执行；每猫最多 2 件在办、每日最多 5 次开工，续办计入日额度。默认 `GET /v1/tickets` 仍只查 open，`status=all` 保持原义。部署前须停旧 API/worker 并应用 `0019_errand_resume`，不可与单 run 的旧代码混跑。验证与边界见[失败托付续办](../docs/决策/2026-11-17-失败托付续办.md)。本批已获用户授权合入 main 并推送，交付以 Git 记录为准；未部署。
 
 2026-11-17：聊天工具与 App 的约定／托付写入统一经过 `agent/engine.ts` 和 `agent/intake.ts`，在一次事务内保存来源、事项变更、决定和收据。补充／改期／取消 HTTP 请求可带 `Idempotency-Key`，重试复用同一键返回原收据，换内容返回 `409 conflict`；不带键仍兼容现有客户端。无新数据库迁移，未部署；实现范围与验证见[统一指令入口](../docs/决策/2026-11-17-Agent统一指令入口.md)。

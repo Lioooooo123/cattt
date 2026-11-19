@@ -14,6 +14,8 @@
 		FCBF015959BBE821BF743BAE /* DiaryAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */; };
 		0CFF041A8D7525086B412B91 /* IdentityAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */; };
 		910C6A215EEBAEBF41B43E94 /* NotificationBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5D291413CC516A87780A39 /* NotificationBridge.swift */; };
+		24F98A26D234133338FB2621 /* PairTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D6CC7622B0784243D14A0B /* PairTransport.swift */; };
+		011F5D1B3472272F19F2995A /* PairVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04235A5C379808FFF72EF0E /* PairVault.swift */; };
 		460562B96EDC02245D9880A7 /* ProactiveAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE763B01980A3EFF3A835F4 /* ProactiveAPI.swift */; };
 		9C60C6516664295225EA1DEB /* SessionVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107F1C925C1C8E8FBB2468A1 /* SessionVault.swift */; };
 		836AB51F3426A557216D2B62 /* WorldBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E376AD69F4D090ACCABB12 /* WorldBridge.swift */; };
@@ -45,6 +47,7 @@
 		8E97AD44C2B7A294C84299AE /* AgreementsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4974B96C3AE398711306DF68 /* AgreementsView.swift */; };
 		C5737F0502BB06B23D342C1D /* MeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22C3064D0824E30AF163D763 /* MeView.swift */; };
 		7579A1FCEEE44AE9F1CCD68F /* MemoryCenterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89CD98657573148BE9B7CD1F /* MemoryCenterView.swift */; };
+		E0495DDFC1BEF98231D755B0 /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EAC6078BB2CCE755D0D7A5 /* PairingView.swift */; };
 		D7368BB94A4304EB2D2D2C45 /* FirstMeetingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C5D32D51C403C809EA8AF45 /* FirstMeetingStep.swift */; };
 		53742DF009E1E98666E00845 /* NamingStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FB709177BD2E00B2C99E1D2 /* NamingStep.swift */; };
 		F964E02D3D84C3F3045221E6 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC93BA893235766AFF19A800 /* OnboardingView.swift */; };
@@ -65,6 +68,7 @@
 		8F4842ECE98776A65B802D83 /* DiarySeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */; };
 		0C970822E3029D7A4CE50E73 /* DiaryStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */; };
 		E805D6198DC960D223F80A31 /* Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE3B9C19706DC69E8BDD559 /* Location.swift */; };
+		DD105D060E51E3D5D088C26D /* PairedHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771C71367484363BC1D629B9 /* PairedHost.swift */; };
 		86DA7990BA314C37B712D5F6 /* Personality.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD6C089082D4459E387B08D /* Personality.swift */; };
 		9D87892ED808F81148011D57 /* World.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C51D5F53E72B7F46C1287C6 /* World.swift */; };
 		41395686B4E2B32DCC3C5223 /* WorldCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CEF454089B66E87EB601A2A /* WorldCamera.swift */; };
@@ -80,6 +84,7 @@
 		0D2E06C0C3970B8CCFF2B24A /* AppStore+Identity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A8080184CDB4DDF4EEC6900 /* AppStore+Identity.swift */; };
 		48A70789913609C8BF21FCD8 /* AppStore+Inbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF23162CE2E934EEC0DF20ED /* AppStore+Inbox.swift */; };
 		837173CEF6C85A889655CF4F /* AppStore+Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DF8D7FB399F69D4B310145F /* AppStore+Notifications.swift */; };
+		17BF90DB6A5ACCD51A9400EF /* AppStore+Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = C174E98638A705C894ED11F0 /* AppStore+Pairing.swift */; };
 		1139537C90AA2BB75864BB96 /* AppStore+Proactive.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F5C49B85A0736C69551583D /* AppStore+Proactive.swift */; };
 		080F84D8505A06DCED47A77D /* AppStore+Remote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE168EDA00C6AA78454DF35 /* AppStore+Remote.swift */; };
 		B4CFD4E1DA318F731B977374 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4431CE254B1414B6FD463F2 /* AppStore.swift */; };
@@ -147,6 +152,8 @@
 		3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryAPI.swift; sourceTree = "<group>"; };
 		6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityAPI.swift; sourceTree = "<group>"; };
 		BC5D291413CC516A87780A39 /* NotificationBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBridge.swift; sourceTree = "<group>"; };
+		C1D6CC7622B0784243D14A0B /* PairTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairTransport.swift; sourceTree = "<group>"; };
+		C04235A5C379808FFF72EF0E /* PairVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairVault.swift; sourceTree = "<group>"; };
 		2EE763B01980A3EFF3A835F4 /* ProactiveAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveAPI.swift; sourceTree = "<group>"; };
 		107F1C925C1C8E8FBB2468A1 /* SessionVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionVault.swift; sourceTree = "<group>"; };
 		A4E376AD69F4D090ACCABB12 /* WorldBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldBridge.swift; sourceTree = "<group>"; };
@@ -178,6 +185,7 @@
 		4974B96C3AE398711306DF68 /* AgreementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgreementsView.swift; sourceTree = "<group>"; };
 		22C3064D0824E30AF163D763 /* MeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeView.swift; sourceTree = "<group>"; };
 		89CD98657573148BE9B7CD1F /* MemoryCenterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCenterView.swift; sourceTree = "<group>"; };
+		A5EAC6078BB2CCE755D0D7A5 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		9C5D32D51C403C809EA8AF45 /* FirstMeetingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstMeetingStep.swift; sourceTree = "<group>"; };
 		8FB709177BD2E00B2C99E1D2 /* NamingStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NamingStep.swift; sourceTree = "<group>"; };
 		EC93BA893235766AFF19A800 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
@@ -198,6 +206,7 @@
 		1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarySeedData.swift; sourceTree = "<group>"; };
 		7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryStorage.swift; sourceTree = "<group>"; };
 		3EE3B9C19706DC69E8BDD559 /* Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Location.swift; sourceTree = "<group>"; };
+		771C71367484363BC1D629B9 /* PairedHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedHost.swift; sourceTree = "<group>"; };
 		BFD6C089082D4459E387B08D /* Personality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Personality.swift; sourceTree = "<group>"; };
 		6C51D5F53E72B7F46C1287C6 /* World.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = World.swift; sourceTree = "<group>"; };
 		6CEF454089B66E87EB601A2A /* WorldCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldCamera.swift; sourceTree = "<group>"; };
@@ -213,6 +222,7 @@
 		6A8080184CDB4DDF4EEC6900 /* AppStore+Identity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Identity.swift"; sourceTree = "<group>"; };
 		DF23162CE2E934EEC0DF20ED /* AppStore+Inbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Inbox.swift"; sourceTree = "<group>"; };
 		6DF8D7FB399F69D4B310145F /* AppStore+Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Notifications.swift"; sourceTree = "<group>"; };
+		C174E98638A705C894ED11F0 /* AppStore+Pairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Pairing.swift"; sourceTree = "<group>"; };
 		9F5C49B85A0736C69551583D /* AppStore+Proactive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Proactive.swift"; sourceTree = "<group>"; };
 		3AE168EDA00C6AA78454DF35 /* AppStore+Remote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppStore+Remote.swift"; sourceTree = "<group>"; };
 		E4431CE254B1414B6FD463F2 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
@@ -315,6 +325,8 @@
 				3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */,
 				6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */,
 				BC5D291413CC516A87780A39 /* NotificationBridge.swift */,
+				C1D6CC7622B0784243D14A0B /* PairTransport.swift */,
+				C04235A5C379808FFF72EF0E /* PairVault.swift */,
 				2EE763B01980A3EFF3A835F4 /* ProactiveAPI.swift */,
 				107F1C925C1C8E8FBB2468A1 /* SessionVault.swift */,
 				A4E376AD69F4D090ACCABB12 /* WorldBridge.swift */,
@@ -388,6 +400,7 @@
 				4974B96C3AE398711306DF68 /* AgreementsView.swift */,
 				22C3064D0824E30AF163D763 /* MeView.swift */,
 				89CD98657573148BE9B7CD1F /* MemoryCenterView.swift */,
+				A5EAC6078BB2CCE755D0D7A5 /* PairingView.swift */,
 			);
 			path = Me;
 			sourceTree = "<group>";
@@ -450,6 +463,7 @@
 				1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */,
 				7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */,
 				3EE3B9C19706DC69E8BDD559 /* Location.swift */,
+				771C71367484363BC1D629B9 /* PairedHost.swift */,
 				BFD6C089082D4459E387B08D /* Personality.swift */,
 				6C51D5F53E72B7F46C1287C6 /* World.swift */,
 				6CEF454089B66E87EB601A2A /* WorldCamera.swift */,
@@ -542,6 +556,7 @@
 				6A8080184CDB4DDF4EEC6900 /* AppStore+Identity.swift */,
 				DF23162CE2E934EEC0DF20ED /* AppStore+Inbox.swift */,
 				6DF8D7FB399F69D4B310145F /* AppStore+Notifications.swift */,
+				C174E98638A705C894ED11F0 /* AppStore+Pairing.swift */,
 				9F5C49B85A0736C69551583D /* AppStore+Proactive.swift */,
 				3AE168EDA00C6AA78454DF35 /* AppStore+Remote.swift */,
 				E4431CE254B1414B6FD463F2 /* AppStore.swift */,
@@ -708,6 +723,8 @@
 				FCBF015959BBE821BF743BAE /* DiaryAPI.swift in Sources */,
 				0CFF041A8D7525086B412B91 /* IdentityAPI.swift in Sources */,
 				910C6A215EEBAEBF41B43E94 /* NotificationBridge.swift in Sources */,
+				24F98A26D234133338FB2621 /* PairTransport.swift in Sources */,
+				011F5D1B3472272F19F2995A /* PairVault.swift in Sources */,
 				460562B96EDC02245D9880A7 /* ProactiveAPI.swift in Sources */,
 				9C60C6516664295225EA1DEB /* SessionVault.swift in Sources */,
 				836AB51F3426A557216D2B62 /* WorldBridge.swift in Sources */,
@@ -739,6 +756,7 @@
 				8E97AD44C2B7A294C84299AE /* AgreementsView.swift in Sources */,
 				C5737F0502BB06B23D342C1D /* MeView.swift in Sources */,
 				7579A1FCEEE44AE9F1CCD68F /* MemoryCenterView.swift in Sources */,
+				E0495DDFC1BEF98231D755B0 /* PairingView.swift in Sources */,
 				D7368BB94A4304EB2D2D2C45 /* FirstMeetingStep.swift in Sources */,
 				53742DF009E1E98666E00845 /* NamingStep.swift in Sources */,
 				F964E02D3D84C3F3045221E6 /* OnboardingView.swift in Sources */,
@@ -759,6 +777,7 @@
 				8F4842ECE98776A65B802D83 /* DiarySeedData.swift in Sources */,
 				0C970822E3029D7A4CE50E73 /* DiaryStorage.swift in Sources */,
 				E805D6198DC960D223F80A31 /* Location.swift in Sources */,
+				DD105D060E51E3D5D088C26D /* PairedHost.swift in Sources */,
 				86DA7990BA314C37B712D5F6 /* Personality.swift in Sources */,
 				9D87892ED808F81148011D57 /* World.swift in Sources */,
 				41395686B4E2B32DCC3C5223 /* WorldCamera.swift in Sources */,
@@ -774,6 +793,7 @@
 				0D2E06C0C3970B8CCFF2B24A /* AppStore+Identity.swift in Sources */,
 				48A70789913609C8BF21FCD8 /* AppStore+Inbox.swift in Sources */,
 				837173CEF6C85A889655CF4F /* AppStore+Notifications.swift in Sources */,
+				17BF90DB6A5ACCD51A9400EF /* AppStore+Pairing.swift in Sources */,
 				1139537C90AA2BB75864BB96 /* AppStore+Proactive.swift in Sources */,
 				080F84D8505A06DCED47A77D /* AppStore+Remote.swift in Sources */,
 				B4CFD4E1DA318F731B977374 /* AppStore.swift in Sources */,

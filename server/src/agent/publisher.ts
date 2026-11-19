@@ -8,14 +8,27 @@ import { cats, proactiveRules, type RunJournal, boundaries, diaryEntries, messag
 import { lockMemory } from '../memory/control.ts';
 import { diaryCommentAllowed, overlapsBoundaries, followupDenial } from './gate.ts';
 
+const revisionFields = sql`c.persona_version, c.updated_at, c.memory_revision,
+      (select max(version) from soul_versions where cat_id = c.id) soul,
+      (select count(*) from soul_blocked_sources where cat_id = c.id) blocked,
+      (select max(created_at) from memory_blocks where cat_id = c.id) memory_deleted`;
+
+export async function turnGuardSnapshot(catId: string, turnId: string, reader: Tx | typeof db = db) {
+  const rows = await reader.execute(sql`select t.status, v.version,
+    (select string_agg(id::text, ',' order by id::text collate "C") from boundaries where cat_id = c.id) boundaries,
+    ${revisionFields} from turns t join conversations v on v.id = t.conversation_id
+    join cats c on c.id = ${catId} where t.id = ${turnId}`);
+  const row = rows[0];
+  if (!row) return undefined;
+  const { status, version, boundaries: stamp, ...revision } = row;
+  return { status, version: Number(version), boundaryStamp: stamp ?? '', revision: JSON.stringify([revision]) };
+}
+
 /** 保留聊天首字前可重读、发布后终止旧快照的原有检查顺序。 */
 export function turnPublicationChecks(catId: string, reader: Tx | typeof db = db) {
   const boundaryStamp = async () => (await reader.select({ id: boundaries.id }).from(boundaries).where(eq(boundaries.catId, catId)))
       .map((b) => b.id).sort().join(',');
-  const revision = async () => JSON.stringify(await reader.execute(sql`select c.persona_version, c.updated_at, c.memory_revision,
-      (select max(version) from soul_versions where cat_id = c.id) soul,
-      (select count(*) from soul_blocked_sources where cat_id = c.id) blocked,
-      (select max(created_at) from memory_blocks where cat_id = c.id) memory_deleted
+  const revision = async () => JSON.stringify(await reader.execute(sql`select ${revisionFields}
       from cats c where c.id = ${catId}`));
   const protection = async () => JSON.stringify(await reader.execute(sql`select c.persona_version, c.updated_at,
       c.learn_memories, c.use_memories, c.learn_after_seq,

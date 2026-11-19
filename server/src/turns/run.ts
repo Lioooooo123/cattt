@@ -1,5 +1,5 @@
 import { messageAllowed } from '../agent/gate.ts';
-import { turnPublicationChecks } from '../agent/publisher.ts';
+import { turnGuardSnapshot, turnPublicationChecks } from '../agent/publisher.ts';
 import { extractSource } from '../worker/memory.ts';
 import { memories, memoryReceipts, messages } from '../db/schema.ts';
 import { lockMemory, MemoryControlError } from '../memory/control.ts';
@@ -17,7 +17,7 @@ import { cancelRequestedActions } from '../world/service.ts';
 import { authorizeFirstToken, claimTurn, commitOutcome } from './store.ts';
 import {
   acquireConversationLock, type CancelReason, publish, readCancel, readVisibleLength,
-  refreshConversationLock, releaseConversationLock,
+  refreshConversationLock, releaseConversationLock, subscribeCancel,
 } from './events.ts';
 
 const running = new Set<Promise<void>>();
@@ -50,25 +50,34 @@ async function runTurn(turnId: string) {
   let text = '';
   let published = false;
   let acquired = false;
+  let unsubscribeCancel: (() => void) | undefined;
+  let lastLockRefresh = 0;
+  const cancelled = (reason: CancelReason | null) => {
+    if (!reason) return;
+    if (cancelReason !== 'supersede') cancelReason = reason;
+    abort.abort(new Error(cancelReason));
+  };
   const stop = (code: string) => { failureCode ??= code; abort.abort(new Error(code)); };
   try {
     await beat();
     acquired = await acquireConversationLock(conv.id, lockToken, 60_000, beat);
     if (!acquired) { await fail(turnId, 'busy', 'waited 60s for conversation lock'); return; }
+    lastLockRefresh = performance.now();
     if (!await claimTurn(turnId)) return;
     // 同一预算贯穿上下文、所有模型步骤与工具，不在每步重置。
     budget = setTimeout(() => stop('turn_timeout'), 45_000);
     heartbeat = setInterval(() => {
       void (async () => {
         if (!await refreshConversationLock(conv.id, lockToken)) { stop('lock_lost'); return; }
+        lastLockRefresh = performance.now();
         await beat();
       })().catch(() => stop('lock_lost'));
     }, 5_000);
+    unsubscribeCancel = await subscribeCancel(turnId, cancelled);
+    cancelled(await readCancel(turnId));
     cancelPoll = setInterval(() => {
-      void readCancel(turnId).then((reason) => {
-        if (reason) { cancelReason = reason; abort.abort(new Error(reason)); }
-      }).catch(() => stop('cancel_unavailable'));
-    }, 200);
+      void readCancel(turnId).then(cancelled).catch(() => stop('cancel_unavailable'));
+    }, 2_000);
 
     const checks = turnPublicationChecks(conv.catId);
     const { boundaryStamp, revision, protection } = checks;
@@ -76,16 +85,17 @@ async function runTurn(turnId: string) {
     let contextRevision: string | undefined;
     const guard = async () => {
       abort.signal.throwIfAborted();
-      cancelReason = await readCancel(turnId);
       if (cancelReason) { abort.abort(new Error(cancelReason)); abort.signal.throwIfAborted(); }
-      const [current] = await db.select({ status: turns.status, version: conversations.version }).from(turns)
-        .innerJoin(conversations, eq(conversations.id, turns.conversationId)).where(eq(turns.id, turnId));
+      const current = await turnGuardSnapshot(conv.catId, turnId);
       if (!current || current.status !== 'generating') { stop('stale'); abort.signal.throwIfAborted(); }
       if (!published && current!.version > turn.inputVersion) {
         cancelReason = 'supersede'; abort.abort(new Error('supersede')); abort.signal.throwIfAborted();
       }
-      if (!await checks.contextUnchanged(contextRevision, initialBoundaries)) { stop('context_changed'); abort.signal.throwIfAborted(); }
-      if (!await refreshConversationLock(conv.id, lockToken)) { stop('lock_lost'); abort.signal.throwIfAborted(); }
+      if ((contextRevision !== undefined && current!.revision !== contextRevision) || current!.boundaryStamp !== initialBoundaries) { stop('context_changed'); abort.signal.throwIfAborted(); }
+      if (performance.now() - lastLockRefresh > 2_000) {
+        if (!await refreshConversationLock(conv.id, lockToken)) { stop('lock_lost'); abort.signal.throwIfAborted(); }
+        lastLockRefresh = performance.now();
+      }
     };
     await guard();
     // 明确记住/更正在回复前保存；成功后才允许说“记下了”。普通闲聊继续异步整理。
@@ -188,6 +198,7 @@ async function runTurn(turnId: string) {
     }
   } finally {
     clearInterval(heartbeat); clearInterval(cancelPoll); clearTimeout(budget);
+    unsubscribeCancel?.();
     await cancelRequestedActions(turnId).catch(() => {});
     if (acquired) await releaseConversationLock(conv.id, lockToken).catch(() => {});
   }

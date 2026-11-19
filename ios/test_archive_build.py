@@ -65,6 +65,9 @@ class ArchiveBuildTests(unittest.TestCase):
         self.assertIs(info["ITSAppUsesNonExemptEncryption"], False)
         self.assertEqual(info["CFBundleVersion"], "$(CURRENT_PROJECT_VERSION)")
         self.assertEqual(info["CFBundleShortVersionString"], "$(MARKETING_VERSION)")
+        self.assertEqual(info["CFBundleURLTypes"][0]["CFBundleURLSchemes"], ["maomao"])
+        self.assertTrue(info["NSAppTransportSecurity"]["NSAllowsLocalNetworking"])
+        self.assertIn("局域网", info["NSLocalNetworkUsageDescription"])
 
 
 if __name__ == "__main__":

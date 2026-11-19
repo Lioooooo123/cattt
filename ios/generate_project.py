@@ -404,6 +404,9 @@ def main():
             "CFBundleShortVersionString": "$(MARKETING_VERSION)",
             "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
             "ITSAppUsesNonExemptEncryption": False,
+            "CFBundleURLTypes": [{"CFBundleURLName": "com.maomao.pair", "CFBundleURLSchemes": ["maomao"]}],
+            "NSLocalNetworkUsageDescription": "连接家里电脑上的团子，在同一个局域网里聊天和同步日记。",
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
         }, handle)
     os.makedirs(project_dir, exist_ok=True)
     with open(os.path.join(project_dir, "project.pbxproj"), "w") as handle:

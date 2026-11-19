@@ -64,7 +64,7 @@ extension APIClient {
             "revision": entry.cloudRevision ?? 0, "mutation_id": mutation,
         ])
         r.timeoutInterval = 12
-        let (data, response) = try await URLSession.shared.data(for: r)
+        let (data, response) = try await data(for: r)
         guard let http = response as? HTTPURLResponse else { throw APIError.badResponse }
         struct Envelope: Decodable { let entry: APIDiaryEntry?; let error: Failure?; struct Failure: Decodable { let code: String } }
         let envelope = try? Self.decode(Envelope.self, from: data)

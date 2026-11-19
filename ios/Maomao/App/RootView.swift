@@ -64,8 +64,21 @@ struct RootView: View {
             .ignoresSafeArea(.keyboard, edges: usesSystemKeyboardAvoidance ? [] : .bottom)
         }
         .environmentObject(store)
+        .overlay(alignment: .topTrailing) {
+            if store.onboarding != nil {
+                Button("连接电脑") { store.openPairing() }
+                    .padding().foregroundStyle(Palette.ink)
+            }
+        }
+        .onOpenURL { store.openPairing($0) }
+        .sheet(isPresented: $store.showsPairing) { PairingView().environmentObject(store) }
+        .onReceive(NotificationCenter.default.publisher(for: .pairedConnectionFailed)) { notification in
+            guard notification.object as? String == store.backend.storageIdentity else { return }
+            store.reprobePairedHost()
+        }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
+            store.reprobePairedHost(foreground: true)
             store.checkAppleCredential()
             store.registerNotificationDevice()
             store.resolveNotificationIntent()

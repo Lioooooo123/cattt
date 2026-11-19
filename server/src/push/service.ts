@@ -61,6 +61,7 @@ async function reservePushDay(tx:Tx,p:typeof pushNotifications.$inferSelect,catI
  await tx.update(pushNotifications).set({budgetDay:day}).where(eq(pushNotifications.id,p.id));return true;
 }
 export async function processPush(id:string,options:{now?:Date;clock?:()=>Date;transport?:PushTransport}={}):Promise<void|{retryAt:Date}>{
+ if(config.REMOTE_PUSH_ENABLED!=='true')return{retryAt:new Date(Date.now()+60000)};
  const send=options.transport??transport();if(!send)return{retryAt:new Date(Date.now()+60000)};
  const now=options.clock?.()??options.now??new Date((await db.execute<{instant:string}>(sql`select now() as instant`))[0]!.instant);
  const ready=await db.transaction(async tx=>{

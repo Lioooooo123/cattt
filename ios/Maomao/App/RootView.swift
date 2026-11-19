@@ -79,10 +79,9 @@ struct RootView: View {
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             store.reprobePairedHost(foreground: true)
-            store.checkAppleCredential()
-            store.registerNotificationDevice()
             store.resolveNotificationIntent()
             store.refreshInbox()
+            await store.refreshFollowupNotifications()
             while !Task.isCancelled {
                 store.syncDiary()
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }

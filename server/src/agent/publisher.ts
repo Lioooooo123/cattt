@@ -1,4 +1,5 @@
 import { enqueuePush } from '../push/service.ts';
+import { config } from '../config.ts';
 import { followupText } from './router.ts';
 import { availableAt, localISO } from './tickets.ts';
 import { refreshConversationLock } from '../turns/events.ts';
@@ -119,7 +120,7 @@ export async function publishFollowups(candidate: {
       await tx.update(tickets).set({status:'ended',stage:candidate.overdue?'letter':'asked',endedReason:'delivered',updatedAt:sql`now()`}).where(eq(tickets.id,t.id));
       await tx.insert(decisions).values({triggerId:candidate.triggerId,ticketId:t.id,outcome:'attach',reasons:[candidate.reason,candidate.overdue?'超过24小时只留信':'亲口约定到期']});
     }
-    if(chatMessage)await enqueuePush(tx,{catId:cat.id,ticketIds:valid.map(t=>t.id),reason:'followup_due',payload:{route:'chat',message_id:chatMessage.id},proof:{messageIds:valid.flatMap(t=>t.sourceMessageId?[t.sourceMessageId]:[]),diaries:[],usedMemories:false,content:text},now,purpose:'push:followup'});
+    if(chatMessage && config.REMOTE_PUSH_ENABLED==='true')await enqueuePush(tx,{catId:cat.id,ticketIds:valid.map(t=>t.id),reason:'followup_due',payload:{route:'chat',message_id:chatMessage.id},proof:{messageIds:valid.flatMap(t=>t.sourceMessageId?[t.sourceMessageId]:[]),diaries:[],usedMemories:false,content:text},now,purpose:'push:followup'});
     // PG收据即前台可重放的提示来源；本段没有外部副作用，无需额外投递。
     return 'sent';
   });
@@ -198,11 +199,11 @@ export async function publishErrand(candidate:{runId:string;attempt:number;callI
  await tx.insert(outbox).values({catId:cat.id,ticketId:t.id,purpose:purpose+':chat',kind:'chat_message',status:'sent'});
  if(a.status==='ready'){
  const [letter]=await tx.insert(mailboxLetters).values({catId:cat.id,ticketId:t.id,text:a.result!}).returning();
- await enqueuePush(tx,{catId:cat.id,ticketIds:[t.id],reason:'errand_ready',payload:{route:'mailbox',letter_id:letter!.id},proof:{messageIds:[...new Set([t.sourceMessageId!,...journal.dependencies.messages])],diaries:journal.dependencies.diaries,usedMemories:journal.dependencies.usedMemories,memoryRevision:journal.dependencies.memoryRevision,content:a.result!},now:candidate.now,purpose:'push:errand:ready'});
+ if(config.REMOTE_PUSH_ENABLED==='true')await enqueuePush(tx,{catId:cat.id,ticketIds:[t.id],reason:'errand_ready',payload:{route:'mailbox',letter_id:letter!.id},proof:{messageIds:[...new Set([t.sourceMessageId!,...journal.dependencies.messages])],diaries:journal.dependencies.diaries,usedMemories:journal.dependencies.usedMemories,memoryRevision:journal.dependencies.memoryRevision,content:a.result!},now:candidate.now,purpose:'push:errand:ready'});
  await tx.insert(outbox).values({catId:cat.id,ticketId:t.id,purpose:'errand:ready:letter',kind:'mailbox_letter',status:'sent'});
  }
  if(a.status==='waiting'){
- await enqueuePush(tx,{catId:cat.id,ticketIds:[t.id],reason:'errand_waiting',payload:{route:'chat',message_id:chatMessage!.id},proof:{messageIds:[...new Set([t.sourceMessageId!,...journal.dependencies.messages])],diaries:journal.dependencies.diaries,usedMemories:journal.dependencies.usedMemories,memoryRevision:journal.dependencies.memoryRevision,content:a.question!,callId:a.callId,runId:r.id},now:candidate.now,purpose:'push:errand:waiting:'+a.callId+runScope});
+ if(config.REMOTE_PUSH_ENABLED==='true')await enqueuePush(tx,{catId:cat.id,ticketIds:[t.id],reason:'errand_waiting',payload:{route:'chat',message_id:chatMessage!.id},proof:{messageIds:[...new Set([t.sourceMessageId!,...journal.dependencies.messages])],diaries:journal.dependencies.diaries,usedMemories:journal.dependencies.usedMemories,memoryRevision:journal.dependencies.memoryRevision,content:a.question!,callId:a.callId,runId:r.id},now:candidate.now,purpose:'push:errand:waiting:'+a.callId+runScope});
  await tx.update(tickets).set({stage:'waiting',updatedAt:candidate.now}).where(eq(tickets.id,t.id));
  await tx.update(runs).set({status:'pending',leaseUntil:null,stepStartedAt:null}).where(eq(runs.id,r.id));
  }else await finish(a.status,'delivered');

@@ -8,13 +8,12 @@ struct BackendConfig: Equatable {
     enum Mode: String, CaseIterable {
         case mock
         case local
-        case service
         case paired
     }
 
     var mode: Mode
     var baseURL: URL
-    /// 开发者 token，`pnpm create-dev-user` 生成。开发者版才有，以后换 Apple 登录。
+    /// 配对设备凭证（`mm_dvc_…`），或 DEBUG 下 `pnpm create-dev-user` 生成的开发者 token。
     var token: String
 
     var accountID: String? = nil
@@ -22,44 +21,29 @@ struct BackendConfig: Equatable {
     var isRemote: Bool { mode != .mock }
     var storageIdentity: String {
         if let pairedHost, mode == .paired { return pairedHost.storageIdentity }
-        if mode == .service { return baseURL.absoluteString + "\naccount:" + (accountID ?? "signed-out") }
         return isRemote ? baseURL.absoluteString + "\n" + token : "local-only"
     }
-    static var serviceURL: URL? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: "CatttAPIURL") as? String,
-              let url = URL(string: raw), url.scheme == "https", url.host != nil else { return nil }
-        return url
-    }
-
     static let localURL = URL(string: "http://localhost:8787")!
 
     static func load() -> BackendConfig {
         if let paired = PairVault.load() {
             return BackendConfig(mode: .paired, baseURL: paired.url(host: paired.hosts[0]), token: paired.deviceToken, accountID: paired.accountID, pairedHost: paired)
         }
-        let defaults = UserDefaults.standard
         #if DEBUG
+        let defaults = UserDefaults.standard
         let mode = Mode(rawValue: defaults.string(forKey: "backendMode") ?? "") ?? .mock
-        if mode != .service && mode != .paired {
+        if mode == .local {
             return BackendConfig(mode: mode, baseURL: defaults.string(forKey: "backendURL").flatMap(URL.init(string:)) ?? localURL,
                                  token: defaults.string(forKey: "backendToken") ?? "")
         }
         #endif
-        #if DEBUG
-        let remembered = defaults.string(forKey: "serviceOrigin").flatMap(URL.init(string:))
-        let url = serviceURL ?? remembered ?? URL(string: "https://unconfigured.invalid")!
-        #else
-        let url = serviceURL ?? URL(string: "https://unconfigured.invalid")!
-        #endif
-        let session = SessionVault.load(origin: url.absoluteString)
-        return BackendConfig(mode: .service, baseURL: url, token: session.flatMap { $0.expiresAt > Date() ? $0.token : nil } ?? "", accountID: session?.accountID)
+        return BackendConfig(mode: .mock, baseURL: localURL, token: "")
     }
 
     func save() {
         #if DEBUG
         let defaults = UserDefaults.standard
         defaults.set(mode.rawValue, forKey: "backendMode")
-        if mode == .service { defaults.set(baseURL.absoluteString, forKey: "serviceOrigin") }
         if CredentialPersistencePolicy.maySaveDeveloperToken(mode: mode.rawValue, accountID: accountID) {
             defaults.set(baseURL.absoluteString, forKey: "backendURL")
             defaults.set(token, forKey: "backendToken")

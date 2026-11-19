@@ -93,9 +93,7 @@ extension AppStore {
         watchdogTask?.cancel()
         isWaiting = false
         isStreaming = false
-        if backend.mode == .service, mode != .service {
-            backend = BackendConfig(mode: mode, baseURL: BackendConfig.localURL, token: "")
-        } else { backend.mode = mode }
+        backend.mode = mode
         if mode == .mock {
             worldBridge?.stop(); worldBridge = nil
             messages = SeedData.messages
@@ -111,7 +109,7 @@ extension AppStore {
     func connectBackend() {
         allowProactive = false; proactiveBusy = false; proactiveError = nil
         inboxTask?.cancel(); inboxTask = nil; inboxRefreshPending = false
-        mailboxLetters = []; inboxError = nil
+        inboxError = nil
         showsMemoryControls = false
         withdrawnSource = nil
         chatTask?.cancel()
@@ -126,8 +124,7 @@ extension AppStore {
         worldBridge?.stop(); worldBridge = nil
         guard backend.isRemote else { return }
         guard !backend.token.isEmpty else {
-            if backend.mode == .service { messages = []; memoryCount = 0; boundaryCount = 0 }
-            backendStatus = backend.mode == .service ? "登录后再一起聊" : "还没填 token"
+            backendStatus = "还没填 token"
             return
         }
         if !timeZoneReportedBackends.contains(client.config) {
@@ -142,7 +139,7 @@ extension AppStore {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                if client.config.mode == .service || client.config.mode == .paired {
+                if client.config.mode == .paired {
                     let account = try await client.account()
                     guard backend == client.config else { return }
                     applyServerProfile(account.cat)
@@ -158,7 +155,6 @@ extension AppStore {
                 refreshInbox()
                 guard historyGeneration == generation, backend == client.config else { return }
                 backendStatus = "已连接 · \(history.count) 条记录"
-                registerNotificationDevice()
                 resolveNotificationIntent()
             } catch {
                 guard historyGeneration == generation, backend == client.config else { return }
@@ -466,8 +462,8 @@ extension AppStore {
 
     /// 创建流程走完：名字、外观、气质、四条特征写到服务端。
     func remoteUpdateCat() {
-        // 正式身份档案以服务器为准；登录不能把演示/创建草稿自动覆盖上去。
-        guard backend.mode != .service && backend.mode != .paired else { return }
+        // 配对后档案以电脑为准；不能把演示/创建草稿自动覆盖上去。
+        guard backend.mode != .paired else { return }
         let traits = Dictionary(uniqueKeysWithValues: traitLevels.map { ($0.key.rawValue, $0.value) })
         let (name, appearance, temperament) = (catName, pickedAppearance, temperament.rawValue)
         let client = api

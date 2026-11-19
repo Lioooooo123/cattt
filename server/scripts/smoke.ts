@@ -337,19 +337,19 @@ await check('每日猫日记三日补齐、HTTP保护、inbox提示，不写聊�
   expect(calls!.n>=3,'未实际经过写作者模型槽位');
 });
 
-await check('正式会话HTTP账号/日记读取与退出；设备注册/注销和账号隔离', async()=>{
- const token=randomUUID();await sql`insert into sessions(user_id,token_hash,expires_at) values(${devUser.userId},${hashToken(token)},now()+interval '1 hour')`;
+await check('配对设备凭证HTTP账号/日记读取与解除配对；推送设备注册/注销和账号隔离', async()=>{
+ const token='mm_dvc_'+randomUUID();await sql`insert into paired_devices(user_id,name,token_hash) values(${devUser.userId},'烟测手机',${hashToken(token)})`;
  const sessionHeaders={authorization:'Bearer '+token,'content-type':'application/json'};
- const me=await fetch(BASE+'/v1/me',{headers:sessionHeaders}).then(r=>r.json()) as any;expect(me.account_id===devUser.userId,'会话账号不稳定');
- expect((await fetch(BASE+'/v1/diary',{headers:sessionHeaders})).status===200,'正式会话不能恢复日记');
+ const me=await fetch(BASE+'/v1/me',{headers:sessionHeaders}).then(r=>r.json()) as any;expect(me.account_id===devUser.userId,'配对账号不稳定');
+ expect((await fetch(BASE+'/v1/diary',{headers:sessionHeaders})).status===200,'配对设备不能恢复日记');
  if(config.APNS_TOPIC){
  const registered=await fetch(BASE+'/v1/devices',{method:'POST',headers:sessionHeaders,body:JSON.stringify({token:'a'.repeat(64),environment:'sandbox',topic:config.APNS_TOPIC})});expect(registered.status===200,'设备登记失败');const device=await registered.json() as any;
  expect((await fetch(BASE+'/v1/devices/'+device.id,{method:'DELETE',headers:sessionHeaders})).status===200,'设备注销失败');
  }
  expect((await fetch(BASE+'/v1/devices',{method:'POST',headers:sessionHeaders,body:JSON.stringify({token:'a'.repeat(64),environment:'sandbox',topic:'wrong.topic'})})).status===400,'topic未隔离');
  expect((await fetch(BASE+'/v1/notifications/'+randomUUID(),{headers:sessionHeaders})).status===404,'不存在的通知制造了目标');
- expect((await fetch(BASE+'/v1/session/logout',{method:'POST',headers:sessionHeaders})).status===200,'退出失败');
- expect((await fetch(BASE+'/v1/me',{headers:sessionHeaders})).status===401,'退出没有撤销会话');
+ expect((await fetch(BASE+'/v1/device/unpair',{method:'POST',headers:sessionHeaders})).status===200,'解除配对失败');
+ expect((await fetch(BASE+'/v1/me',{headers:sessionHeaders})).status===401,'解除配对没有撤销凭证');
 });
 
 // 第六段：真实HTTP新聊天→PG待办/pg-boss→observe聚合；始终不切真实auto规则。

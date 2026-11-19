@@ -1,13 +1,5 @@
 import Foundation
 
-struct AccountSession: Codable, Equatable {
-    let accountID: String
-    let token: String
-    let appleUserID: String
-    let expiresAt: Date
-    func storageIdentity(origin: String) -> String { origin + "\naccount:" + accountID }
-}
-
 struct NotificationIntent: Codable, Equatable {
     let accountID: String
     let notificationID: String

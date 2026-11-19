@@ -26,6 +26,16 @@ describe('硬件推荐', () => {
 });
 
 describe('配置文件', () => {
+  it('更新本机模型时原样保留所有槽位来源与模型覆盖', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'cattt-model-'));
+    const path = join(dir, 'env');
+    const overrides = 'CHAT_PROVIDER=deepseek\nexport ROUTER_PROVIDER=deepseek # 云端\nWORKER_PROVIDER=deepseek\nEXTRACT_PROVIDER=openai-compatible\nEXTRACT_MODEL=custom-local\n';
+    try {
+      await writeFile(path, `MODEL_PROVIDER=openai-compatible\nOPENAI_COMPAT_MODEL=old\n${overrides}`);
+      await updateModelEnv(path, 'qwen2.5:3b');
+      expect(await readFile(path, 'utf8')).toBe(`MODEL_PROVIDER=openai-compatible\nOPENAI_COMPAT_MODEL=qwen2.5:3b\n${overrides}`);
+    } finally { await rm(dir, { recursive: true }); }
+  });
   it('保留注释、其他配置，替换所有旧键并收紧权限', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'cattt-model-'));
     const path = join(dir, 'env');

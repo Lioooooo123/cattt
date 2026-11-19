@@ -24,6 +24,34 @@ open ios/Maomao.xcodeproj
 
 陪伴世界最近一次在 iPhone 17 Pro / iOS 26.5 Simulator 构建并运行验证是 2026-09-12（逐帧 v5 树窝与走路换向），记录原文（原文 2026-09-27 从当前版本删除，原件在 git 历史）；更早的 v4/v3/v2 记录同样已删。尚未完成 iOS 17 真机验收。
 
+## Release 与 TestFlight 归档准备
+
+先在仓库根目录运行 `pnpm --dir web install --frozen-lockfile`。Xcode 的「Build YardWeb」阶段在复制资源前执行 `pnpm --dir web build:ios`，不需要提交生成的 `Maomao/Resources/YardWeb`。生成器在该目录不存在时也保留资源引用。脚本补充 Homebrew、Volta、pnpm 常用路径，并在没有 pnpm 时尝试 Corepack；缺少工具会明确报错。Node.js 需 22.12+、pnpm 需 11。脚本需要读写网页工程，因此关闭用户脚本沙箱。
+
+版本默认 `0.1` / `1`，每次上传用命令行覆盖，不必改工程；Info.plist 从 `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)` 展开：
+
+```sh
+xcodebuild -project ios/Maomao.xcodeproj -scheme Maomao \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath "$HOME/Maomao.xcarchive" \
+  CURRENT_PROJECT_VERSION=42 MARKETING_VERSION=0.1 archive
+```
+
+命令仍需操作者已有的签名配置；本次不修改 bundle ID、Team 或签名，也不登录 Apple 账号、不上传。无签名模拟器验证：
+
+```sh
+xcodebuild -project ios/Maomao.xcodeproj -scheme Maomao \
+  -configuration Release -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
+  CURRENT_PROJECT_VERSION=7 build CODE_SIGNING_ALLOWED=NO
+```
+
+开发时可加 `SKIP_YARD_WEB_BUILD=1` 复用已有网页；如果 `YardWeb/app.html` 不存在则报错。正式上传不要跳过，以免带入旧网页。
+
+`generate_project.py` 同时生成工程与 `Maomao/Info.plist`，后者声明 `ITSAppUsesNonExemptEncryption=false`。隐私清单作为应用资源复制：UserDefaults 用于本机设置和恢复（CA92.1）；`WorldEngine`、`WorldBridge` 等使用 `systemUptime` 计算时间间隔（35F9.1）。检索未发现文件时间戳、磁盘余量、键盘列表等其它必需理由 API。
+
+数据声明按现有远端路径覆盖：Apple 登录账号标识（`IdentityAPI`）、推送设备 token，以及聊天、日记、记忆和猫资料（`Backend` / `DiaryAPI`）用于 App 功能，关联账号且不用于跟踪。天气使用大致位置向 Open-Meteo 即时取天气，客户端不保存坐标；不将仅即时处理的位置声明为持久收集。无广告或分析 SDK。发布者仍需按实际服务端保留策略和第三方服务条款核对 App Store 隐私问卷；清单不代替该审核。
+
 ### 文件列表变了怎么办
 
 `Maomao.xcodeproj/project.pbxproj` 是脚本生成的。平时在 Xcode 里增删文件正常操作即可；

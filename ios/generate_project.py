@@ -13,8 +13,8 @@ byte-identical file and diffs stay readable.
 
 import hashlib
 import os
-import re
 import plistlib
+import re
 
 PROJECT = "Maomao"
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -58,10 +58,12 @@ def collect():
                 resources.append(os.path.join(rel_dir, name))
             if name.endswith(".m4a") and rel_dir.startswith("Resources/Audio"):
                 resources.append(os.path.join(rel_dir, name))
-            if name.endswith(".storyboard"):
+            if name.endswith((".storyboard", ".xcprivacy")):
                 resources.append(os.path.join(rel_dir, name) if rel_dir else name)
             if name.endswith((".swift", ".metal")):
                 swift.append(os.path.join(rel_dir, name) if rel_dir else name)
+    if "Resources/YardWeb" not in resources:
+        resources.append("Resources/YardWeb")
     return sorted(swift), sorted(resources)
 
 
@@ -128,7 +130,7 @@ def main():
     for path in resource_files:
         name = os.path.basename(path)
         out('\t\t%s /* %s */ = {isa = PBXFileReference; lastKnownFileType = %s; '
-            'path = %s; sourceTree = "<group>"; };' % (oid("file:" + path), name, "folder.assetcatalog" if path.endswith(".xcassets") else "file.storyboard" if path.endswith(".storyboard") else "folder" if name == "YardWeb" else "audio.m4a" if path.endswith(".m4a") else "image.png", pbx_str(name)))
+            'path = %s; sourceTree = "<group>"; };' % (oid("file:" + path), name, "folder.assetcatalog" if path.endswith(".xcassets") else "text.xml" if path.endswith(".xcprivacy") else "file.storyboard" if path.endswith(".storyboard") else "folder" if name == "YardWeb" else "audio.m4a" if path.endswith(".m4a") else "image.png", pbx_str(name)))
     out("/* End PBXFileReference section */")
 
     # ---- PBXFrameworksBuildPhase
@@ -197,6 +199,7 @@ def main():
     out("\t\t\tbuildPhases = (")
     out("\t\t\t\t%s /* Sources */," % oid("sources"))
     out("\t\t\t\t%s /* Frameworks */," % oid("frameworks"))
+    out("\t\t\t\t%s /* Build YardWeb */," % oid("yardWeb"))
     out("\t\t\t\t%s /* Resources */," % oid("resources"))
     out("\t\t\t);")
     out("\t\t\tbuildRules = (")
@@ -257,6 +260,20 @@ def main():
     out("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
     out("\t\t};")
     out("/* End PBXResourcesBuildPhase section */")
+
+    out("")
+    out("/* Begin PBXShellScriptBuildPhase section */")
+    out("\t\t%s /* Build YardWeb */ = {" % oid("yardWeb"))
+    out("\t\t\tisa = PBXShellScriptBuildPhase;")
+    out("\t\t\talwaysOutOfDate = 1;")
+    out("\t\t\tbuildActionMask = 2147483647;")
+    out('\t\t\tname = "Build YardWeb";')
+    out('\t\t\toutputPaths = ("$(SRCROOT)/Maomao/Resources/YardWeb",);')
+    out("\t\t\trunOnlyForDeploymentPostprocessing = 0;")
+    out("\t\t\tshellPath = /bin/sh;")
+    out('\t\t\tshellScript = "sh \\"$SRCROOT/build_yard_web.sh\\"";')
+    out("\t\t};")
+    out("/* End PBXShellScriptBuildPhase section */")
 
     # ---- PBXSourcesBuildPhase
     out("")
@@ -319,6 +336,7 @@ def main():
         ("INFOPLIST_KEY_CatttAPIURL", '"$(CATTT_API_URL)"'),
         ("CURRENT_PROJECT_VERSION", "1"),
         ("ENABLE_PREVIEWS", "YES"),
+        ("ENABLE_USER_SCRIPT_SANDBOXING", "NO"),
         ("GENERATE_INFOPLIST_FILE", "YES"),
         ("INFOPLIST_FILE", "Maomao/Info.plist"),
         ("INFOPLIST_KEY_UIApplicationSceneManifest_Generation", "YES"),
@@ -381,6 +399,15 @@ def main():
     out("}")
 
     project_dir = os.path.join(ROOT, PROJECT + ".xcodeproj")
+    with open(os.path.join(ROOT, SOURCE_DIR, "Info.plist"), "wb") as handle:
+        plistlib.dump({
+            "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+            "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
+            "ITSAppUsesNonExemptEncryption": False,
+            "CFBundleURLTypes": [{"CFBundleURLName": "com.maomao.pair", "CFBundleURLSchemes": ["maomao"]}],
+            "NSLocalNetworkUsageDescription": "连接家里电脑上的团子，在同一个局域网里聊天和同步日记。",
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+        }, handle)
     os.makedirs(project_dir, exist_ok=True)
     with open(os.path.join(project_dir, "project.pbxproj"), "w") as handle:
         handle.write("\n".join(lines) + "\n")
@@ -390,10 +417,4 @@ def main():
 
 
 if __name__ == "__main__":
-    with open(os.path.join(ROOT, SOURCE_DIR, "Info.plist"), "wb") as info:
-        plistlib.dump({
-            "CFBundleURLTypes": [{"CFBundleURLName": "com.maomao.pair", "CFBundleURLSchemes": ["maomao"]}],
-            "NSLocalNetworkUsageDescription": "连接家里电脑上的团子，在同一个局域网里聊天和同步日记。",
-            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
-        }, info)
     main()

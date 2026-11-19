@@ -106,12 +106,11 @@ export function modelConfigProblems(c: ModelConfig & Pick<typeof config, 'MAOMAO
   return problems;
 }
 
-/** api 和 worker 启动时调；建账号之类的脚本用不到模型，不检查 */
+/** 模型配置不阻断 API、配对和后台服务启动；有问题只提示，模型调用时再报未配置 */
 export function assertModelConfig() {
   const problems = modelConfigProblems();
   if (problems.length) {
-    console.error([...problems, '还没有模型就先用 MODEL_PROVIDER=mock。'].join('\n'));
-    process.exit(1);
+    console.warn(['模型：未配置。', ...problems, '模型调用暂不可用，其他服务继续运行。'].join('\n'));
   }
 }
 
@@ -121,9 +120,9 @@ export function describeModelConfig(): string {
   if (config.MODEL_PROVIDER === 'mock') model = 'mock';
   else {
     const where = (p: ModelSource) => p === 'deepseek'
-      ? `deepseek（key …${config.MAOMAO_DEEPSEEK_API_KEY?.slice(-4)}）`
+      ? (config.MAOMAO_DEEPSEEK_API_KEY ? `deepseek（key …${config.MAOMAO_DEEPSEEK_API_KEY.slice(-4)}）` : 'deepseek（key 未配置）')
       : `${config.OPENAI_COMPAT_BASE_URL}`;
-    model = slotNames.map(name => { const s = slotSpec(name); return `${name}=${s.model}@${where(s.provider as ModelSource)}`; }).join('，');
+    model = slotNames.map(name => { const s = slotSpec(name); return `${name}=${s.model ?? '未配置'}@${where(s.provider as ModelSource)}`; }).join('，');
   }
   const shadow =
     shadowedEnvKeys.length > 0 ? `\n  注意：环境变量盖掉了 .env 里的 ${shadowedEnvKeys.join('、')}` : '';

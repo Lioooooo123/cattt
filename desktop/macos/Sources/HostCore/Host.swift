@@ -92,6 +92,33 @@ public final class Host {
         environment["MODEL_PROVIDER"] = "deepseek"; environment["MAOMAO_DEEPSEEK_API_KEY"] = key
         stopServices(); try startServices()
     }
+    public func modelSetupEnvironment() throws -> [String: String] {
+        guard ready else { throw HostError("请先解决宿主启动错误") }
+        let values = try Self.parseEnv(String(contentsOf: path("env")))
+        let reserved = ["DATABASE_URL", "PGPASSWORD", "CATTT_DATA_DIR", "HOST", "PORT", "LAN_HTTPS_HOST", "LAN_HTTPS_PORT", "NODE_ENV"]
+        return environment.filter { key, _ in
+            !key.hasPrefix("MODEL_") && !key.hasPrefix("OPENAI_COMPAT_") && !key.hasPrefix("MAOMAO_") && !["CHAT", "WORKER", "ROUTER", "EXTRACT"].contains(key.components(separatedBy: "_").first ?? "")
+        }.merging(values.filter { !reserved.contains($0.key) }) { _, new in new }
+    }
+    public func reloadModelConfiguration() throws {
+        environment = try modelSetupEnvironment()
+        stopServices(); try startServices(); pollHealth()
+    }
+    public static func needsLocalModelSetup(_ env: [String: String]) -> Bool {
+        (env["MODEL_PROVIDER"] ?? "openai-compatible") == "openai-compatible" && (env["OPENAI_COMPAT_MODEL"] ?? "").isEmpty && (env["CHAT_MODEL"] ?? "").isEmpty && (env["MAOMAO_DEEPSEEK_API_KEY"] ?? "").isEmpty
+    }
+    public var recommendsLocalModelSetup: Bool {
+        (environment["MAOMAO_DEEPSEEK_API_KEY"] ?? "").isEmpty && (Self.needsLocalModelSetup(environment) || status["模型"]?.contains("未配置") == true || status["模型"]?.contains("服务未启动") == true)
+    }
+    public static func claimModelSetupPrompt(in data: URL, environment: [String: String]) throws -> Bool {
+        guard needsLocalModelSetup(environment) else { return false }
+        let url = data.appendingPathComponent("host-state.json")
+        var state = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        guard state["modelSetupPrompted"] != "true" else { return false }
+        state["modelSetupPrompted"] = "true"
+        try JSONEncoder().encode(state).write(to: url, options: .atomic)
+        return true
+    }
     public static func requireAvailablePort(_ port: UInt16) throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { throw HostError("无法检查端口 \(port)") }
@@ -182,7 +209,8 @@ public final class Host {
             if probe.terminationStatus == 0 { _ = try backup(preUpgrade: true) }
         }
         try run(resources.appendingPathComponent("node/bin/node"), [resources.appendingPathComponent("server/migrate.mjs").path])
-        try JSONSerialization.data(withJSONObject: ["lastVersion": version]).write(to: path("host-state.json"), options: .atomic)
+        var state = previous ?? [:]; state["lastVersion"] = version
+        try JSONSerialization.data(withJSONObject: state).write(to: path("host-state.json"), options: .atomic)
         ready = true
         try startServices()
         log("宿主已启动 \(version)")

@@ -11,6 +11,11 @@ final class HostModel: ObservableObject {
     @Published var notice = ""
     @Published var busy = true
     @Published var loginEnabled = false
+    @Published var setupRunning = false
+    @Published var showLocalModelSetup = false
+    @Published var localModelRecommended = false
+    private var setupRunner: ModelSetupRunner?
+    private let setupGroup = DispatchGroup()
     private let queue = DispatchQueue(label: "app.cattt.host.supervisor", qos: .utility)
     private var timer: DispatchSourceTimer?
     private var started = false
@@ -32,7 +37,12 @@ final class HostModel: ObservableObject {
             UserDefaults.standard.set(true, forKey: "attemptedLoginRegistration"); setLogin(true)
         }
         queue.async {
-            do { try host.start(); self.publish() }
+            do {
+                try host.start(); self.publish()
+                if let env = try? host.modelSetupEnvironment(), (try? Host.claimModelSetupPrompt(in: host.data, environment: env)) == true {
+                    DispatchQueue.main.async { self.showLocalModelSetup = true }
+                }
+            }
             catch { host.shutdown(); self.publish(error: String(describing: error)) }
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now(), repeating: 1)
@@ -46,8 +56,10 @@ final class HostModel: ObservableObject {
     }
     private func publish(error: String? = nil, notice: String? = nil) {
         let snapshot = host.status
+        let recommended = host.recommendsLocalModelSetup
         DispatchQueue.main.async {
             self.status = snapshot; self.busy = false
+            self.localModelRecommended = recommended
             if let error { self.error = error }
             if let notice { self.notice = notice }
         }
@@ -60,6 +72,45 @@ final class HostModel: ObservableObject {
         }
     }
     func saveKey(_ key: String) { perform { try host.configureDeepSeek(key); return "模型配置已保存，服务正在启动" } }
+    func checkOllama(_ completion: @escaping (Bool) -> Void) {
+        queue.async {
+            guard let env = try? host.modelSetupEnvironment(), let request = ModelSetupRunner.ollamaRequest(env) else {
+                DispatchQueue.main.async { completion(false) }; return
+            }
+            URLSession.shared.dataTask(with: request) { _, response, _ in
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                DispatchQueue.main.async { completion((200..<300).contains(code)) }
+            }.resume()
+        }
+    }
+    func runModelSetup(consent: Bool, model: String? = nil, onEvent: @escaping (ModelSetupEvent) -> Void, completion: @escaping (Result<ModelSetupOutcome, Error>) -> Void) {
+        guard !setupRunning, !busy else { completion(.failure(HostError("宿主正在处理其他操作，请稍后重试"))); return }
+        let runner = ModelSetupRunner(resources: host.resources, data: host.data)
+        setupRunner = runner; setupRunning = true; setupGroup.enter()
+        func finish(_ result: Result<ModelSetupOutcome, Error>) {
+            self.setupGroup.leave()
+            DispatchQueue.main.async { self.setupRunner = nil; self.setupRunning = false; completion(result) }
+        }
+        queue.async {
+            do {
+                let environment = try host.modelSetupEnvironment()
+                DispatchQueue.global(qos: .utility).async {
+                    do {
+                        let result = try runner.run(environment: environment, consent: consent, model: model) { event in
+                            DispatchQueue.main.async { onEvent(event) }
+                        }
+                        self.queue.async {
+                            do {
+                                if result == .saved { try host.reloadModelConfiguration(); self.publish() }
+                                finish(.success(result))
+                            } catch { finish(.failure(error)) }
+                        }
+                    } catch { finish(.failure(error)) }
+                }
+            } catch { finish(.failure(error)) }
+        }
+    }
+    func cancelModelSetup() { setupRunner?.cancel() }
     func backup() { perform { let url = try host.backup(); return "备份完成：\(url.lastPathComponent)" } }
     func restorePicker() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
@@ -86,7 +137,8 @@ final class HostModel: ObservableObject {
     func quit() { NSApp.terminate(nil) }
     func prepareTermination() {
         guard !quitting else { return }; quitting = true
-        queue.async {
+        cancelModelSetup()
+        setupGroup.notify(queue: queue) {
             self.timer?.cancel(); host.shutdown()
             DispatchQueue.main.async { NSApp.reply(toApplicationShouldTerminate: true) }
         }

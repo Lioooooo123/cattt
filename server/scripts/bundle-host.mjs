@@ -6,7 +6,7 @@ const { build } = require(require.resolve('esbuild', { paths: [require.resolve('
 const outdir = resolve(process.argv[2] ?? 'dist-host');
 await mkdir(outdir, { recursive: true });
 await build({
-  entryPoints: ['src/api.ts', 'src/worker.ts', 'src/migrate.ts'],
+  entryPoints: { api: 'src/api.ts', worker: 'src/worker.ts', migrate: 'src/migrate.ts', 'model-setup': 'scripts/model-setup.ts' },
   outdir, bundle: true, platform: 'node', target: 'node22', format: 'esm',
   outExtension: { '.js': '.mjs' },
   banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },

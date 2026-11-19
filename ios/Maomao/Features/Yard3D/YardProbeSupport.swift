@@ -42,10 +42,32 @@ struct YardProbeIdentity {
 struct YardVisualGate {
     private(set) var pageID = ""
     private(set) var isVisible = true
+    private(set) var failure: String?
+    private var recoverableFailure = false
+    private var commandedActive: Bool?
+
+    func allowsCommands(ready: Bool) -> Bool { ready && !isVisible }
+
+    func allowsLifecycle(ready: Bool, active: Bool) -> Bool {
+        ready && (!isVisible || (active && commandedActive == false))
+    }
+
+    func needsWatchdogFailure(active: Bool) -> Bool { active && isVisible }
+
+    mutating func sentActive(_ active: Bool) { commandedActive = active }
+
+    mutating func fail(_ reason: String, recoverable: Bool) {
+        if failure != nil && !recoverableFailure { return }
+        failure = reason
+        recoverableFailure = recoverable
+    }
 
     mutating func begin(pageID: String) {
         self.pageID = pageID
         isVisible = true
+        failure = nil
+        recoverableFailure = false
+        commandedActive = nil
     }
 
     mutating func cover(pageID: String) {
@@ -57,6 +79,7 @@ struct YardVisualGate {
     mutating func reveal(pageID: String) -> Bool {
         guard pageID == self.pageID else { return false }
         isVisible = false
+        if recoverableFailure { failure = nil; recoverableFailure = false }
         return true
     }
 }

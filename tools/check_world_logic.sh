@@ -14,3 +14,10 @@ for t in ios/Tests/*.swift; do
   "$d/$name" assets/scenes/courtyard-v4/scene.json
   echo "  ok  $name"
 done
+
+for t in ios/BridgeTests/Yard*Tests.swift; do
+  name=$(basename "$t" .swift)
+  swiftc ios/Maomao/Features/Yard3D/YardProbeSupport.swift "$t" -o "$d/$name"
+  "$d/$name"
+  echo "  ok  $name"
+done

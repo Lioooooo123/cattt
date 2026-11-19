@@ -47,6 +47,8 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
     private var stopped = true
     private var restoring = false
     private var visualGate = YardVisualGate()
+    var canSendCommands: Bool { !stopped && visualGate.allowsCommands(ready: ready) }
+    func needsWatchdogFailure(active: Bool) -> Bool { !stopped && visualGate.needsWatchdogFailure(active: active) }
     private let proxy = YardMessageProxy()
     private static var coverDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("YardCovers", isDirectory: true)
@@ -154,7 +156,8 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
         lifecycleRevision += 1
         let revision = lifecycleRevision
         let page = identity.pageID
-        guard ready, !stopped else { return }
+        guard !stopped, visualGate.allowsLifecycle(ready: ready, active: value) else { return }
+        visualGate.sentActive(value)
         do { try await send(["type": "active", "on": value]) }
         catch {
             guard !stopped, page == identity.pageID, revision == lifecycleRevision else { return }
@@ -166,7 +169,8 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
     }
 
     func markUnavailable(_ reason: String, detail: String = "") {
-        failure = reason
+        visualGate.fail(reason, recoverable: true)
+        failure = visualGate.failure
         // 原生超时也进入同一条证据链，不能只留下屏幕上的提示。
         emit("unavailable", ["message": reason, "detail": detail, "ready": ready, "surfaceReady": surfaceReady, "loading": webView.isLoading])
     }
@@ -191,12 +195,17 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
               identity.accepts(object) else { return }
         if let state = object["snapshot"] as? [String: Any] { snapshot = state }
         let type = object["type"] as? String
-        if type == "error" { failure = object["message"] as? String }
+        if type == "error", let reason = object["message"] as? String {
+            visualGate.fail(reason, recoverable: false)
+            failure = visualGate.failure
+        }
         if type == "contextLost" {
             visualGate.cover(pageID: identity.pageID)
             surfaceReady = false
         } else if type == "visualReady", visualGate.reveal(pageID: identity.pageID) {
             surfaceReady = true
+            failure = visualGate.failure
+            if !active { Task { await setActive(active) } }
         }
         messages.send(object)
         if type == "ready" {
@@ -205,6 +214,7 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
             Task { [weak self] in
                 guard let self, !stopped, expected == identity.pageID else { return }
                 var command: [String: Any] = ["type": "initialize", "active": active]
+                visualGate.sentActive(active)
                 command["configuration"] = ["viewport", "controls", "previewMotion", "facts"].compactMap { homeConfiguration[$0] }
                 if restoring, let snapshot { command["snapshot"] = snapshot }
                 if let homeIntent { command["intent"] = homeIntent }
@@ -230,7 +240,8 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { navigationFailed(error) }
     private func navigationFailed(_ error: Error) {
         guard !stopped, (error as NSError).code != NSURLErrorCancelled else { return }
-        failure = error.localizedDescription
+        visualGate.fail(error.localizedDescription, recoverable: false)
+        failure = visualGate.failure
         emit("error", ["message": error.localizedDescription])
     }
 

@@ -22,7 +22,7 @@
 | iOS 客户端 | Swift、SwiftUI、WKWebView，最低 iOS 17 |
 | macOS 电脑端宿主 | SwiftPM、SwiftUI MenuBarExtra，最低 macOS 14，Apple Silicon |
 | 3D 世界与展示页 | TypeScript、Three.js、Vite |
-| 服务端 | Node.js、TypeScript、Hono、AI SDK |
+| 服务端 | Node.js、TypeScript、Hono、自研模型客户端与 Agent 循环 |
 | 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
 | 实时消息 | SSE、PostgreSQL LISTEN/NOTIFY |
 | 模型与资源 | 本机 OpenAI 兼容模型（Ollama 等）/ 自带 key 的 DeepSeek / mock、Blender 3D 资源 |

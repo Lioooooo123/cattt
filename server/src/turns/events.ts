@@ -5,7 +5,7 @@ import { turns } from '../db/schema.ts';
 import { subscribe } from './subscriber.ts';
 
 /**
- * 发给 iOS 的 SSE 事件。格式是我们自己定的，不用 AI SDK 的流协议，
+ * 发给 iOS 的 SSE 事件。格式是我们自己定的，与模型来源的流协议分离，
  * 这样 SDK 升级不会牵连 iOS 发版。见 docs/方案/后端-开发者版-方案-2026-09-11.md 第 7 节。
  */
 export type TurnEvent =

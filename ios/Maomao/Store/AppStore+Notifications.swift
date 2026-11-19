@@ -8,29 +8,31 @@ extension AppStore {
         guard backend.isRemote, !backend.token.isEmpty else { return }
         let client = api
         Task { @MainActor in
-            guard let tickets = try? await client.tickets(includeEndedFollowups: true), backend == client.config,
-                  AgreementNotificationGate.accepted(sourceID: sourceMessageID, savedSources: tickets.filter { $0.kind == "followup" && $0.stage != "cancelled" && $0.stage != "dropped" }.compactMap(\.sourceMessageId)) else { return }
+            guard let tickets = try? await client.tickets(includeEndedFollowups: true), backend == client.config else { return }
+            await reconcileFollowupNotifications(tickets, config: client.config)
+            guard AgreementNotificationGate.accepted(sourceID: sourceMessageID, savedSources: tickets.filter { $0.kind == "followup" && $0.mandateKind == "explicit" && $0.stage != "cancelled" && $0.stage != "dropped" }.compactMap(\.sourceMessageId)) else { return }
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined { _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge]) }
-            let current = await center.notificationSettings()
-            if current.authorizationStatus == .authorized || current.authorizationStatus == .provisional { UIApplication.shared.registerForRemoteNotifications() }
+            await reconcileFollowupNotifications(tickets, config: client.config)
         }
     }
-    func registerNotificationDevice() {
+    func reconcileFollowupNotifications(_ tickets: [APITicket], config: BackendConfig) async {
+        await FollowupNotifications.reconcile(tickets) { self.backend == config }
+    }
+
+    func refreshFollowupNotifications() async {
         guard backend.isRemote, !backend.token.isEmpty else { return }
         let client = api
-        Task { @MainActor in
-            let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-            if status == .authorized || status == .provisional {
-                if let token = NotificationBridge.token {
-                    let id = try? await client.registerDevice(token: token)
-                    if backend == client.config { registeredNotificationDeviceID = id }
-                } else { UIApplication.shared.registerForRemoteNotifications() }
-            }
-        }
+        guard let tickets = try? await client.tickets(includeEndedFollowups: true), backend == client.config else { return }
+        await reconcileFollowupNotifications(tickets, config: client.config)
     }
     func resolveNotificationIntent() {
+        if NotificationBridge.pendingLocal {
+            NotificationBridge.pendingLocal = false
+            screen = .chat
+            refreshInbox()
+        }
         guard let intent = NotificationBridge.pending,
               intent.canResolve(accountID: backend.accountID, connected: backend.isRemote && !backend.token.isEmpty), !resolvingNotification else { return }
         resolvingNotification = true

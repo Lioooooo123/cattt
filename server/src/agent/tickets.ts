@@ -9,6 +9,7 @@ export const ticketView = (t: typeof tickets.$inferSelect) => ({
   id: t.id,
   source_message_id:t.sourceMessageId,
   kind: t.kind,
+  mandate_kind: t.mandate.kind,
   goal: t.goal,
   status: t.status,
   stage: t.stage,

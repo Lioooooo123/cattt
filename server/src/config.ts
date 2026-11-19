@@ -26,6 +26,7 @@ const source = z.enum(modelSources);
 const schema = z
   .object({
     APP_ENV: z.enum(['development','staging','production']).default('development'),
+    REMOTE_PUSH_ENABLED: z.enum(['true','false']).default('false'),
     APNS_TEAM_ID: z.string().optional(), APNS_KEY_ID: z.string().optional(),
     APNS_PRIVATE_KEY_FILE: z.string().optional(), APNS_TOPIC: z.string().optional(),
     MODEL_DAILY_CALL_LIMIT: z.coerce.number().int().positive().default(120),

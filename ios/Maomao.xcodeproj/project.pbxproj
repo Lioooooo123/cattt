@@ -12,6 +12,7 @@
 		8C110EF04255CC160596AE74 /* AgreementAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */; };
 		A7F5C89CB20A407D76A9BD70 /* Backend.swift in Sources */ = {isa = PBXBuildFile; fileRef = C908A7DB0E92D34F9C84C967 /* Backend.swift */; };
 		FCBF015959BBE821BF743BAE /* DiaryAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */; };
+		1F5C5750F2E12DC4BDEBE36D /* FollowupNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236FBBA23EDD12B2FA36044B /* FollowupNotifications.swift */; };
 		0CFF041A8D7525086B412B91 /* IdentityAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */; };
 		910C6A215EEBAEBF41B43E94 /* NotificationBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5D291413CC516A87780A39 /* NotificationBridge.swift */; };
 		24F98A26D234133338FB2621 /* PairTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D6CC7622B0784243D14A0B /* PairTransport.swift */; };
@@ -66,6 +67,7 @@
 		3BBF4C1400C85E217CDBED47 /* DiaryEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C11FD7C1474944EA6B337AB /* DiaryEntry.swift */; };
 		8F4842ECE98776A65B802D83 /* DiarySeedData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */; };
 		0C970822E3029D7A4CE50E73 /* DiaryStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */; };
+		A975822146F80307B5EBDFC1 /* FollowupNotificationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68CEF4608A38D604317DE08 /* FollowupNotificationPlan.swift */; };
 		E805D6198DC960D223F80A31 /* Location.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EE3B9C19706DC69E8BDD559 /* Location.swift */; };
 		DD105D060E51E3D5D088C26D /* PairedHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 771C71367484363BC1D629B9 /* PairedHost.swift */; };
 		86DA7990BA314C37B712D5F6 /* Personality.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD6C089082D4459E387B08D /* Personality.swift */; };
@@ -149,6 +151,7 @@
 		7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgreementAPI.swift; sourceTree = "<group>"; };
 		C908A7DB0E92D34F9C84C967 /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
 		3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryAPI.swift; sourceTree = "<group>"; };
+		236FBBA23EDD12B2FA36044B /* FollowupNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowupNotifications.swift; sourceTree = "<group>"; };
 		6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityAPI.swift; sourceTree = "<group>"; };
 		BC5D291413CC516A87780A39 /* NotificationBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationBridge.swift; sourceTree = "<group>"; };
 		C1D6CC7622B0784243D14A0B /* PairTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairTransport.swift; sourceTree = "<group>"; };
@@ -203,6 +206,7 @@
 		6C11FD7C1474944EA6B337AB /* DiaryEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryEntry.swift; sourceTree = "<group>"; };
 		1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarySeedData.swift; sourceTree = "<group>"; };
 		7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiaryStorage.swift; sourceTree = "<group>"; };
+		C68CEF4608A38D604317DE08 /* FollowupNotificationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowupNotificationPlan.swift; sourceTree = "<group>"; };
 		3EE3B9C19706DC69E8BDD559 /* Location.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Location.swift; sourceTree = "<group>"; };
 		771C71367484363BC1D629B9 /* PairedHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairedHost.swift; sourceTree = "<group>"; };
 		BFD6C089082D4459E387B08D /* Personality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Personality.swift; sourceTree = "<group>"; };
@@ -321,6 +325,7 @@
 				7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */,
 				C908A7DB0E92D34F9C84C967 /* Backend.swift */,
 				3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */,
+				236FBBA23EDD12B2FA36044B /* FollowupNotifications.swift */,
 				6C16EEFEC4AD5ED490EA8FF2 /* IdentityAPI.swift */,
 				BC5D291413CC516A87780A39 /* NotificationBridge.swift */,
 				C1D6CC7622B0784243D14A0B /* PairTransport.swift */,
@@ -459,6 +464,7 @@
 				6C11FD7C1474944EA6B337AB /* DiaryEntry.swift */,
 				1E3A560FAEA0E4B3E361DA49 /* DiarySeedData.swift */,
 				7FE6945587F0E974A5A8DE7F /* DiaryStorage.swift */,
+				C68CEF4608A38D604317DE08 /* FollowupNotificationPlan.swift */,
 				3EE3B9C19706DC69E8BDD559 /* Location.swift */,
 				771C71367484363BC1D629B9 /* PairedHost.swift */,
 				BFD6C089082D4459E387B08D /* Personality.swift */,
@@ -718,6 +724,7 @@
 				8C110EF04255CC160596AE74 /* AgreementAPI.swift in Sources */,
 				A7F5C89CB20A407D76A9BD70 /* Backend.swift in Sources */,
 				FCBF015959BBE821BF743BAE /* DiaryAPI.swift in Sources */,
+				1F5C5750F2E12DC4BDEBE36D /* FollowupNotifications.swift in Sources */,
 				0CFF041A8D7525086B412B91 /* IdentityAPI.swift in Sources */,
 				910C6A215EEBAEBF41B43E94 /* NotificationBridge.swift in Sources */,
 				24F98A26D234133338FB2621 /* PairTransport.swift in Sources */,
@@ -772,6 +779,7 @@
 				3BBF4C1400C85E217CDBED47 /* DiaryEntry.swift in Sources */,
 				8F4842ECE98776A65B802D83 /* DiarySeedData.swift in Sources */,
 				0C970822E3029D7A4CE50E73 /* DiaryStorage.swift in Sources */,
+				A975822146F80307B5EBDFC1 /* FollowupNotificationPlan.swift in Sources */,
 				E805D6198DC960D223F80A31 /* Location.swift in Sources */,
 				DD105D060E51E3D5D088C26D /* PairedHost.swift in Sources */,
 				86DA7990BA314C37B712D5F6 /* Personality.swift in Sources */,

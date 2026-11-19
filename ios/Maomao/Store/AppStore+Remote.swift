@@ -109,7 +109,7 @@ extension AppStore {
     func connectBackend() {
         allowProactive = false; proactiveBusy = false; proactiveError = nil
         inboxTask?.cancel(); inboxTask = nil; inboxRefreshPending = false
-        mailboxLetters = []; inboxError = nil
+        inboxError = nil
         showsMemoryControls = false
         withdrawnSource = nil
         chatTask?.cancel()
@@ -155,7 +155,6 @@ extension AppStore {
                 refreshInbox()
                 guard historyGeneration == generation, backend == client.config else { return }
                 backendStatus = "已连接 · \(history.count) 条记录"
-                registerNotificationDevice()
                 resolveNotificationIntent()
             } catch {
                 guard historyGeneration == generation, backend == client.config else { return }

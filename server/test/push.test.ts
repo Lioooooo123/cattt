@@ -14,9 +14,19 @@ import { runs,mailboxLetters } from '../src/db/schema.ts';
 import { config } from '../src/config.ts';
 import { closeQueues } from '../src/queue.ts';
 const now=new Date('2026-11-12T12:00:00Z');let userId:string,catId:string,convId:string,sourceId:string;const ids:string[]=[];
-beforeEach(async()=>{const [u]=await db.insert(users).values({timeZone:'UTC'}).returning();userId=u!.id;ids.push(userId);const[c]=await db.insert(cats).values({userId,name:'团子',appearance:'orange',temperament:'slow',traits:{energy:1,initiative:1,directness:1,closeness:1}}).returning();catId=c!.id;const[v]=await db.insert(conversations).values({catId}).returning();convId=v!.id;const[m]=await db.insert(messages).values({conversationId:convId,role:'user',text:'问我面试怎么样'}).returning();sourceId=m!.id;});
+beforeEach(async()=>{config.REMOTE_PUSH_ENABLED='true';const [u]=await db.insert(users).values({timeZone:'UTC'}).returning();userId=u!.id;ids.push(userId);const[c]=await db.insert(cats).values({userId,name:'团子',appearance:'orange',temperament:'slow',traits:{energy:1,initiative:1,directness:1,closeness:1}}).returning();catId=c!.id;const[v]=await db.insert(conversations).values({catId}).returning();convId=v!.id;const[m]=await db.insert(messages).values({conversationId:convId,role:'user',text:'问我面试怎么样'}).returning();sourceId=m!.id;});
 afterAll(async()=>{for(const id of ids){await sql`delete from async_jobs where source_id in(select id from push_notifications where cat_id in(select id from cats where user_id=${id})) or source_id in(select id from triggers where cat_id in(select id from cats where user_id=${id})) or object_id in(select r.id from runs r join tickets t on t.id=r.ticket_id join cats c on c.id=t.cat_id where c.user_id=${id})`;await db.delete(users).where(eq(users.id,id));}await closeQueues();await sql.end();});
 const register=(token='a'.repeat(64),uid=userId)=>registerDevice(uid,{token,environment:'sandbox',topic:'local.test.cat'},'local.test.cat');
+it('关闭远程推送仍发布聊天与信箱，不创建推送待办',async()=>{
+ config.REMOTE_PUSH_ENABLED='false';await register();
+ const jobs=await db.select().from(asyncJobs).where(eq(asyncJobs.kind,'push'));
+ await due();
+ expect(await pushes()).toHaveLength(0);
+ expect(await db.select().from(messages).where(and(eq(messages.conversationId,convId),eq(messages.role,'cat')))).toHaveLength(1);
+ expect(await db.select().from(mailboxLetters).where(eq(mailboxLetters.catId,catId))).toHaveLength(1);
+ expect(await db.select().from(outbox).where(and(eq(outbox.catId,catId),eq(outbox.kind,'push')))).toHaveLength(0);
+ expect(await db.select().from(asyncJobs).where(eq(asyncJobs.kind,'push'))).toEqual(jobs);
+});
 const pushes=async()=>(await db.select({p:pushNotifications}).from(pushNotifications).innerJoin(outbox,eq(outbox.id,pushNotifications.outboxId)).where(eq(pushNotifications.catId,catId)).orderBy(asc(outbox.seq))).map(r=>r.p);
 async function due(goal='面试怎么样'){const t=await scheduleFollowup(catId,sourceId,'2026-11-12T11:59:00Z',goal,new Date('2026-11-11'));await scanFollowups(now,catId);for(const e of await db.select().from(triggers).where(and(eq(triggers.catId,catId),eq(triggers.source,'clock'))))await processFollowup(e.id,{now});return t;}
 it('合并约定只产生一条推送；多设备一次用户预算；稳定apns-id，重复投递不重发',async()=>{

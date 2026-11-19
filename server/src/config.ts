@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { z } from 'zod';
+import { fileURLToPath } from 'node:url';
 
 // 本机开发从 server/.env 读；已经在环境里的变量优先（部署时靠环境变量，测试时靠它临时切 mock）。
 // 环境里的值和 .env 不一样时记下来，启动时提醒，免得被 shell 里的全局变量悄悄盖掉。
@@ -32,6 +33,10 @@ const schema = z
     DATABASE_URL: z.string().default('postgres://maomao:maomao@localhost:5432/maomao'),
     REDIS_URL: z.string().default('redis://localhost:6379'),
     PORT: z.coerce.number().int().default(8787),
+    HOST: z.string().default('127.0.0.1'),
+    LAN_HTTPS_HOST: z.string().default('0.0.0.0'),
+    LAN_HTTPS_PORT: z.coerce.number().int().min(0).max(65535).default(8788),
+    CATTT_DATA_DIR: z.string().default(fileURLToPath(new URL('../.local', import.meta.url))),
     MODEL_PROVIDER: z.enum(['deepseek', 'mock']).default('deepseek'),
     /** 带项目前缀，免得被 shell 里全局的 DEEPSEEK_API_KEY 盖掉 */
     MAOMAO_DEEPSEEK_API_KEY: z.string().optional(),

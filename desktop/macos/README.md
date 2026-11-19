@@ -24,6 +24,10 @@ bash desktop/macos/scripts/smoke-host.sh
 
 菜单显示默认来源的地址与聊天模型名；现有后台健康轮询会请求 `<base>/models`（2 秒超时，带可选 Bearer key），连接失败显示“本地服务未启动”，HTTP 错误显示状态码。可达不代表模型已下载或推理成功；缺模型名时明确显示“未配置模型名”。`MODEL_PROVIDER=deepseek` 时按 `MAOMAO_DEEPSEEK_API_KEY` 是否存在显示配置状态，菜单填写 DeepSeek key 会同时设置该 provider；`MODEL_PROVIDER=mock` 显示“测试模式”。这些状态不阻止服务启动。烟测使用全新数据目录、不设置模型 provider 或密钥，验证服务进程和健康接口。
 
+“设置本地模型…”会先检测硬件，显示 Qwen2.5 推荐标签与下载量，再由用户点击“下载并测试”明确同意。首次没有本地模型名和 DeepSeek key 时自动打开一次（`host-state.json` 的 `modelSetupPrompted`，升级保留）；缺配置或本地服务未启动时菜单标为推荐入口。Ollama 必须自行从 https://ollama.com/download 安装并启动，窗口可重新检测；宿主不会安装或捆绑 Ollama。
+
+打包包含 `Resources/server/model-setup.mjs`，由随附 Node 运行 `--json --env-file <data>/env`，确认下载后才加 `--yes --model <推荐标签>`。子进程继承当前数据目录配置和密钥，PATH 包含 `/usr/sbin:/sbin` 以识别 Apple Silicon。窗口显示下载进度及中文回复／工具调用烟测结果；仅收到“配置已保存”才重载配置并重启 API/worker，退出码 0 本身不代表切换成功。设置只修改全局 provider 和共用模型名，原有槽位级覆盖仍优先。取消或关闭运行中的设置窗口会终止子进程并恢复原 env（已下载的数据可由 Ollama 缓存），不会自动换模型；失败可改用 DeepSeek。下载独立于宿主监督队列，退出应用会先取消设置再停服务。
+
 默认数据在 `~/Library/Application Support/Cattt`，可以 `--data-dir` 或 `CATTT_DATA_DIR` 覆盖。`env` 是权限 0600 的 `KEY=VALUE` 文件（支持整行注释及引号，不执行 shell）；修改后重启宿主，或用菜单切换到 DeepSeek。测试可用 `MODEL_PROVIDER=mock`。
 
 ```sh

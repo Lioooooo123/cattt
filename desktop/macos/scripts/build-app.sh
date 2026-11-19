@@ -23,6 +23,7 @@ for binary in postgres initdb pg_dump pg_restore pg_isready psql; do
   otool -L "$APP/Contents/Resources/postgres/bin/$binary"
 done
 pnpm --dir "$ROOT/server" exec node scripts/bundle-host.mjs "$APP/Contents/Resources/server"
+test -f "$APP/Contents/Resources/server/model-setup.mjs"
 swift build --package-path "$PKG" -c release
 cp "$PKG/.build/release/CatttHost" "$APP/Contents/MacOS/CatttHost"
 /usr/libexec/PlistBuddy -c 'Clear dict' "$APP/Contents/Info.plist" 2>/dev/null || true

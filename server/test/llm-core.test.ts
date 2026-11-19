@@ -84,6 +84,41 @@ describe('流式模型客户端', () => {
       expect(f.bodies[0]!.messages[0].content).toContain('Return JSON that conforms to the following schema:');
     } else expect(f.bodies[0]!.response_format).toMatchObject({ type: 'json_schema', json_schema: { strict: true, name: 'response', schema: { type: 'object' } } });
   });
+  it('结构化输出按 draft-07 输入语义保留默认字段可选，解析时再补默认值', async () => {
+    const f = fixture(false, [chunk({ content: '{"memories":[{"value":"不喝咖啡"}]}' }, 'stop')]);
+    const schema = z.object({ clarification: z.string().default(''), memories: z.array(z.object({
+      value: z.string(), explicit: z.boolean().default(false),
+    })) });
+    const result = await generateObject(f.client, request, schema);
+    expect(result.object).toEqual({ clarification: '', memories: [{ value: '不喝咖啡', explicit: false }] });
+    expect(f.bodies[0]!.response_format).toEqual({ type: 'json_schema', json_schema: {
+      name: 'response', strict: true, schema: {
+        $schema: 'http://json-schema.org/draft-07/schema#', type: 'object', additionalProperties: false,
+        properties: { clarification: { type: 'string', default: '' }, memories: { type: 'array', items: {
+          type: 'object', additionalProperties: false, properties: {
+            value: { type: 'string' }, explicit: { type: 'boolean', default: false },
+          }, required: ['value'],
+        } } }, required: ['memories'],
+      },
+    } });
+  });
+  it('工具 schema 保留字典约束和嵌套默认值，JSON Schema 输入不改写', async () => {
+    const f = fixture();
+    const raw = { type: 'object', properties: {}, additionalProperties: true };
+    await generateText(f.client, { ...request, tools: [
+      { name: 'lookup', inputSchema: z.object({ options: z.object({ count: z.number().default(1) }), labels: z.record(z.string(), z.string()) }) },
+      { name: 'empty', inputSchema: z.object({}) },
+      { name: 'passthrough', inputSchema: z.object({}).passthrough() },
+      { name: 'raw', inputSchema: raw },
+    ] });
+    const parameters = f.bodies[0]!.tools.map((tool: any) => tool.function.parameters);
+    expect(parameters[0].properties.options.required ?? []).not.toContain('count');
+    expect(parameters[0].properties.options.additionalProperties).toBe(false);
+    expect(parameters[0].properties.labels.additionalProperties).toEqual({ type: 'string' });
+    expect(parameters[1].additionalProperties).toBe(false);
+    expect(parameters[2].additionalProperties).toEqual({});
+    expect(parameters[3]).toEqual(raw);
+  });
   it.each(['bad', '{"answer":1}', ''])('JSON 或 schema 错误不重试 %s', async text => {
     const f = fixture(false, [chunk({ content: text }, 'stop')]);
     await expect(generateObject(f.client, request, z.object({ answer: z.string() }))).rejects.toBeInstanceOf(ModelOutputError);

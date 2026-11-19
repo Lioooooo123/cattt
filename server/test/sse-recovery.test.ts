@@ -5,8 +5,7 @@ import { app } from '../src/api/app.ts';
 import { db, sql } from '../src/db/client.ts';
 import { createDevUser } from '../src/dev-user.ts';
 import { cats, conversations, messages, turns, users } from '../src/db/schema.ts';
-import { redis } from '../src/redis.ts';
-import { publish } from '../src/turns/events.ts';
+import { publish, tail } from '../src/turns/events.ts';
 const ids: string[] = []; const turnIds: string[] = [];
 async function fixture() {
   const user = await createDevUser('sse-test'); ids.push(user.userId);
@@ -20,35 +19,39 @@ async function fixture() {
 }
 afterAll(async () => {
   for (const id of ids) await db.delete(users).where(eq(users.id, id));
-  for (const id of turnIds) await redis.del(`turn:${id}:events`);
-  await sql.end(); redis.disconnect();
+  for (const id of turnIds) await sql`delete from turn_events where turn_id=${id}`;
+  await sql.end();
 });
 describe('HTTP SSE 恢复契约', () => {
   it('空读后才发布的最后 delta 必须先于补发 done', async () => {
     const { turn, headers } = await fixture();
     await db.update(turns).set({ status: 'generating' }).where(eq(turns.id, turn.id));
     await publish(turn.id, { event: 'accepted', data: { turn_id: turn.id, user_message_id: turn.userMessageId } });
-    const duplicate = redis.duplicate.bind(redis);
-    const hook = vi.spyOn(redis, 'duplicate').mockImplementation((...args) => {
-      const conn = duplicate(...args);
-      const read = conn.xread.bind(conn);
-      let injected = false;
-      vi.spyOn(conn, 'xread').mockImplementation(async (...args: Parameters<typeof read>) => {
-        const result = await read(...args);
-        if (!result && !injected) {
-          injected = true;
-          await publish(turn.id, { event: 'delta', data: { text: '完整回复' } });
-          await db.update(turns).set({ status: 'completed' }).where(eq(turns.id, turn.id));
-        }
+    const stream = tail(turn.id, '0', new AbortController().signal);
+    expect((await stream.next()).value).toMatchObject({ event: 'accepted' });
+    // 空读之后、终态查询之前插入最后一段。
+    const hook = vi.spyOn(db, 'select').mockImplementationOnce((...args: Parameters<typeof db.select>) => {
+      const query = db.select(...args);
+      const from = query.from.bind(query);
+      vi.spyOn(query, 'from').mockImplementationOnce((...tables: Parameters<typeof from>) => {
+        const result = from(...tables);
+        const where = result.where.bind(result);
+        vi.spyOn(result, 'where').mockImplementationOnce(((...filters: Parameters<typeof where>) => {
+          return (async () => {
+            await publish(turn.id, { event: 'delta', data: { text: '完整回复' } });
+            await db.update(turns).set({ status: 'completed' }).where(eq(turns.id, turn.id));
+            return await where(...filters);
+          })();
+        }) as typeof result.where);
         return result;
       });
-      return conn;
+      return query;
     });
     try {
-      const body = await (await app.request(`/v1/turns/${turn.id}/stream`, { headers })).text();
-      expect(body.match(/完整回复/g)).toHaveLength(1);
-      expect(body.indexOf('event: delta')).toBeLessThan(body.indexOf('event: done'));
-    } finally { hook.mockRestore(); }
+      expect((await stream.next()).value).toMatchObject({ event: 'delta', data: { text: '完整回复' } });
+      expect((await stream.next()).value).toMatchObject({ event: 'done' });
+      expect((await stream.next()).done).toBe(true);
+    } finally { hook.mockRestore(); await stream.return('aborted'); }
   });
   it('保留正文的流缺少 done 时，从 PG 补终态而不重复全文', async () => {
     const { turn, headers } = await fixture();

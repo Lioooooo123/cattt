@@ -387,6 +387,6 @@ await check('主动许可默认关闭；HTTP聊天异步observe只记聚合，�
 console.log(failed === 0 ? '\n全部通过' : `\n${failed} 项没通过`);
 await sql`delete from async_jobs where object_id in (select r.id from runs r join tickets t on t.id=r.ticket_id join cats c on c.id=t.cat_id where c.user_id=${devUser.userId}) or source_id in (select t.id from triggers t join cats c on c.id=t.cat_id where c.user_id=${devUser.userId})`;
 await deleteUser(devUser.userId);
-const {redis}=await import('../src/redis.ts');await redis.quit();
+
 await sql.end();
 process.exit(failed === 0 ? 0 : 1);

@@ -16,7 +16,6 @@ import { catTools } from '../src/runtime/tools.ts';
 import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 const now=new Date('2026-11-12T04:00:00Z');
 let catId:string,convId:string,sourceId:string,userId:string,token:string;
 const ids:string[]=[];
@@ -28,7 +27,7 @@ beforeEach(async()=>{
 });
 afterAll(async()=>{
  for(const id of ids){await sql`delete from async_jobs where object_id in(select r.id from runs r join tickets t on t.id=r.ticket_id join cats c on c.id=t.cat_id where c.user_id=${id})`;await db.delete(users).where(eq(users.id,id));}
- await closeQueues();await redis.quit();await sql.end();
+ await closeQueues();await sql.end();
 });
 const create=(goal='想想周末怎么过',at=now)=>startErrand(catId,sourceId,goal,at);
 const runFor=async(id:string)=>(await db.select().from(runs).where(eq(runs.ticketId,id)))[0]!;

@@ -23,7 +23,6 @@ import { executeJob } from '../src/jobs/store.ts';
 import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { catTools } from '../src/runtime/tools.ts';
 const now = new Date('2026-11-12T04:00:00Z');
 let owner: { userId: string; catId: string; conversationId: string }, sourceId: string, token: string;
@@ -59,7 +58,7 @@ afterAll(async () => {
     await db.delete(users).where(eq(users.id, id));
   }
   await closeQueues();
-  await redis.quit();
+
   await sql.end();
 });
 it('500 个已经投递但仍开放的约定不会挡住下一件', async () => {

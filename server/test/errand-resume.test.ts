@@ -16,7 +16,6 @@ import { app } from '../src/api/app.ts';
 import { hashToken } from '../src/auth-token.ts';
 import { registerDevice, processPush } from '../src/push/service.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 
 const day = new Date().toISOString().slice(0, 10);
 const now = new Date(day + 'T12:00:00Z');
@@ -36,7 +35,7 @@ afterAll(async () => {
     await sql`delete from async_jobs where object_id in(select r.id from runs r join tickets t on t.id=r.ticket_id join cats c on c.id=t.cat_id where c.user_id=${id}) or object_id in(select w.id from worker_reports w join cats c on c.id=w.cat_id where c.user_id=${id}) or source_id in(select p.id from push_notifications p join cats c on c.id=p.cat_id where c.user_id=${id})`;
     await db.delete(users).where(eq(users.id, id));
   }
-  await closeQueues(); await redis.quit(); await sql.end();
+  await closeQueues();  await sql.end();
 });
 async function message(text: string) {
   const [m] = await db.insert(messages).values({ conversationId, role: 'user', text }).returning(); return m!.id;

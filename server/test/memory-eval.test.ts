@@ -10,7 +10,6 @@ import * as expansion from '../src/memory/query.ts';
 import { scheduleFollowup } from '../src/agent/tickets.ts';
 import { processFollowup, scanFollowups } from '../src/agent/followup.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 
 const expand = vi.spyOn(expansion, 'expandRecallQuery');
 const owners: string[] = [];
@@ -68,7 +67,7 @@ afterAll(async () => {
     await sql`delete from async_jobs where source_id in (select t.id from triggers t join cats c on c.id=t.cat_id where c.user_id=${id})`;
     await db.delete(users).where(eq(users.id, id));
   }
-  await closeQueues(); await redis.quit(); await sql.end();
+  await closeQueues(); await sql.end();
 });
 
 it('纵向记忆评测：召回准确率不低于基线且没有越权或不当打扰', async () => {

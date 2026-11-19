@@ -7,7 +7,6 @@ import { createSendTurn, loadOwner } from '../src/turns/create.ts';
 import { drainTurns } from '../src/turns/run.ts';
 import { changeSettings, lockMemory, settings, withdrawSources } from '../src/memory/control.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { config } from '../src/config.ts';
 config.MODEL_PROVIDER = 'mock'; config.MOCK_DELAY_MS = 1;
 const ids: string[] = [];
@@ -17,7 +16,7 @@ async function owner() {
   await db.insert(conversations).values({ catId: c!.id });
   return (await loadOwner(u!.id))!;
 }
-afterAll(async () => { await drainTurns(5000); for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues(); await redis.quit(); await sql.end(); });
+afterAll(async () => { await drainTurns(5000); for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
 it('真正经过回复执行器：明确记住先保存，回复引用有来源记录', async () => {
   const o = await owner();
   const sent = await createSendTurn(o, randomUUID(), '记住，我不喝咖啡。');

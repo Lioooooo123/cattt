@@ -7,7 +7,6 @@ import { memories, messages, turns } from '../src/db/schema.ts';
 import { createDevUser } from '../src/dev-user.ts';
 import { createSendTurn, loadOwner } from '../src/turns/create.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { changeSettings, settings } from '../src/memory/control.ts';
 if (!process.env.DATABASE_URL?.includes('maomao_memory_review_')) throw new Error('只允许隔离验收库');
 const account = await createDevUser('真实模型合成验收');
@@ -36,4 +35,4 @@ try {
   await changeSettings(owner.catId, { learn: false, revision: (await settings(owner.catId)).revision });
   await send('记住，我喜欢周末去图书馆。');
   await writeFile('/tmp/maomao-memory-model-results.json', JSON.stringify(results, null, 2));
-} finally { await closeQueues(); await redis.quit(); await sql.end(); }
+} finally { await closeQueues();  await sql.end(); }

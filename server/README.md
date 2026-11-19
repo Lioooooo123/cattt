@@ -7,9 +7,25 @@
 宿主从 `CATTT_DATA_DIR/host-admin.token` 读取管理口令，以 Bearer 调用回环 `/host/pairing-codes`、`/host/devices`、`/host/status`；局域网监听不挂载管理接口。
 开发数据目录默认 `.local/`，可设置 `CATTT_DATA_DIR`。其中的 CA 和私钥必须持久保存并随宿主备份；不要删除 CA，否则手机需要重新配对。API 每分钟检查地址和证书有效期，自动重签并热更新服务端证书。
 
+## 电脑端运行
+
+正式运行形态是用户自己的 macOS 电脑，不运营云托管服务。应用构建、状态菜单、配对、配置、备份与恢复见 [macOS 宿主说明](../desktop/macos/README.md)。宿主打包 API、worker、迁移入口及 Node 22、PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
+
+原云部署目录、容器构建配置、容器健康与镜像回退脚本已移除，本机初始化、升级前备份、恢复及重启保留数据改由宿主烟测覆盖。保留的 `docker-compose.yml` 仅用于以下源码开发流程的 PG，不用于发布。
+
+## 协议与 SDK 依据
+
+- Apple：[验证身份 token](https://developer.apple.com/documentation/signinwithapple/verifying-a-user)、[原生登录流程](https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple)。服务端校验签名/JWKS、issuer、audience、exp、iat、一次性 nonce；原生会话默认 7 天（配置上限 30 天），不保存 Apple refresh token。iOS 回前台检查本机 Apple credential state；没有 Apple 授权码交换、服务端账户变更 webhook 或跨团队转移处理。
+- Apple：[APNs 令牌认证](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[HTTP/2 请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应与失效时间](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)。使用 ES256、kid/iss/iat，provider token 缓存 50 分钟；410 清理以设备更新时间和供应商失效时间比较，不使更新后的登记被旧响应停用。
+- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 `jwtVerify/createRemoteJWKSet/createLocalJWKSet/SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
+
+这些是现存协议实现的参考，不代表已经完成真实 Apple/APNs 验收。
+
 2026-11-17：失败或受阻的托付可在用户补充后继续原事项。聊天 `list_tickets` 会包含这些事项，`update_ticket {text}` 与 HTTP `PATCH /v1/tickets/:id {text}` 共用准入；HTTP 成功续办额外返回 `resumed: true`、`queued`。也可取消失败事项；已取消、完成或丢弃的事项不恢复。原 run 与检查点保留，新 run 独立执行；每猫最多 2 件在办、每日最多 5 次开工，续办计入日额度。默认 `GET /v1/tickets` 仍只查 open，`status=all` 保持原义。部署前须停旧 API/worker 并应用 `0019_errand_resume`，不可与单 run 的旧代码混跑。验证与边界见[失败托付续办](../docs/决策/2026-11-17-失败托付续办.md)。本批已获用户授权合入 main 并推送，交付以 Git 记录为准；未部署。
 
 2026-11-17：聊天工具与 App 的约定／托付写入统一经过 `agent/engine.ts` 和 `agent/intake.ts`，在一次事务内保存来源、事项变更、决定和收据。补充／改期／取消 HTTP 请求可带 `Idempotency-Key`，重试复用同一键返回原收据，换内容返回 `409 conflict`；不带键仍兼容现有客户端。无新数据库迁移，未部署；实现范围与验证见[统一指令入口](../docs/决策/2026-11-17-Agent统一指令入口.md)。
+
+2026-11-19：模型来源（[本地优先重塑](../docs/决策/2026-11-19-本地优先.md)批次 B）。`MODEL_PROVIDER` 新增并默认 `openai-compatible`：接本机 Ollama / LM Studio / llama.cpp server 等 `/v1/chat/completions`（`OPENAI_COMPAT_BASE_URL`，默认 Ollama），各槽位默认共用 `OPENAI_COMPAT_MODEL`；DeepSeek 改为自带 key 的可选来源。chat / extract / router / worker 四个槽位可用 `*_PROVIDER`、`*_MODEL` 单独指定来源与模型，`mock` 仍全局生效。关思考按 `OPENAI_COMPAT_THINKING_PARAM` 传 `reasoning_effort: none` 或 `chat_template_kwargs.enable_thinking`；结构化输出走 `json_schema`，流式带用量供预算与账本使用。兼容测试见 `test/model-provider.test.ts`（工具循环、终答 `tool_choice: none`、思考内容不进正文、结构化输出、`required`）。已在本机 Ollama + qwen3:0.6b 上跑通 `check:model` 与一轮聊天；模型选型与并发准入（批次 C、I）未做。无数据库迁移。
 
 方案见 `docs/方案/后端-开发者版-方案-2026-09-11.md`。这一版只在本机跑，不部署。
 
@@ -20,8 +36,8 @@
 ```bash
 cd server
 pnpm install
-cp .env.example .env          # 填 MAOMAO_DEEPSEEK_API_KEY；没有 key 就把 MODEL_PROVIDER 改成 mock
-docker compose up -d --wait   # PG 和 Redis，只绑 127.0.0.1
+cp .env.example .env          # 填 OPENAI_COMPAT_MODEL（本机 Ollama 等）或改用 deepseek；都没有就把 MODEL_PROVIDER 改成 mock
+docker compose up -d --wait   # PG，只绑 127.0.0.1
 pnpm db:migrate
 pnpm create-dev-user 你的名字  # 打印 token，只显示这一次
 pnpm dev                      # api（:8787）和 worker 一起起
@@ -51,8 +67,8 @@ pnpm smoke                     # 逐条走验收：流式、续传、作废、�
 | 目录 | 内容 |
 |---|---|
 | `src/api/` | 路由、SSE、token 校验 |
-| `src/turns/` | 一轮回复：建轮次、生成、Redis 事件流、停止与作废、对话锁 |
-| `src/runtime/` | 模型适配（DeepSeek / 假模型）、性格、上下文组装 |
+| `src/turns/` | 一轮回复：建轮次、生成、PG 事件流、停止与作废、对话锁 |
+| `src/runtime/` | 模型适配（OpenAI 兼容 / DeepSeek / 假模型）、性格、上下文组装 |
 | `src/worker/` | 记忆提取、边界整理、清理卡住的回复 |
 | `src/db/` | 表定义；迁移 SQL 在 `drizzle/` |
 
@@ -79,11 +95,11 @@ docker compose exec postgres psql -U maomao -c \
 
 本机后端受控验证118项测试通过；10-20真实模型本地凭证配置已修正，认证通过但余额不足，用户选择充值后继续；公网部署经用户确认另做。当前证据见[模型连接排查](../outputs/model-connection-review/验收报告.md)。详见[本轮报告](../outputs/diary-sync-review/验收报告.md)。
 
-真实模型检查：`MODEL_PROVIDER=deepseek pnpm check:model`。只发送固定测试文字；认证、余额或生成失败均返回非零状态，不回退模拟模型。
+真实模型检查：`pnpm check:model`（用 `.env` 里的来源；MODEL_PROVIDER=mock 时拒绝）。只发送固定测试文字，每个不同的槽位来源与模型各验一次；兼容来源先查服务能否连上、模型是否已下载，DeepSeek 先查认证与余额；失败均返回非零状态，不回退模拟模型。
 
 ## 2026-11-11 异步 Agent 第一段底座
 
-后台投递改用 `pg-boss` 12.x（当前锁定 12.38.1）；Node 需 22.12+。`async_jobs` 仍是唯一权威待办：PG 认领、续租、控制最多三次尝试，永久失败直接结束。投递只有一次执行机会（`retryLimit: 0`），同一待办按 `ID.已尝试次数` 分开投递；同次未领取的投递合并，旧的失败或进行中投递不挡住下一次。投递失败不会删除 PG 待办，worker 每 15 秒恢复补投并独立清扫失去心跳的聊天。记忆/边界/日记读取/清扫的处理并发分别为 4/2/2/1。Redis 保留聊天事件流、续传及既有聊天控制协议，后台三类待办的投递与执行不再依赖 Redis。
+后台投递改用 `pg-boss` 12.x（当前锁定 12.38.1）；Node 需 22.12+。`async_jobs` 仍是唯一权威待办：PG 认领、续租、控制最多三次尝试，永久失败直接结束。投递只有一次执行机会（`retryLimit: 0`），同一待办按 `ID.已尝试次数` 分开投递；同次未领取的投递合并，旧的失败或进行中投递不挡住下一次。投递失败不会删除 PG 待办，worker 每 15 秒恢复补投并独立清扫失去心跳的聊天。记忆/边界/日记读取/清扫的处理并发分别为 4/2/2/1。聊天事件流、续传、取消和对话锁也使用 PG 表与 LISTEN/NOTIFY，不再需要额外进程。
 
 `pg-boss.start()` 使用同一数据库中的独立 **`pgboss` schema**，由 pg-boss 自己建表、升级；连接用户需拥有创建该 schema/表的权限。本仓库的业务表位于 `public`，Drizzle 只从 `src/db/schema.ts` 及其显式导出生成迁移，迁移历史放在 `drizzle` schema；不要把 `pgboss` 表加入 Drizzle 定义，也不要用 push/introspect 接管它们。`pnpm db:migrate` 不迁移、不删除 pg-boss 的表。增量迁移 `0007_user_time_zone` 只为 `users` 加 `time_zone`（默认 `Asia/Shanghai`）；升级时先停旧 API/worker，迁移后再启动，首次启动自动准备投递 schema。回退时停新 API/worker 后恢复旧 BullMQ 代码；`async_jobs` 无变更，恢复扫描会补投，新增用户字段和 `pgboss` schema 可保留，不需要删数据。
 
@@ -101,7 +117,7 @@ API 前台 Router 每30秒把到期约定写成 `clock:<ticket_id>:<due_at>` 事
 
 `GET /v1/tickets?status=open`、`PATCH /v1/tickets/:id`（`{when: ISO}`）、`POST /v1/tickets/:id/cancel`、`GET /v1/mailbox?after=seq`、`POST /v1/mailbox/:id/read` 均从鉴权账号取得归属。聊天历史新增 `ticket_id`；`GET /v1/messages?after=seq&limit=100` 由旧到新补拉，可连续翻页。世界流 `inbox` 只提示收据序号，聊天与信的内容仍从 PG 拉取。
 
-主动消息持有既有 Redis 对话锁，发布时锁猫与会话行，`turn_id` 空、`ticket_id` 非空；不递增只代表用户输入的 `conversation.version`。iOS 生成回复时暂缓拉取，完成后合并新消息，不改待恢复轮次。发信及 outbox 收据在同一事务提交，每件每用途唯一；本段提示由持久化收据轮询重放，无外部推送副作用。
+主动消息持有既有 PG 对话锁，发布时锁猫与会话行，`turn_id` 空、`ticket_id` 非空；不递增只代表用户输入的 `conversation.version`。iOS 生成回复时暂缓拉取，完成后合并新消息，不改待恢复轮次。发信及 outbox 收据在同一事务提交，每件每用途唯一；本段提示由持久化收据轮询重放，无外部推送副作用。
 
 pg-boss 连接的 `statement_timeout` 从2秒放宽到60秒，让大表维护查询有合理时间完成。`dispatchJob` 请求侧仍最多等待2.5秒；失败不撤销已写的 PG 待办，恢复扫描继续补投。
 
@@ -116,7 +132,7 @@ pg-boss 连接的 `statement_timeout` 从2秒放宽到60秒，让大表维护查
 
 最多20步、累计8000输出token（含供应商计入output的思考token）、累计10分钟活动执行时间；等待回答和安静时段延期不占活动时间。崩溃后未完成步骤至恢复认领的时间保守计入预算，避免重启清零。408/429/5xx与明确网络错误在同一步递增退避重试3次，其余报failed；每次尝试入成本账本。report先按call_id存凭证再返回；progress不发布，ready写信+一句短通知，waiting只问一句，blocked/failed如实说明，dropped安静结束。等待问题按各次report凭证去重，同一最终用途只有一份收据。
 
-出口在同一事务里复核归属、授权、消息/日记来源、边界、记忆开关与修订、新鲜度、安静时段和去重，持有既有Redis对话锁。会话version变化先重新判断；撤回来源后不继续把旧检查点观察交给模型。22:00–09:00的结果推迟到09:00；waiting产生24小时后无回答只安静等，不再追问。详情、自动化证据与未验边界见[实施记录](../docs/方案/团子异步Agent与后端架构-实施与验收-2026-11-10.md)。
+出口在同一事务里复核归属、授权、消息/日记来源、边界、记忆开关与修订、新鲜度、安静时段和去重，持有既有PG对话锁。会话version变化先重新判断；撤回来源后不继续把旧检查点观察交给模型。22:00–09:00的结果推迟到09:00；waiting产生24小时后无回答只安静等，不再追问。详情、自动化证据与未验边界见[实施记录](../docs/方案/团子异步Agent与后端架构-实施与验收-2026-11-10.md)。
 
 ## 第六段：推断开口保持observe
 
@@ -154,6 +170,6 @@ API 现在同时运行前台 Router，消费 `report/followup/inference/push`；
 
 请求副本先删旧完整用户轮次，再删旧完整工具调用与结果；保留当前用户原话、系统指令和最新工具轮次。worker 保留全部原托付与用户补充。持久原话和检查点不裁剪，已完成 report 的恢复路径不变。必需内容仍超限时不请求模型：聊天返回 `model_input_budget`（不可直接重试），托付以明确预算原因失败。无额外摘要模型调用、摘要表、HTTP接口、服务或迁移。
 
-隔离集成测试应串行运行，避免 PG 全局通知和共享队列干扰：`DATABASE_URL=<本轮新库> REDIS_URL=<本轮Redis> MODEL_PROVIDER=mock pnpm exec vitest run --no-file-parallelism`。不要将既有开发／生产库用于本轮测试。
+隔离集成测试应串行运行，避免 PG 全局通知和共享队列干扰：`DATABASE_URL=<本轮新库> MODEL_PROVIDER=mock pnpm exec vitest run --no-file-parallelism`。不要将既有开发／生产库用于本轮测试。
 
 真实模型验收：`MODEL_PROVIDER=deepseek node --import tsx scripts/accept-agent-live.mjs`，只允许显式本机隔离库，八类场景与证据见[报告](../outputs/personal-agent-live-review/验收报告.md)。DeepSeek思考模式不接受强制工具调用，worker启用思考时用auto，仍只通过结构化report汇报；关闭记忆读取返回明确的不可用状态，不再混同于检索无命中。

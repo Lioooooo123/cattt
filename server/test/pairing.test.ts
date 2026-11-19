@@ -9,7 +9,6 @@ import { db, sql } from '../src/db/client.ts';
 import { pairedDevices, pairingCodes, users } from '../src/db/schema.ts';
 import { hashToken } from '../src/auth-token.ts';
 import { initializeLan, lanHosts, type LanIdentity } from '../src/lan-tls.ts';
-import { redis } from '../src/redis.ts';
 
 let dir: string;
 let identity: LanIdentity;
@@ -26,7 +25,6 @@ afterAll(async () => {
   await db.delete(pairingCodes);
   if (!originalOwner) await db.delete(users).where(eq(users.hostOwner, true));
   await rm(dir, { recursive: true });
-  redis.disconnect();
   await sql.end();
 });
 const headers = () => ({ authorization: `Bearer ${identity.adminToken}` });

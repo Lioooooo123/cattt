@@ -38,7 +38,6 @@ const { startErrand } = await import('../src/agent/errands.ts');
 const { processErrand } = await import('../src/agent/executor.ts');
 const { processReport } = await import('../src/agent/reports.ts');
 const { closeQueues } = await import('../src/queue.ts');
-const { redis } = await import('../src/redis.ts');
 assert(config.MODEL_PROVIDER === 'deepseek' && config.MAOMAO_DEEPSEEK_API_KEY, '真实供应商配置缺失');
 
 const results = [];
@@ -184,5 +183,5 @@ try {
   process.exitCode=results.some(r=>r.status!=='passed')?1:0;
 } finally {
   globalThis.fetch=originalFetch;
-  await drainTurns(5000);await closeQueues();await redis.quit();await sql.end();
+  await drainTurns(5000);await closeQueues();await sql.end();
 }

@@ -1,6 +1,5 @@
 /** 仅在隔离验收库创建合成账号；token 只落 /tmp，不打印。 */
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { writeFile } from 'node:fs/promises';
 import { eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
@@ -23,4 +22,4 @@ const [reply] = await db.insert(messages).values({ conversationId: conv!.id, rol
 await db.insert(boundaries).values({ catId: cat!.id, sourceMessageId: reply!.id, description: '上次考试的分数' });
 await writeFile('/tmp/maomao-memory-review-account.json', JSON.stringify({ ...account, catId: cat!.id, conversationId: conv!.id }), { mode: 0o600 });
 console.log('已创建合成验收账号，凭证仅存本机临时文件');
-await closeQueues(); await redis.quit(); await sql.end();
+await closeQueues();  await sql.end();

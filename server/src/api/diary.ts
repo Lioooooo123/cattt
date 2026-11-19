@@ -30,7 +30,7 @@ diaryRoutes.put('/diary', async c => {
   const parsed = body.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json(bad('日记格式不正确'), 400);
   const entry = await saveDiary(c.get('owner').catId, parsed.data);
-  // 待办在同一PG事务中已保存，由常驻恢复扫描器投递，HTTP不等待Redis。
+  // 待办在同一PG事务中已保存，由常驻恢复扫描器投递，HTTP不等待PG。
   return c.json({ entry: diaryJSON(entry) });
 });
 diaryRoutes.get('/diary/changes', async c => {

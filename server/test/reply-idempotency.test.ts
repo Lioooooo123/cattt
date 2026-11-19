@@ -4,7 +4,6 @@ import { eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
 import { cats, conversations, messages, turns, users } from '../src/db/schema.ts';
 import { createReplyTurn } from '../src/turns/create.ts';
-import { redis } from '../src/redis.ts';
 
 // 检查真实事务与锁；不调用模型、不启动回复后台任务。
 vi.mock('../src/turns/run.ts', () => ({ startTurn: vi.fn() }));
@@ -20,8 +19,8 @@ async function fixture() {
 }
 afterAll(async () => {
   for (const id of owners) await db.delete(users).where(eq(users.id, id));
-  for (const id of created) await redis.del(`turn:${id}:events`, `turn:${id}:cancel`);
-  await sql.end(); redis.disconnect();
+  for (const id of created) { await sql`delete from turn_events where turn_id=${id}`; await sql`delete from turn_controls where turn_id=${id}`; }
+  await sql.end();
 });
 it('并发重试同一个 request_id 只建一轮，新的点击才建新一轮', async () => {
   const { owner, message } = await fixture();

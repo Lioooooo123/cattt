@@ -13,6 +13,7 @@ import { redis } from '../src/redis.ts';
 import { createSendTurn, loadOwner } from '../src/turns/create.ts';
 import { drainTurns } from '../src/turns/run.ts';
 import * as expansion from '../src/memory/query.ts';
+import * as diary from '../src/diary/service.ts';
 const expand = vi.spyOn(expansion, 'expandRecallQuery');
 const userIds: string[] = [];
 let catId: string, convId: string, userId: string;
@@ -123,6 +124,29 @@ it('搜索异常时保留普通聊天，不降级成全量旧记忆注入', asyn
   const ctx = await buildTurnContext(catId, convId);
   expect(ctx.memoryIds).toEqual([]);
   expect(JSON.stringify(ctx.messages)).toContain('晚饭吃什么');
+});
+it('日记读取与记忆查找并行，空日记不改变来源', async () => {
+  await memory('饮食习惯', '素食');
+  const msg = await source('晚饭吃什么', { diaryEntryId: randomUUID() });
+  const [turn] = await db.insert(turns).values({conversationId:convId,userMessageId:msg.id,inputVersion:0}).returning();
+  let entered = false;
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const read = vi.spyOn(diary, 'readableDiary').mockImplementation(async () => { entered = true; await barrier; return undefined; });
+  expand.mockImplementationOnce(async () => { expect(entered).toBe(true); release(); return ['饮食']; });
+  try {
+    const ctx = await buildTurnContext(catId, convId, turn!.id);
+    expect(ctx.diarySourceIds).toEqual([]);
+    expect(JSON.stringify(ctx.messages)).toContain('晚饭吃什么');
+    expect(expand).toHaveBeenCalled();
+  } finally { release(); read.mockRestore(); }
+});
+it('上下文记忆查找取消时仍抛出取消原因', async () => {
+  await memory('饮食习惯', '素食'); await source('晚饭吃什么');
+  const controller = new AbortController();
+  const reason = new Error('取消上下文');
+  expand.mockImplementationOnce(async () => { controller.abort(reason); throw reason; });
+  await expect(buildTurnContext(catId, convId, undefined, controller.signal)).rejects.toBe(reason);
 });
 it('停用发生在扩词期间，实际回复执行器不输出旧上下文', async () => {
   const old = await memory('饮食习惯', '素食');

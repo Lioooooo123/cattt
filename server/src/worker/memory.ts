@@ -2,7 +2,7 @@ import { userTimeZone } from '../runtime/time.ts';
 import { canLearnFrom } from '../agent/gate.ts';
 import { bumpMemory, lockMemory, removeAspect } from '../memory/control.ts';
 import { rethrowForQueue } from './model-error.ts';
-import { generateText, Output } from 'ai';
+import { generateObject } from '../llm/index.ts';
 import { and, desc, eq, gt, inArray, lt, lte, max } from 'drizzle-orm';
 import { z } from 'zod';
 import { db, dbNow, type Tx } from '../db/client.ts';
@@ -111,11 +111,11 @@ export async function extractSource(catId: string, sourceId: string, turnId: str
   const previous = await precedingCatMessage(db, m, cat.learnAfterSeq);
   const slot = extractSlot(foreground ? 'memory_extract_chat' : 'memory_extract');
   const started = Date.now();
-  const { output, usage } = await generateText({
-    model: slot.model, instructions: `${EXTRACT_INSTRUCTIONS}\n今天是${new Intl.DateTimeFormat('zh-CN', { timeZone: await userTimeZone(catId), dateStyle: 'full' }).format(m.createdAt)}。\n已有记忆：\n${existingBlock}`,
-    messages: [...(previous ? [{ role: 'assistant' as const, content: previous.text }] : []), { role: 'user', content: m.text }], output: Output.object({ schema: candidateSchema }),
-    providerOptions: slot.providerOptions, maxRetries: 2, abortSignal: signal,
-  }).catch(rethrowForQueue);
+  const { object: output, usage } = await generateObject(slot.client, {
+    system: `${EXTRACT_INSTRUCTIONS}\n今天是${new Intl.DateTimeFormat('zh-CN', { timeZone: await userTimeZone(catId), dateStyle: 'full' }).format(m.createdAt)}。\n已有记忆：\n${existingBlock}`,
+    messages: [...(previous ? [{ role: 'assistant' as const, content: previous.text }] : []), { role: 'user', content: m.text }],
+    extraBody: slot.extraBody, signal,
+  }, candidateSchema, { maxRetries: 2 }).catch(rethrowForQueue);
   await recordModelCall({ purpose: 'memory_extract', modelId: slot.modelId, usage, latencyMs: Date.now() - started, turnId, jobId });
   let remembered = false;
   const saved: string[] = [];

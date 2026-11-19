@@ -1,5 +1,6 @@
 import { withdrawSources } from '../src/memory/control.ts';
-import { MockLanguageModelV4 } from 'ai/test';
+import { scriptedClient } from '../src/llm/testing.ts';
+import { emptyUsage } from '../src/llm/index.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -145,12 +146,13 @@ it.each([false,true])('worker搜索展开旧原话与撤回=%s，模型请求有
  const pair=(id:string,value:string):any[]=>[{role:'assistant',content:[{type:'tool-call',toolCallId:id,toolName:'get_time',input:{}}]},{role:'tool',content:[{type:'tool-result',toolCallId:id,toolName:'get_time',output:{type:'text',value}}]}];
  const checkpoint:any[]=[{role:'user',content:'用户托付：找那杯茶'},...pair('old','历史观察🙂'.repeat(30000)),...pair('new','当前观察')];
  await db.insert(runSteps).values({runId:r.id,step:0,messages:checkpoint,usage:{outputTokens:0}});
- const model=new MockLanguageModelV4({doGenerate:async request=>{
- count++;expect(Buffer.byteLength(JSON.stringify({prompt:request.prompt,tools:request.tools}))).toBeLessThan(56*1024);
- expect(JSON.stringify(request.prompt)).toContain('找那杯茶');
- if(count>1){expect((await runFor(t.ticket_id)).report.dependencies.messages).toContain(old);expect(JSON.stringify(request.prompt)).toContain('桂花100%_茶');}
- return {content:[{type:'tool-call',toolCallId:'history-'+count,toolName:count===1?'search_chat_history':count===2?'read_chat_history':'report',input:JSON.stringify(count===1?{query:'桂花100%_'}:count===2?{messageIds:[old]}:{status:'ready',result:'桂花100%_茶'})}],finishReason:{unified:'tool-calls',raw:'tool_calls'},usage:{inputTokens:{total:10,noCache:10,cacheRead:0,cacheWrite:0},outputTokens:{total:3,text:3,reasoning:0}},warnings:[]};
- }});
+ const model=scriptedClient(async request=>{
+ count++;expect(Buffer.byteLength(JSON.stringify({prompt:request.messages,tools:request.tools}))).toBeLessThan(56*1024);
+ expect(JSON.stringify(request.messages)).toContain('找那杯茶');
+ if(count>1){expect((await runFor(t.ticket_id)).report.dependencies.messages).toContain(old);expect(JSON.stringify(request.messages)).toContain('桂花100%_茶');}
+ const input=count===1?{query:'桂花100%_'}:count===2?{messageIds:[old]}:{status:'ready',result:'桂花100%_茶'};
+ return [{type:'tool-call',toolCallId:'history-'+count,toolName:count===1?'search_chat_history':count===2?'read_chat_history':'report',input,rawInput:JSON.stringify(input)},{type:'finish',finishReason:'tool-calls',usage:{...emptyUsage(),inputTokens:10,outputTokens:3}}];
+ });
  await execute(t.ticket_id,{model,afterStep:async step=>{if(withdraw&&step===2)await db.transaction(tx=>withdrawSources(tx,catId,[old]));}});
  expect((await db.select().from(runSteps).where(and(eq(runSteps.runId,r.id),eq(runSteps.step,0))))[0]!.messages).toEqual(checkpoint);
  if(withdraw){expect(count).toBe(1);expect(await letters()).toHaveLength(0);return;}
@@ -163,12 +165,12 @@ it('思考模式使用auto，模型普通文字不会绕过report直接发布',a
  const before=config.WORKER_THINKING;config.WORKER_THINKING='enabled';
  try {
  const t=await create('整理一条短建议');const choices:string[]=[];
- const model=new MockLanguageModelV4({doGenerate:async request=>{
-  choices.push(request.toolChoice?.type??'unset');
-  if(request.toolChoice?.type!=='auto')throw Object.assign(new Error('Thinking mode does not support this tool_choice'),{statusCode:400});
+ const model=scriptedClient(async request=>{
+  choices.push(request.toolChoice??'unset');
+  if(request.toolChoice!=='auto')throw Object.assign(new Error('Thinking mode does not support this tool_choice'),{statusCode:400});
   const first=choices.length===1;
-  return {content:first?[{type:'text',text:'没有汇报凭证的模型文字不能发给用户'}]:[{type:'tool-call',toolCallId:'thinking-report',toolName:'report',input:JSON.stringify({status:'ready',result:'可以在窗边安静待一会儿。'})}],finishReason:{unified:first?'stop':'tool-calls',raw:first?'stop':'tool_calls'},usage:{inputTokens:{total:10,noCache:10,cacheRead:0,cacheWrite:0},outputTokens:{total:3,text:3,reasoning:0}},warnings:[]};
- }});
+  return [...(first?[{type:'text-delta' as const,delta:'没有汇报凭证的模型文字不能发给用户'}]:[{type:'tool-call' as const,toolCallId:'thinking-report',toolName:'report',input:{status:'ready',result:'可以在窗边安静待一会儿。'},rawInput:'{}'}]),{type:'finish',finishReason:first?'stop':'tool-calls',usage:{...emptyUsage(),inputTokens:10,outputTokens:3}}];
+ });
  await execute(t.ticket_id,{model,afterStep:async()=>{expect(await letters()).toHaveLength(0);expect(await said()).toHaveLength(0);}});
  expect(choices).toEqual(['auto','auto']);
  expect((await ticket(t.ticket_id)).stage).toBe('ready');

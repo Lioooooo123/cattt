@@ -1,6 +1,6 @@
-import type { LanguageModelV4CallOptions } from '@ai-sdk/provider';
-import { APICallError } from 'ai';
-import { MockLanguageModelV4 } from 'ai/test';
+import { ModelHttpError } from '../src/llm/index.ts';
+import { scriptedClient } from '../src/llm/testing.ts';
+import { emptyUsage, type ModelEvent, type ModelRequest, type ModelClient } from '../src/llm/index.ts';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { config } from '../src/config.ts';
 import { sql } from '../src/db/client.ts';
@@ -14,18 +14,17 @@ beforeEach(() => {
   vi.spyOn(models, 'recordModelCall').mockResolvedValue();
 });
 afterAll(async () => { vi.useRealTimers(); config.MEMORY_RECALL_MODE = original.mode; config.MEMORY_RECALL_TIMEOUT_MS = original.timeout; await sql.end(); });
-function slot(doGenerate: (options: LanguageModelV4CallOptions) => Promise<ReturnType<typeof result>>) {
-  const model = new MockLanguageModelV4({ doGenerate });
-  const spy = vi.spyOn(models, 'recallSlot').mockReturnValue({ model, modelId: 'query-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+function slot(doGenerate: (options: ModelRequest) => Promise<ReturnType<typeof result>>) {
+  const model = scriptedClient(doGenerate);
+  const spy = vi.spyOn(models, 'recallSlot').mockReturnValue({ client: model, modelId: 'query-test', thinking: 'disabled', extraBody: { thinking: { type: 'disabled' } } });
   return spy;
 }
-function result(text: string) {
-  return { content: [{ type: 'text' as const, text }], finishReason: { unified: 'stop' as const, raw: 'stop' }, warnings: [],
-    usage: { inputTokens: { total: 180, noCache: 180, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 20, text: 20, reasoning: 0 } } };
+function result(text: string): ModelEvent[] {
+  return [{ type: 'text-delta', delta: text }, { type: 'finish', finishReason: 'stop', usage: { ...emptyUsage(), inputTokens: 180, outputTokens: 20 } }];
 }
 it('复用结构化模型，只传当前查询；输出去重并记录独立成本', async () => {
   slot(async options => {
-    const user = options.prompt.find(m => m.role === 'user');
+    const user = options.messages.find(m => m.role === 'user');
     expect(JSON.stringify(user)).toContain('烧脑的读物');
     expect(options.maxOutputTokens).toBe(192);
     return result('{"terms":["阅读","科幻","阅读"]}');
@@ -43,8 +42,8 @@ it('无效结构不带入模型生成的文字，直接退回本地', async () =
   expect(await expandRecallQuery('晚饭吃什么')).toEqual([]);
 });
 it('超时可退回本地；请求不重试', async () => {
-  const called = vi.fn(async (options: LanguageModelV4CallOptions) => {
-    await new Promise((_, reject) => options.abortSignal?.addEventListener('abort', () => reject(options.abortSignal?.reason), { once: true }));
+  const called = vi.fn(async (options: ModelRequest) => {
+    await new Promise((_, reject) => options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true }));
     return result('{"terms":[]}');
   });
   slot(called);
@@ -52,7 +51,7 @@ it('超时可退回本地；请求不重试', async () => {
   expect(called).toHaveBeenCalledTimes(1);
 });
 it('认证失败后暂不重复请求，避免每轮都拖慢聊天', async () => {
-  const called = vi.fn(async () => { throw new APICallError({ message: 'invalid test credential', url: 'https://invalid.example', requestBodyValues: {}, statusCode: 401, isRetryable: false }); });
+  const called = vi.fn(async () => { throw new ModelHttpError(401, 'invalid test credential', ''); });
   slot(called);
   expect(await expandRecallQuery('晚饭吃什么')).toEqual([]);
   expect(await expandRecallQuery('找本小说')).toEqual([]);

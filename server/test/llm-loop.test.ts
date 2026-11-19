@@ -128,6 +128,16 @@ describe('自研前台循环', () => {
 });
 
 describe('单步与检查点', () => {
+  it('同一步多个工具结果保持旧检查点的单条tool消息格式', async () => {
+    const client=scriptedClient([step('',[{name:'report',id:'one'},{name:'report',id:'two'}])]);
+    const order:string[]=[];
+    const result=await runModelStep({client,instructions:'',messages:[],signal:new AbortController().signal,guard:async()=>{},tools:{
+      report:{description:'报告',inputSchema:z.object({}),execute:async(_input,_signal,call)=>{order.push(call.toolCallId);return {saved:call.toolCallId};}},
+    }});
+    expect(order).toEqual(['one','two']);
+    expect(result.responseMessages).toHaveLength(2);
+    expect(result.responseMessages[1]).toEqual({role:'tool',content:order.map(id=>({type:'tool-result',toolCallId:id,toolName:'report',output:{type:'json',value:{saved:id}}}))});
+  });
   it('只调用一次，顺序执行 report，返回可续跑的 assistant/tool 消息而不自动 finish_tools', async () => {
     const client = scriptedClient([[{ type: 'reasoning-delta', delta: '想' }, ...step('内部文字', [{ name: 'report', id: 'r', input: { status: 'ready' } }])], step('后续')]);
     let callId = '';

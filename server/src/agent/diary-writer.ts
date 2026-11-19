@@ -1,4 +1,4 @@
-import { generateText, Output } from 'ai';
+import { generateObject } from '../llm/index.ts';
 import { z } from 'zod';
 import { routerSlot, catDiarySlot, recordModelCall } from '../runtime/model.ts';
 import type { DailyInput } from './daily-diary.ts';
@@ -14,9 +14,9 @@ async function call(input: DailyInput, role: 'route' | 'cat_diary') {
   if(estimateTokens(system+prompt)>3000)throw new Error('daily_input_budget');
   const started = Date.now();let usage = null;
   try {
-    const result = await generateText({model:slot.model,providerOptions:slot.providerOptions,system,prompt,
-      output:Output.object({schema:(role==='route'?routeSchema:writeSchema) as z.ZodType<unknown>}),maxOutputTokens:role==='route'?800:1600,maxRetries:0,abortSignal:AbortSignal.timeout(15000)});
-    usage=result.usage;return result.output;
+    const result = await generateObject(slot.client, {extraBody: slot.extraBody,system, messages: [{ role: 'user', content: prompt }],
+      maxOutputTokens:role==='route'?800:1600,signal:AbortSignal.timeout(15000)}, (role==='route'?routeSchema:writeSchema) as z.ZodType<unknown>, { maxRetries: 0 });
+    usage=result.usage;return result.object;
   } finally { await recordModelCall({purpose:role,modelId:slot.modelId,usage,latencyMs:Date.now()-started,jobId:input.ticketId}); }
 }
 export const routeDailyDiary = (input:DailyInput)=>call(input,'route');

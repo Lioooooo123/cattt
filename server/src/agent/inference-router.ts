@@ -1,4 +1,4 @@
-import { generateText, Output } from "ai";
+import { generateObject } from "../llm/index.ts";
 import { z } from "zod";
 import { routerSlot, recordModelCall } from "../runtime/model.ts";
 import { personaBlock } from "../runtime/persona.ts";
@@ -93,18 +93,15 @@ export async function assessOutcome(s: InferenceSnapshot) {
   if (estimateTokens(system + JSON.stringify(card)) > 3000)
     throw new Error("outcome_input_budget");
   try {
-    const result = await generateText({
-      model: slot.model,
-      providerOptions: slot.providerOptions,
+    const result = await generateObject(slot.client, {
+      extraBody: slot.extraBody,
       system,
-      prompt: JSON.stringify(card),
-      output: Output.object({ schema }),
+      messages: [{ role: 'user', content: JSON.stringify(card) }],
       maxOutputTokens: 900,
-      maxRetries: 0,
-      abortSignal: AbortSignal.timeout(15000),
-    });
+      signal: AbortSignal.timeout(15000),
+    }, schema, { maxRetries: 0 });
     usage = result.usage;
-    return result.output;
+    return result.object;
   } finally {
     await recordModelCall({
       purpose: "route",

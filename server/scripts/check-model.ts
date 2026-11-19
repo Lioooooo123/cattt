@@ -1,5 +1,5 @@
 /** 真实模型连通检查：仅发送固定测试文字，不读取账号或日记数据。失败以非零状态退出。 */
-import { APICallError, generateText } from 'ai';
+import { ModelHttpError, generateText } from '../src/llm/index.ts';
 import { config, modelConfigProblems, slotNames, slotSpec } from '../src/config.ts';
 import { slotFrom } from '../src/runtime/model.ts';
 
@@ -69,14 +69,14 @@ async function check() {
   for (const spec of specs) {
     const slot = slotFrom(spec, 'check');
     try {
-      const result = await generateText({
-        model: slot.model, prompt: '连接测试：只回复 OK。', providerOptions: slot.providerOptions,
+      const result = await generateText(slot.client, {
+        messages: [{ role: 'user', content: '连接测试：只回复 OK。' }], extraBody: slot.extraBody,
         // 本机推理模型开思考时会先想一段，给够长度
-        maxOutputTokens: spec.thinking === 'enabled' ? 1024 : 64, maxRetries: 0, abortSignal: AbortSignal.timeout(spec.provider === 'deepseek' ? 15_000 : 120_000),
-      });
+        maxOutputTokens: spec.thinking === 'enabled' ? 1024 : 64, signal: AbortSignal.timeout(spec.provider === 'deepseek' ? 15_000 : 120_000),
+      }, { maxRetries: 0 });
       if (!/^ok[.!。！]?$/i.test(result.text.trim())) return { connected: false, authentication: 'passed', provider: spec.provider, model: spec.model, code: 'model_unexpected_reply' };
     } catch (error) {
-      const status = APICallError.isInstance(error) ? error.statusCode : undefined;
+      const status = ModelHttpError.isInstance(error) ? error.statusCode : undefined;
       return { connected: false, provider: spec.provider, model: spec.model, status, warnings,
         code: status === 402 ? 'model_quota' : [401, 403].includes(status ?? 0) ? 'model_auth' : status === 404 ? 'model_not_found' : 'model_generation_failed' };
     }

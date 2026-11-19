@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { generateText, Output } from 'ai';
+import { createOpenAICompatible, generateObject, runModelStep } from '../src/llm/index.ts';
 import { z } from 'zod';
 import { config, describeModelConfig, modelConfigProblems, slotAdmission, slotNames, slotSpec } from '../src/config.ts';
-import { catDiarySlot, diarySlot, recallSlot, OPENAI_COMPAT_NAME, thinkingOptions } from '../src/runtime/model.ts';
+import { catDiarySlot, diarySlot, recallSlot, thinkingOptions } from '../src/runtime/model.ts';
 import { runCatAgent, type RuntimeTool } from '../src/runtime/agent.ts';
 
 const base = {
@@ -57,10 +56,10 @@ describe('模型来源配置', () => {
     expect(problems[1]).toContain('EXTRACT_MODEL、WORKER_MODEL');
   });
   it('思考开关按来源与参数风格映射', () => {
-    expect(thinkingOptions('deepseek', 'disabled')).toEqual({ deepseek: { thinking: { type: 'disabled' } } });
-    expect(thinkingOptions('openai-compatible', 'disabled', 'reasoning_effort')).toEqual({ [OPENAI_COMPAT_NAME]: { reasoningEffort: 'none' } });
+    expect(thinkingOptions('deepseek', 'disabled')).toEqual({ thinking: { type: 'disabled' } });
+    expect(thinkingOptions('openai-compatible', 'disabled', 'reasoning_effort')).toEqual({ reasoning_effort: 'none' });
     expect(thinkingOptions('openai-compatible', 'enabled', 'reasoning_effort')).toEqual({});
-    expect(thinkingOptions('openai-compatible', 'disabled', 'chat_template_kwargs')).toEqual({ [OPENAI_COMPAT_NAME]: { chat_template_kwargs: { enable_thinking: false } } });
+    expect(thinkingOptions('openai-compatible', 'disabled', 'chat_template_kwargs')).toEqual({ chat_template_kwargs: { enable_thinking: false } });
     expect(thinkingOptions('openai-compatible', 'disabled', 'none')).toEqual({});
   });
   it('默认来源是本机 OpenAI 兼容服务，不内置任何 key', () => {
@@ -73,7 +72,7 @@ type Request = { model: string; stream?: boolean; tools?: { function: { name: st
 /** 按 Ollama / LM Studio / llama.cpp 的 /v1/chat/completions 流式格式应答 */
 function fakeServer(reply: (request: Request, index: number) => object[]) {
   const requests: Request[] = []; const urls: string[] = [];
-  const provider = createOpenAICompatible({ name: OPENAI_COMPAT_NAME, baseURL: 'http://127.0.0.1:11434/v1', includeUsage: true, supportsStructuredOutputs: true,
+  const provider = createOpenAICompatible({ modelId: 'qwen3:8b', baseURL: 'http://127.0.0.1:11434/v1',
     fetch: async (url, init) => {
       const request = JSON.parse(String(init?.body)) as Request;
       requests.push(request); urls.push(String(url));
@@ -103,8 +102,8 @@ describe('OpenAI 兼容来源与现有调用方式', () => {
       ? [{ reasoning_content: '用户问天气，我查一下。' }, call('call-1', 'lookup', '{"city":"杭州"}')]
       : i === 1 ? [call('call-2', 'finish_tools', '{}')]
       : [{ reasoning: '查到了。' }, { content: request.tool_choice === 'none' ? '杭州今天晴，喵。' : '<tool_call>' }]);
-    let text = ''; const tools: string[] = []; const usage: (number | undefined)[] = [];
-    await runCatAgent({ model: server.provider.chatModel('qwen3:8b'), providerOptions: thinkingOptions('openai-compatible', 'disabled', 'reasoning_effort'),
+    let text = ''; const tools: string[] = []; const usage: (number | null | undefined)[] = [];
+    await runCatAgent({ client: server.provider, extraBody: thinkingOptions('openai-compatible', 'disabled', 'reasoning_effort'),
       instructions: '猫', messages: [{ role: 'user', content: '杭州天气怎么样' }], tools: { lookup },
       signal: new AbortController().signal, guard: async () => {}, onText: async t => { text += t; },
       onTool: async t => { if (t.output) tools.push(`${t.tool}:${t.output.status}`); },
@@ -123,8 +122,8 @@ describe('OpenAI 兼容来源与现有调用方式', () => {
   it('结构化输出走 json_schema，chat_template_kwargs 原样透传', async () => {
     const schema = z.object({ terms: z.array(z.string()) });
     const server = fakeServer(() => [{ content: '{"terms":["饮食","口味"]}' }]);
-    const { output, usage } = await generateText({ model: server.provider.chatModel('qwen3:8b'), prompt: '晚饭吃什么',
-      output: Output.object({ schema }), providerOptions: thinkingOptions('openai-compatible', 'disabled', 'chat_template_kwargs'), maxRetries: 0 });
+    const { object: output, usage } = await generateObject(server.provider, { messages: [{ role: 'user', content: '晚饭吃什么' }],
+      extraBody: thinkingOptions('openai-compatible', 'disabled', 'chat_template_kwargs') }, schema, { maxRetries: 0 });
     expect(output).toEqual({ terms: ['饮食', '口味'] });
     expect(usage.inputTokens).toBe(12);
     const request = server.requests[0]!;
@@ -135,9 +134,9 @@ describe('OpenAI 兼容来源与现有调用方式', () => {
   });
   it('后台执行者 toolChoice=required 能发到兼容服务', async () => {
     const server = fakeServer(() => [{ tool_calls: [{ index: 0, id: 'r', type: 'function', function: { name: 'report', arguments: '{"status":"ready"}' } }] }]);
-    const { tool } = await import('ai');
-    const result = await generateText({ model: server.provider.chatModel('qwen3:8b'), prompt: '想一想', maxRetries: 0, toolChoice: 'required',
-      tools: { report: tool({ description: '报告', inputSchema: z.object({ status: z.string() }), execute: async () => 'ok' }) } });
+    const result = await runModelStep({ client: server.provider, instructions: '', messages: [{ role: 'user', content: '想一想' }], toolChoice: 'required',
+      signal: new AbortController().signal, guard: async () => {},
+      tools: { report: { description: '报告', inputSchema: z.object({ status: z.string() }), execute: async () => 'ok' } } });
     expect(server.requests[0]!.tool_choice).toBe('required');
     expect(result.toolCalls.map(c => c.input)).toEqual([{ status: 'ready' }]);
   });

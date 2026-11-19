@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, expect, it, vi } from 'vitest';
-import { MockLanguageModelV4 } from 'ai/test';
+import { scriptedClient } from '../src/llm/testing.ts';
+import { emptyUsage } from '../src/llm/index.ts';
 import { eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
 import { boundaries, cats, conversations, memories, messages, users } from '../src/db/schema.ts';
@@ -18,12 +19,11 @@ async function fixture() {
   return { catId: cat!.id, conversationId: conv!.id, add };
 }
 function extractor(output: object, inspect?: (prompt: string) => void) {
-  const model = new MockLanguageModelV4({ doGenerate: async options => {
-    inspect?.(JSON.stringify(options.prompt));
-    return { content: [{ type: 'text', text: JSON.stringify(output) }], finishReason: { unified: 'stop', raw: 'stop' },
-      usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } }, warnings: [] };
-  } });
-  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+  const model = scriptedClient(async options => {
+    inspect?.(JSON.stringify([...(options.system ? [{ role: 'system', content: options.system }] : []), ...options.messages]));
+    return [{ type: 'text-delta', delta: JSON.stringify(output) }, { type: 'finish', finishReason: 'stop', usage: { ...emptyUsage(), inputTokens: 10, outputTokens: 10 } }];
+  });
+  vi.spyOn(models, 'extractSlot').mockReturnValue({ client: model, modelId: 'controlled-test', thinking: 'disabled', extraBody: { thinking: { type: 'disabled' } } });
 }
 afterEach(() => vi.restoreAllMocks());
 afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
@@ -51,8 +51,8 @@ it('用相邻的猫追问理解简答，记忆来源仍是用户的回答', asyn
   extractor({ memories: [{ ...base, predicate: '面试结果', value: '没过', kind: 'fact', explicit: false }] }, prompt => {
     const input = JSON.parse(prompt);
     expect(input.filter((m: { role: string }) => m.role !== 'system').map((m: { role: string }) => m.role)).toEqual(['assistant', 'user']);
-    expect(input.at(-2).content).toEqual([{ type: 'text', text: question }]);
-    expect(input.at(-1).content).toEqual([{ type: 'text', text: answer }]);
+    expect(input.at(-2).content).toBe(question);
+    expect(input.at(-1).content).toBe(answer);
     expect(prompt).not.toContain(later);
   });
   await extractSource(f.catId, source, randomUUID());
@@ -99,12 +99,11 @@ it('关闭整理或停用原话后，连提取模型也不调用', async () => {
 });
 it('提取期间撤回原话，迟到的模型结果不能写入', async () => {
   const f = await fixture(); const a = await f.add('记住，我不喝咖啡');
-  const model = new MockLanguageModelV4({ doGenerate: async () => {
+  const model = scriptedClient(async () => {
     await db.transaction(async tx => { await lockMemory(tx, f.catId); await withdrawSources(tx, f.catId, [a]); });
-    return { content: [{ type: 'text', text: JSON.stringify({ memories: [base] }) }], finishReason: { unified: 'stop', raw: 'stop' },
-      usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } }, warnings: [] };
-  } });
-  vi.spyOn(models, 'extractSlot').mockReturnValue({ model, modelId: 'controlled-test', thinking: 'disabled', providerOptions: { deepseek: { thinking: { type: 'disabled' } } } });
+    return [{ type: 'text-delta', delta: JSON.stringify({ memories: [base] }) }, { type: 'finish', finishReason: 'stop', usage: { ...emptyUsage(), inputTokens: 10, outputTokens: 10 } }];
+  });
+  vi.spyOn(models, 'extractSlot').mockReturnValue({ client: model, modelId: 'controlled-test', thinking: 'disabled', extraBody: { thinking: { type: 'disabled' } } });
   expect((await extractSource(f.catId, a, randomUUID())).remembered).toBe(false);
   expect(await db.select().from(memories).where(eq(memories.catId, f.catId))).toHaveLength(0);
 });

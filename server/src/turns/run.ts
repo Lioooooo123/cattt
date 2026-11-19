@@ -155,7 +155,7 @@ async function runTurn(turnId: string) {
       return out;
     };
     await runCatAgent({
-      model: slot.model, providerOptions: slot.providerOptions, instructions: context.instructions, messages: context.messages,
+      client: slot.client, extraBody: slot.extraBody, instructions: context.instructions, messages: context.messages,
       tools: await catTools({ catId: conv.catId, turnId, userMessageId: turn.userMessageId }), signal: abort.signal, guard,
       onText: async (chunk) => {
         const visible = tidy(chunk);

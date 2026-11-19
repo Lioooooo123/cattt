@@ -1,5 +1,5 @@
 import { canUseMemories } from '../agent/gate.ts';
-import type { ModelMessage } from 'ai';
+import type { ModelMessage } from '../llm/index.ts';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import { CONTEXT_MESSAGES } from '../config.ts';
 import { db } from '../db/client.ts';

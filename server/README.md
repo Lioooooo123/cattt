@@ -34,11 +34,10 @@ pnpm 11 会把 `--env-file` 识别为 Node 自身参数，因此带此选项时�
 
 ## 协议与 SDK 依据
 
-- Apple：[验证身份 token](https://developer.apple.com/documentation/signinwithapple/verifying-a-user)、[原生登录流程](https://developer.apple.com/documentation/signinwithapple/authenticating-users-with-sign-in-with-apple)。服务端校验签名/JWKS、issuer、audience、exp、iat、一次性 nonce；原生会话默认 7 天（配置上限 30 天），不保存 Apple refresh token。iOS 回前台检查本机 Apple credential state；没有 Apple 授权码交换、服务端账户变更 webhook 或跨团队转移处理。
 - Apple：[APNs 令牌认证](https://developer.apple.com/documentation/usernotifications/establishing-a-token-based-connection-to-apns)、[HTTP/2 请求](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)、[响应与失效时间](https://developer.apple.com/documentation/usernotifications/handling-notification-responses-from-apns)。使用 ES256、kid/iss/iat，provider token 缓存 50 分钟；410 清理以设备更新时间和供应商失效时间比较，不使更新后的登记被旧响应停用。
-- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 `jwtVerify/createRemoteJWKSet/createLocalJWKSet/SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
+- [jose 官方实现与文档](https://github.com/panva/jose)：本机安装 6.2.16，核对了 APNs 用到的 `SignJWT/importPKCS8` 类型；没有手拼签名。模型额度中间件按 AI SDK 7.0.97 和 provider V4 本机类型实现。
 
-这些是现存协议实现的参考，不代表已经完成真实 Apple/APNs 验收。
+这些是现存协议实现的参考，不代表已经完成真实 APNs 验收。手机身份只来自配对设备凭证，Sign in with Apple 已移除（见[本地优先决策](../docs/决策/2026-11-19-本地优先.md#g-批落地)）。
 
 2026-11-17：失败或受阻的托付可在用户补充后继续原事项。聊天 `list_tickets` 会包含这些事项，`update_ticket {text}` 与 HTTP `PATCH /v1/tickets/:id {text}` 共用准入；HTTP 成功续办额外返回 `resumed: true`、`queued`。也可取消失败事项；已取消、完成或丢弃的事项不恢复。原 run 与检查点保留，新 run 独立执行；每猫最多 2 件在办、每日最多 5 次开工，续办计入日额度。默认 `GET /v1/tickets` 仍只查 open，`status=all` 保持原义。部署前须停旧 API/worker 并应用 `0019_errand_resume`，不可与单 run 的旧代码混跑。验证与边界见[失败托付续办](../docs/决策/2026-11-17-失败托付续办.md)。本批已获用户授权合入 main 并推送，交付以 Git 记录为准；未部署。
 

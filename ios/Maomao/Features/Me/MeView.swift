@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 /// 我的。2026-09-10 起由院子右上角的头像钮打开，是一张系统 sheet（App Store 账户页那种做法），
 /// 右上角一个「完成」，也能下拉关。
@@ -46,20 +45,9 @@ struct MeView: View {
                 Text("已连接家里的电脑").font(Typo.sans(14)).foregroundStyle(Palette.ink2)
                 if let status = store.backendStatus { Text(status).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
                 TextLink(text: "解除配对", size: 13) { store.unpairHost() }
-            } else if store.backend.mode == .service, !store.backend.token.isEmpty {
-                Text("已登录").font(Typo.sans(14)).foregroundStyle(Palette.ink2)
-                TextLink(text: "退出登录", size: 13) { store.signOut() }
-            } else if store.appleLoginNonce != nil {
-                SignInWithAppleButton(.continue) { request in
-                    request.nonce = store.appleNonceDigest
-                } onCompletion: { store.finishAppleLogin($0) }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: Metrics.minTap)
             } else {
-                TextLink(text: store.identityBusy ? "正在连接…" : "用 Apple 登录", size: 14) { store.prepareAppleLogin() }
-                    .disabled(store.identityBusy)
+                TextLink(text: "连接家里的电脑", size: 14) { store.openPairing() }
             }
-            if store.backend.mode != .paired { TextLink(text: "连接家里的电脑", size: 14) { store.openPairing() } }
             if let error = store.identityError { Text(error).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
         }
     }

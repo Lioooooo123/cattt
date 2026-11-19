@@ -79,7 +79,6 @@ struct RootView: View {
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             store.reprobePairedHost(foreground: true)
-            store.checkAppleCredential()
             store.registerNotificationDevice()
             store.resolveNotificationIntent()
             store.refreshInbox()

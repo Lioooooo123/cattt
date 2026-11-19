@@ -8,7 +8,7 @@ import { hashToken } from './auth-token.ts';
 import { config } from './config.ts';
 import { lanHosts, type LanIdentity } from './lan-tls.ts';
 import { DEFAULT_TRAITS } from './runtime/persona.ts';
-import { accountJSON } from './identity/service.ts';
+import { accountJSON } from './identity/account.ts';
 import type { Env } from './api/auth.ts';
 
 const active = () => and(isNull(pairingCodes.usedAt), isNull(pairingCodes.burnedAt), gt(pairingCodes.expiresAt, dbNow()));

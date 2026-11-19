@@ -13,7 +13,7 @@ const stopRouter = await startFrontendRouter();
 const identity = await initializeLan();
 if (!['127.0.0.1', 'localhost', '::1'].includes(config.HOST)) throw new Error('HOST 必须是回环地址，管理接口不能暴露到局域网');
 
-const server = serve({ fetch: createApp(undefined, identity).fetch, hostname: config.HOST, port: config.PORT }, (info) => {
+const server = serve({ fetch: createApp(identity).fetch, hostname: config.HOST, port: config.PORT }, (info) => {
   console.log(`[api] http://localhost:${info.port}  ${describeModelConfig()}`);
 });
 const lanServer = config.LAN_HTTPS_PORT ? serve({ fetch: createApp().fetch, hostname: config.LAN_HTTPS_HOST,

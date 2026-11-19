@@ -1,23 +1,13 @@
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { hashToken } from '../auth-token.ts';
 import { config } from '../config.ts';
 import { db, dbNow } from '../db/client.ts';
-import { cats, conversations, pairedDevices, sessions, users } from '../db/schema.ts';
+import { cats, conversations, pairedDevices, users } from '../db/schema.ts';
 import { withModelAccount } from '../runtime/budget.ts';
 import type { Owner } from '../turns/create.ts';
 
 export type Env = { Variables: { owner: Owner } };
-
-function tokenUserId(tokenHash: string) {
-  const session = db.select({ userId: sessions.userId }).from(sessions).where(and(
-    eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt), gt(sessions.expiresAt, dbNow()),
-  ));
-  if (config.APP_ENV !== 'development') return sql<string>`(${session})`;
-
-  const dev = db.select({ userId: users.id }).from(users).where(eq(users.devTokenHash, tokenHash));
-  return sql<string>`coalesce((${session}), (${dev}))`;
-}
 
 export const auth = createMiddleware<Env>(async (c, next) => {
   const header = c.req.header('authorization') ?? '';
@@ -28,13 +18,15 @@ export const auth = createMiddleware<Env>(async (c, next) => {
     const [device] = await db.update(pairedDevices).set({ lastSeenAt: dbNow() }).where(and(eq(pairedDevices.tokenHash, hashToken(token)), isNull(pairedDevices.revokedAt))).returning({ userId: pairedDevices.userId });
     if (!device) return c.json({ error: { code: 'unauthorized', message: 'token 不对' } }, 401);
     deviceUserId = device.userId;
+  } else if (config.APP_ENV !== 'development') {
+    return c.json({ error: { code: 'unauthorized', message: 'token 不对' } }, 401);
   }
 
   const [row] = await db.select({ userId: users.id, catId: cats.id, conversationId: conversations.id })
     .from(users)
     .leftJoin(cats, eq(cats.userId, users.id))
     .leftJoin(conversations, eq(conversations.catId, cats.id))
-    .where(eq(users.id, deviceUserId ?? tokenUserId(hashToken(token))));
+    .where(deviceUserId ? eq(users.id, deviceUserId) : eq(users.devTokenHash, hashToken(token)));
   if (!row) return c.json({ error: { code: 'unauthorized', message: 'token 不对' } }, 401);
 
   const { userId, catId, conversationId } = row;

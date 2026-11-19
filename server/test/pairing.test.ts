@@ -19,7 +19,7 @@ beforeAll(async () => {
   originalOwner = (await db.select().from(users).where(eq(users.hostOwner, true)))[0]?.id;
   dir = await mkdtemp(join(homedir(), '.cattt-pairing-test-'));
   identity = await initializeLan(dir);
-  host = createApp(undefined, identity);
+  host = createApp(identity);
 });
 afterAll(async () => {
   await db.delete(pairingCodes);

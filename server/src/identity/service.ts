@@ -11,7 +11,6 @@ import { DEFAULT_TRAITS } from '../runtime/persona.ts';
 const appleKeys=createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'),{timeoutDuration:5000});
 export const accountJSON=(c:typeof cats.$inferSelect)=>({id:c.id,name:c.name,appearance:c.appearance,temperament:c.temperament,traits:c.traits,created_at:c.createdAt});
 export async function revokeSession(token:string){await db.update(sessions).set({revokedAt:sql`now()`}).where(eq(sessions.tokenHash,hashToken(token)));}
-export async function sessionUser(token:string){const [row]=await db.select({id:sessions.userId}).from(sessions).where(and(eq(sessions.tokenHash,hashToken(token)),isNull(sessions.revokedAt),gt(sessions.expiresAt,sql`now()`)));return row?.id;}
 /** JWKS注入仅由测试构造路由调用；运行配置没有替代JWKS或跳过校验开关。 */
 export function createIdentityRoutes(options:{audience?:string;jwks?:JWTVerifyGetKey}={}){
  const routes=new Hono();

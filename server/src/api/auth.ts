@@ -1,29 +1,39 @@
-import { config } from '../config.ts';
-import { sessionUser } from '../identity/service.ts';
-import { withModelAccount } from '../runtime/budget.ts';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { hashToken } from '../auth-token.ts';
-import { db } from '../db/client.ts';
-import { users } from '../db/schema.ts';
-import { loadOwner, type Owner } from '../turns/create.ts';
+import { config } from '../config.ts';
+import { db, dbNow } from '../db/client.ts';
+import { cats, conversations, sessions, users } from '../db/schema.ts';
+import { withModelAccount } from '../runtime/budget.ts';
+import type { Owner } from '../turns/create.ts';
 
 export type Env = { Variables: { owner: Owner } };
 
-/** 开发者版：每人一个 token，scripts/create-dev-user.ts 生成。库里只存哈希。 */
+function tokenUserId(tokenHash: string) {
+  const session = db.select({ userId: sessions.userId }).from(sessions).where(and(
+    eq(sessions.tokenHash, tokenHash), isNull(sessions.revokedAt), gt(sessions.expiresAt, dbNow()),
+  ));
+  if (config.APP_ENV !== 'development') return sql<string>`(${session})`;
+
+  const dev = db.select({ userId: users.id }).from(users).where(eq(users.devTokenHash, tokenHash));
+  return sql<string>`coalesce((${session}), (${dev}))`;
+}
+
 export const auth = createMiddleware<Env>(async (c, next) => {
   const header = c.req.header('authorization') ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return c.json({ error: { code: 'unauthorized', message: '缺少 token' } }, 401);
 
-  const sessionId=await sessionUser(token);
-  const [dev]=!sessionId&&config.APP_ENV==='development'?await db.select({id:users.id}).from(users).where(eq(users.devTokenHash,hashToken(token))):[];
-  const user=sessionId?{id:sessionId}:dev;
-  if (!user) return c.json({ error: { code: 'unauthorized', message: 'token 不对' } }, 401);
+  const [row] = await db.select({ userId: users.id, catId: cats.id, conversationId: conversations.id })
+    .from(users)
+    .leftJoin(cats, eq(cats.userId, users.id))
+    .leftJoin(conversations, eq(conversations.catId, cats.id))
+    .where(eq(users.id, tokenUserId(hashToken(token))));
+  if (!row) return c.json({ error: { code: 'unauthorized', message: 'token 不对' } }, 401);
 
-  const owner = await loadOwner(user.id);
-  if (!owner) return c.json({ error: { code: 'no_cat', message: '这个账号还没有猫' } }, 409);
+  const { userId, catId, conversationId } = row;
+  if (!catId || !conversationId) return c.json({ error: { code: 'no_cat', message: '这个账号还没有猫' } }, 409);
 
-  c.set('owner', owner);
-  await withModelAccount(user.id,()=>next());
+  c.set('owner', { userId, catId, conversationId });
+  await withModelAccount(userId, () => next());
 });

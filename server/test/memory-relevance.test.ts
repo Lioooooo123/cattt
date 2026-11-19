@@ -5,6 +5,42 @@ const item = (id: string, predicate: string, value: string, extra: Partial<Recal
   lastConfirmedAt: new Date('2026-01-01'), revision: 0, ...extra,
 });
 describe('相关记忆排序', () => {
+  it('喝的与清水、白开水、饮水互通，不扩大敏感内容许可', () => {
+    for (const value of ['只喝清水', '只喝白开水', '饮水不加糖']) {
+      const drink = item(value, '日常偏好', value);
+      expect(selectMemories(rankMemories([drink], '来点喝的吧'))).toEqual([drink]);
+      expect(selectMemories(rankMemories([{ ...drink, explicit: true, sensitivity: 'high' }], '来点喝的吧'))).toEqual([]);
+    }
+  });
+  it('查询原词不因分词差异同时获得词面和扩词两票', () => {
+    const old = item('old', '旧菜单', '咖啡拿铁美式浓缩');
+    const fresh = item('fresh', '咖啡习惯', '不加糖', { lastConfirmedAt: new Date() });
+    expect(rankMemories([old, fresh], '咖啡拿铁美式浓缩')[0]!.item.id).toBe('fresh');
+  });
+  it('相关性相同时近期确认优先，但三个月半衰期不淘汰旧相关记忆', () => {
+    const old = item('old', '咖啡', '不加糖', { lastConfirmedAt: new Date('2020-01-01') });
+    const fresh = item('fresh', '咖啡', '不加奶', { lastConfirmedAt: new Date() });
+    expect(rankMemories([old, fresh], '咖啡').map(r => r.item.id)).toEqual(['fresh', 'old']);
+  });
+  it('同一 UTC 日确认的内容共享时间名次，不奖励写入毫秒差', () => {
+    const first = item('first', '咖啡', '不加糖', { lastConfirmedAt: new Date('2026-01-01T00:00:01Z') });
+    const last = item('last', '咖啡', '不加奶', { lastConfirmedAt: new Date('2026-01-01T23:59:59Z') });
+    const ranked = rankMemories([first, last], '咖啡');
+    expect(ranked[0]!.score).toBe(ranked[1]!.score);
+  });
+  it('RRF 合并独立词面和扩词名次，而不是累加字面命中数', () => {
+    const direct = item('direct', 'alpha', 'bravo charlie delta');
+    const both = item('both', 'alpha', 'echo foxtrot');
+    const ranked = rankMemories([direct, both], 'alpha bravo charlie delta', ['echo', 'foxtrot']);
+    expect(ranked[0]!.item.id).toBe('both');
+  });
+  it('同一指纹先保留最新修订，不让旧值的更多词面命中抢占', () => {
+    const stale = item('stale', '咖啡', '咖啡拿铁美式浓缩', { fingerprint: 'drink', revision: 1 });
+    const corrected = item('corrected', '咖啡', '只喝清水', { fingerprint: 'drink', revision: 2 });
+    expect(selectMemories(rankMemories([stale, corrected], '咖啡拿铁美式浓缩'))).toEqual([corrected]);
+    const confirmed = { ...corrected, id: 'confirmed', lastConfirmedAt: new Date() };
+    expect(selectMemories(rankMemories([corrected, confirmed], '咖啡'))).toEqual([confirmed]);
+  });
   it('旧饮食偏好能胜过大量新近无关条目', () => {
     const old = item('diet', '忌口', '不吃香菜');
     const noise = Array.from({ length: 80 }, (_, i) => item(`noise-${i}`, `收藏编号${i}`, `蓝色石头${i}`, { explicit: true, lastConfirmedAt: new Date() }));

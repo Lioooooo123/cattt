@@ -3,6 +3,7 @@ import { redis } from '../redis.ts';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { turns } from '../db/schema.ts';
+import { subscribe } from './subscriber.ts';
 
 /**
  * 发给 iOS 的 SSE 事件。格式是我们自己定的，不用 AI SDK 的流协议，
@@ -124,11 +125,20 @@ export async function terminalEvent(turnId: string): Promise<TurnEvent | null> {
 
 export type CancelReason = 'stop' | 'supersede';
 const cancelKey = (turnId: string) => `turn:${turnId}:cancel`;
+const cancelChannel = (turnId: string) => `turn:${turnId}:cancelled`;
+
+export function subscribeCancel(turnId: string, listener: (reason: CancelReason) => void) {
+  return subscribe(cancelChannel(turnId), reason => {
+    if (reason === 'stop' || reason === 'supersede') listener(reason);
+  });
+}
 
 export async function requestCancel(turnId: string, reason: CancelReason) {
   // 作废优先于停止：两者都来时按作废处理
-  if (reason === 'stop') await redis.set(cancelKey(turnId), reason, 'EX', 600, 'NX');
-  else await redis.set(cancelKey(turnId), reason, 'EX', 600);
+  const saved = reason === 'stop'
+    ? await redis.set(cancelKey(turnId), reason, 'EX', 600, 'NX')
+    : await redis.set(cancelKey(turnId), reason, 'EX', 600);
+  if (saved) await redis.publish(cancelChannel(turnId), reason).catch(() => {});
 }
 
 export async function readCancel(turnId: string): Promise<CancelReason | null> {
@@ -150,6 +160,7 @@ export async function readVisibleLength(turnId: string): Promise<number | null> 
 // ---- 同一段对话同一时间只生成一轮 ----
 
 const lockKey = (conversationId: string) => `conv:${conversationId}:lock`;
+const lockChannel = (conversationId: string) => `conv:${conversationId}:lock-released`;
 
 /** 只用于避免聊天忙碌时做无用措辞；发布仍必须实际取得锁。 */
 export async function conversationBusy(conversationId: string) { return await redis.exists(lockKey(conversationId)) > 0; }
@@ -163,24 +174,46 @@ export async function acquireConversationLock(
 ): Promise<boolean> {
   const deadline = performance.now() + waitMs;
   let lastBeat = performance.now();
-  while (performance.now() < deadline) {
-    const ok = await redis.set(lockKey(conversationId), token, 'PX', LOCK_TTL_MS, 'NX');
-    if (ok) return true;
-    if (onWait && performance.now() - lastBeat > 5_000) {
-      lastBeat = performance.now();
-      await onWait();
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return false;
+  let notified = false;
+  let wake: (() => void) | undefined;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    do {
+      notified = false;
+      const ok = await redis.set(lockKey(conversationId), token, 'PX', LOCK_TTL_MS, 'NX');
+      if (ok) return true;
+      if (performance.now() >= deadline) return false;
+      if (!unsubscribe) {
+        let expired = false;
+        let timer: NodeJS.Timeout | undefined;
+        const registration = subscribe(lockChannel(conversationId), () => { notified = true; wake?.(); });
+        unsubscribe = await Promise.race([
+          registration.then(remove => { if (expired) remove(); return remove; }),
+          new Promise<undefined>(resolve => { timer = setTimeout(() => { expired = true; resolve(undefined); }, Math.max(0, deadline - performance.now())); }),
+        ]);
+        clearTimeout(timer);
+        if (!unsubscribe) return false;
+        continue;
+      }
+      if (onWait && performance.now() - lastBeat > 5_000) {
+        lastBeat = performance.now();
+        await onWait();
+      }
+      if (!notified) await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => { wake = undefined; resolve(); }, Math.max(0, Math.min(1_000, deadline - performance.now())));
+        wake = () => { clearTimeout(timer); wake = undefined; resolve(); };
+      });
+    } while (performance.now() < deadline);
+    return false;
+  } finally { unsubscribe?.(); }
 }
 
 // 只删自己持有的锁
-const RELEASE = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end`;
+const RELEASE = `if redis.call('get', KEYS[1]) == ARGV[1] then local removed = redis.call('del', KEYS[1]); redis.call('publish', ARGV[2], 'released'); return removed else return 0 end`;
 const REFRESH = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end`;
 
 export async function releaseConversationLock(conversationId: string, token: string) {
-  await redis.eval(RELEASE, 1, lockKey(conversationId), token);
+  await redis.eval(RELEASE, 1, lockKey(conversationId), token, lockChannel(conversationId));
 }
 
 export async function refreshConversationLock(conversationId: string, token: string) {

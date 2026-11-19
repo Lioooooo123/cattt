@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
-import { boundaries, cats, conversations, memories, memoryBlocks, messages, turns, users } from '../src/db/schema.ts';
+import { boundaries, cats, conversations, memories, memoryBlocks, memoryReceipts, messages, turns, users } from '../src/db/schema.ts';
 import { memoryFingerprint } from '../src/runtime/fingerprint.ts';
 import { buildTurnContext } from '../src/runtime/context.ts';
 import { changeSettings, editMemory, lockMemory, settings, withdrawSources } from '../src/memory/control.ts';
@@ -14,6 +14,7 @@ import { createSendTurn, loadOwner } from '../src/turns/create.ts';
 import { drainTurns } from '../src/turns/run.ts';
 import * as expansion from '../src/memory/query.ts';
 import * as diary from '../src/diary/service.ts';
+import { recallPermissions } from '../src/memory/recall.ts';
 const expand = vi.spyOn(expansion, 'expandRecallQuery');
 const userIds: string[] = [];
 let catId: string, convId: string, userId: string;
@@ -36,6 +37,38 @@ beforeEach(async () => {
   expand.mockReset().mockResolvedValue([]);
 });
 afterAll(async () => { await drainTurns(10000); for (const id of userIds) await db.delete(users).where(eq(users.id, id)); await closeQueues(); await redis.quit(); await sql.end(); });
+it('没有边界时许可抑制集合和话题为空', async () => {
+  const expected = {suppressedSources:new Set(),suppressedMemories:new Set(),boundaryTopics:[]};
+  expect(await recallPermissions(catId)).toEqual(expected);
+  await db.transaction(async tx => { expect(await recallPermissions(catId, tx)).toEqual(expected); });
+});
+it('边界许可合并轮次记忆与已接受的问题凭证，事务内也读取当前边界', async () => {
+  const question = await source('不要再提那件事');
+  const accepted = await memory('旧事', '旧记忆');
+  const duplicate = await memory('旧事', '另一条相同指纹记忆');
+  const rejected = await memory('未接受', '不应抑制');
+  const unrelated = await memory('无关问题', '也不应抑制');
+  const turnMemoryId = randomUUID();
+  const [turn] = await db.insert(turns).values({conversationId:convId,userMessageId:question.id,inputVersion:0,memoryIds:[turnMemoryId,accepted.id]}).returning();
+  const reply = await source('猫的旧回复', {role:'cat',turnId:turn!.id});
+  const hidden = await source('不允许的原话', {contextAllowed:false});
+  await db.insert(memoryReceipts).values([
+    {catId,questionId:reply.id,sourceMessageId:accepted.sourceMessageId,fingerprint:accepted.fingerprint,accepted:true},
+    {catId,questionId:reply.id,sourceMessageId:rejected.sourceMessageId,fingerprint:rejected.fingerprint,accepted:false},
+    {catId,questionId:question.id,sourceMessageId:unrelated.sourceMessageId,fingerprint:unrelated.fingerprint,accepted:true},
+  ]);
+  const expected = {suppressedSources:new Set([reply.id,hidden.id,question.id]),
+    suppressedMemories:new Set([turnMemoryId,accepted.id,duplicate.id]),boundaryTopics:['猫的旧回复']};
+  await db.transaction(async tx => {
+    await tx.insert(boundaries).values([{catId,sourceMessageId:reply.id}, {catId,sourceMessageId:hidden.id,description:'隐藏话题'}]);
+    expect(await recallPermissions(catId, tx)).toEqual(expected);
+  });
+  expect(await recallPermissions(catId)).toEqual(expected);
+  await db.update(boundaries).set({description:'明确边界'}).where(eq(boundaries.sourceMessageId,reply.id));
+  expect((await recallPermissions(catId)).boundaryTopics).toEqual(['明确边界']);
+  const other = await account();
+  expect(await recallPermissions(other.catId)).toEqual({suppressedSources:new Set(),suppressedMemories:new Set(),boundaryTopics:[]});
+});
 it('旧相关记忆超过旧50条窗口仍能被找到，近期无关内容不挤占', async () => {
   const old = await memory('忌口', '不吃香菜');
   const sources = await db.insert(messages).values(Array.from({ length: 65 }, (_, i) => ({ conversationId: convId, role: 'user' as const, text: `收藏蓝石编号${i}` }))).returning();

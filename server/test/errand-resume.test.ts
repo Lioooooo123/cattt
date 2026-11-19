@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterAll, beforeEach, expect, it } from 'vitest';
-import { MockLanguageModelV4 } from 'ai/test';
+import { scriptedClient } from '../src/llm/testing.ts';
+import { emptyUsage, type ModelClient } from '../src/llm/index.ts';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
 import { users, cats, conversations, messages, tickets, ticketInputs, runs, runSteps, workerReports, asyncJobs, mailboxLetters, boundaries, pushNotifications } from '../src/db/schema.ts';
@@ -49,7 +50,7 @@ const letters = () => db.select().from(mailboxLetters).where(eq(mailboxLetters.c
 const request = (id: string, text: string, key = randomUUID(), bearer = token) => app.request(`/v1/tickets/${id}`, {
   method: 'PATCH', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json', 'Idempotency-Key': key }, body: JSON.stringify({ text }),
 });
-const failModel = () => new MockLanguageModelV4({ doGenerate: async () => { throw Object.assign(new Error('provider refused'), { statusCode: 400 }); } });
+const failModel = () => scriptedClient(async () => { throw Object.assign(new Error('provider refused'), { statusCode: 400 }); });
 async function failed(goal = '周末建议', at = now) {
   const t = await startErrand(catId, sourceId, goal, at), [r] = await runList(t.ticket_id);
   await processErrand(r!.id, { now: () => at, model: failModel() });
@@ -97,7 +98,7 @@ it('耗尽的执行保留预算与检查点，新执行可用独立预算读旧�
   await appendTicketInput(catId, t.ticket_id, '不要安排跑步');
   const loop = mockWorkerModel();
   // 用固定progress模型真实耗尽20步；原goal保持普通托付，下一次恢复可正常完成。
-  const progress = new MockLanguageModelV4({ doGenerate: async call => loop.doGenerate({ ...call, prompt: [{ role: 'user', content: [{ type: 'text', text: '[loop]' }] }, ...call.prompt] }) });
+  const progress: ModelClient = {provider:'mock',modelId:'progress',stream:(call,signal)=>loop.stream({...call,messages:[{role:'user',content:'[loop]'},...call.messages]},signal)};
   await processErrand(old!.id, { now: () => now, model: progress }); await deliverReports(old!.id, now);
   const oldSteps = await db.select().from(runSteps).where(eq(runSteps.runId, old!.id)); expect(oldSteps).toHaveLength(20);
   const previous = (await runList(t.ticket_id))[0]!;
@@ -241,7 +242,7 @@ it('只认当前执行的waiting推送，旧执行同名工具回执不会恢复
   config.REMOTE_PUSH_ENABLED = 'true';
   await registerDevice(userId, { token: randomUUID().replaceAll('-', '').repeat(2), environment: 'sandbox', topic: 'local.test.cat' }, 'local.test.cat');
   const t = await failed();
-  const wait = new MockLanguageModelV4({ doGenerate: async () => ({ content: [{ type: 'tool-call', toolCallId: 'same-call', toolName: 'report', input: JSON.stringify({ status: 'waiting', question: '想待在家吗？' }) }], finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 10, text: 10, reasoning: 0 } }, warnings: [] }) });
+  const wait = scriptedClient(async () => [{type:'tool-call',toolCallId:'same-call',toolName:'report',input:{status:'waiting',question:'想待在家吗？'},rawInput:'{}'},{type:'finish',finishReason:'tool-calls',usage:{...emptyUsage(),inputTokens:10,outputTokens:10}}]);
   await appendTicketInput(catId, t.id, '继续'); let r = (await runList(t.id)).at(-1)!;
   await processErrand(r.id, { now: () => now, model: wait }); await deliverReports(r.id, now);
   const oldPush = (await db.select().from(pushNotifications).where(eq(pushNotifications.catId, catId)))[0]!;

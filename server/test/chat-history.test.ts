@@ -1,4 +1,5 @@
-import { MockLanguageModelV4 } from 'ai/test';
+import { scriptedClient } from '../src/llm/testing.ts';
+import { emptyUsage } from '../src/llm/index.ts';
 import { runCatAgent } from '../src/runtime/agent.ts';
 import { catTools } from '../src/runtime/tools.ts';
 import { withdrawSources } from '../src/memory/control.ts';
@@ -91,16 +92,17 @@ it('中文旧原话按字面搜索、展开，隔离未来和跨猫，来源先�
  const [turn]=await db.insert(turns).values({conversationId:conv!.id,userMessageId:anchor!.id,inputVersion:0,status:'generating',contextRevision:0,contextSourceIds:[anchor!.id]}).returning();
  const frontend=await catTools({catId:c!.id,turnId:turn!.id,userMessageId:anchor!.id});
  let requests=0;let answer='';
- const model=new MockLanguageModelV4({doStream:async request=>{
+ const model=scriptedClient(async request=>{
  requests++;
- if(requests>1){expect(JSON.stringify(request.prompt)).toContain(old!.id);expect((await db.select().from(turns).where(eq(turns.id,turn!.id)))[0]!.contextSourceIds).toContain(old!.id);}
- const parts:any[]=[{type:'stream-start',warnings:[]}];
- if(requests<3)parts.push({type:'tool-call',toolCallId:'history-'+requests,toolName:requests===1?'search_chat_history':'read_chat_history',input:JSON.stringify(requests===1?{query:'桂花100%_'}:{messageIds:[old!.id]})});
- else parts.push({type:'text-start',id:'t'},{type:'text-delta',id:'t',delta:'桂花100%_茶'},{type:'text-end',id:'t'});
- parts.push({type:'finish',finishReason:{unified:requests<3?'tool-calls':'stop',raw:'stop'},usage:{inputTokens:{total:10,noCache:10,cacheRead:0,cacheWrite:0},outputTokens:{total:3,text:3,reasoning:0}}});
- return {stream:new ReadableStream({start(c){parts.forEach(p=>c.enqueue(p));c.close();}})};
- }});
- await runCatAgent({model,instructions:'只根据原话回答',messages:[{role:'user',content:'请找那杯茶'}],tools:frontend,signal,guard:async()=>{},onText:async t=>{answer+=t;},onTool:async()=>{},onStep:async()=>{}});
+ if(requests>1){expect(JSON.stringify(request.messages)).toContain(old!.id);expect((await db.select().from(turns).where(eq(turns.id,turn!.id)))[0]!.contextSourceIds).toContain(old!.id);}
+ const calls=requests<3;
+ const input=requests===1?{query:'桂花100%_'}:{messageIds:[old!.id]};
+ return [
+ ...(calls?[{type:'tool-call' as const,toolCallId:'history-'+requests,toolName:requests===1?'search_chat_history':'read_chat_history',input,rawInput:JSON.stringify(input)}]:[{type:'text-delta' as const,delta:'桂花100%_茶'}]),
+ {type:'finish' as const,finishReason:calls?'tool-calls':'stop',usage:{...emptyUsage(),inputTokens:10,outputTokens:3}}
+ ];
+ });
+ await runCatAgent({client:model,instructions:'只根据原话回答',messages:[{role:'user',content:'请找那杯茶'}],tools:frontend,signal,guard:async()=>{},onText:async t=>{answer+=t;},onTool:async()=>{},onStep:async()=>{}});
  expect(requests).toBe(3);expect(answer).toBe('桂花100%_茶');
  expect((await db.select().from(turns).where(eq(turns.id,turn!.id)))[0]!.contextSourceIds).toContain(old!.id);
  const [reply]=await db.insert(messages).values({conversationId:conv!.id,role:'cat',text:'派生猫回复',turnId:turn!.id}).returning();

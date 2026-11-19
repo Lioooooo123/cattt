@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
+import type { ModelClient } from '../llm/index.ts';
 import { sql } from '../db/client.ts';
 
 export type AdmissionLane = 'chat' | 'background';
@@ -53,30 +53,12 @@ export async function acquire(resource: string, lane: AdmissionLane, purpose: st
   }
 }
 
-export function admissionModel(model: LanguageModel, purpose: string, resource: string, limit: number): LanguageModel {
+export function admissionModel(model: ModelClient, purpose: string, resource: string, limit: number): ModelClient {
   if (limit === 0) return model;
-  const middleware: LanguageModelMiddleware = {
-    wrapGenerate: async ({ doGenerate, params }) => {
-      const release = await acquire(resource, admissionLane(purpose), purpose, limit, params.abortSignal);
-      try { return await doGenerate(); } finally { await release(); }
-    },
-    wrapStream: async ({ doStream, params }) => {
-      const release = await acquire(resource, admissionLane(purpose), purpose, limit, params.abortSignal);
-      try {
-        const result = await doStream();
-        const reader = result.stream.getReader();
-        return { ...result, stream: new ReadableStream({
-          async pull(controller) {
-            try {
-              const next = await reader.read();
-              if (next.done) { await release(); controller.close(); }
-              else { if (next.value.type === 'error') await release(); controller.enqueue(next.value); }
-            } catch (error) { await release(); controller.error(error); }
-          },
-          async cancel(reason) { try { await reader.cancel(reason); } finally { await release(); } },
-        }, { highWaterMark: 0 }) };
-      } catch (error) { await release(); throw error; }
-    },
-  };
-  return wrapLanguageModel({ model: model as Parameters<typeof wrapLanguageModel>[0]['model'], middleware });
+  return { provider: model.provider, modelId: model.modelId, async *stream(request, signal) {
+    const signals = [request.signal, signal].filter((s): s is AbortSignal => !!s);
+    const combined = signals.length ? AbortSignal.any(signals) : undefined;
+    const release = await acquire(resource, admissionLane(purpose), purpose, limit, combined);
+    try { yield* model.stream(request, combined); } finally { await release(); }
+  } };
 }

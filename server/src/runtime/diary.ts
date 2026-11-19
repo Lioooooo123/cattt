@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { generateText } from '../llm/index.ts';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { cats } from '../db/schema.ts';
@@ -53,17 +53,15 @@ export async function writeDiary(catId: string, facts: DiaryFacts) {
   const behavior = compileBehavior(temperament, cat.traits);
   const slot = catDiarySlot('chat');
   const started = Date.now();
-  const { text, usage } = await generateText({
-    model: slot.model,
-    instructions: `你是${cat.name}，一只猫。晚上你在自己的本子上记下今天。
+  const { text, usage } = await generateText(slot.client, {
+    system: `你是${cat.name}，一只猫。晚上你在自己的本子上记下今天。
 - 只写下面这张事实表里有的事，一件都不许添。没写的事就是没发生。
 - ${behavior.diarySentences} 句以内，短句，猫的口吻，平铺直叙。
 - 不问"为什么不来"，不指责，不许诺，不写打卡、任务、连续天数这类词。
 - 不写标题、日期、署名，不用 markdown。只输出正文。`,
     messages: [{ role: 'user', content: `今天的事实：\n${factLines(facts).join('\n')}` }],
-    providerOptions: slot.providerOptions,
-    maxRetries: 2,
-  });
+    extraBody: slot.extraBody,
+  }, { maxRetries: 2 });
   await recordModelCall({ purpose: 'cat_diary', modelId: slot.modelId, usage, latencyMs: Date.now() - started });
   return text.trim().replace(/\s+/g, '').slice(0, 120);
 }

@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
+import type { ModelClient } from '../llm/index.ts';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { users,modelReservations } from '../db/schema.ts';
@@ -7,17 +7,8 @@ import { config } from '../config.ts';
 const account=new AsyncLocalStorage<string>();
 export const withModelAccount=<T>(userId:string,run:()=>T):T=>account.run(userId,run);
 export class ModelBudgetExceeded extends Error{constructor(){super('model_daily_budget');this.name='ModelBudgetExceeded';}}
-/** 每次底层调用/SDK重试前预留，失败和响应丢失均不退还。UTC日不随旅行重复发额度。 */
-export function budgetModel(model:LanguageModel,purpose:string):LanguageModel{
- const middleware:LanguageModelMiddleware={
-  transformParams:async({params})=>({...params,maxOutputTokens:Math.min(params.maxOutputTokens??2048,8000)}),
-  wrapGenerate:async({doGenerate,params})=>{const finish=await reserve(params);try{const r=await doGenerate();await finish('completed');return r;}catch(e){await finish('failed');throw e;}},
-  wrapStream:async({doStream,params})=>{
-   const finish=await reserve(params);
-   try{const r=await doStream();let failed=false;return {...r,stream:r.stream.pipeThrough(new TransformStream({transform(part,controller){if(part.type==='error')failed=true;controller.enqueue(part);},async flush(){await finish(failed?'failed':'completed');}}))};}
-   catch(e){await finish('failed');throw e;}
-  },
- };
+/** 每次底层调用/重试前预留，失败和响应丢失均不退还。UTC日不随旅行重复发额度。 */
+export function budgetModel(model:ModelClient,purpose:string):ModelClient{
  async function reserve(params:unknown){
   const userId=account.getStore();
   if(!userId){if(config.APP_ENV!=='development')throw new Error('model_account_required');return async(_status:string)=>{};}
@@ -32,7 +23,13 @@ export function budgetModel(model:LanguageModel,purpose:string):LanguageModel{
   });
   return async(status:string)=>{await db.update(modelReservations).set({status}).where(eq(modelReservations.id,id));};
  }
- return wrapLanguageModel({model:model as Parameters<typeof wrapLanguageModel>[0]['model'],middleware});
+ return {provider:model.provider,modelId:model.modelId,async *stream(request,signal){
+  const params={...request,maxOutputTokens:Math.min(request.maxOutputTokens??2048,8000)};
+  const finish=await reserve(params);let completed=false;
+  try{for await(const event of model.stream(params,signal)){if(event.type==='finish')completed=event.finishReason!=='error';yield event;}}
+  catch(error){completed=false;throw error;}
+  finally{await finish(completed?'completed':'failed');}
+ }};
 }
 export async function jobModelAccount<T>(job:{kind:string;objectId:string},run:()=>Promise<T>):Promise<T>{
  const [r]=await db.execute<{user_id:string}>(sql`select c.user_id from cats c where c.id = case

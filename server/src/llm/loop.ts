@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { budgetMessages, toolSchemas } from './context.ts';
 import { ModelOutputError } from './errors.ts';
-import { emptyUsage, type ModelClient, type ModelMessage, type ModelRequest, type ModelUsage, type ToolCall } from './types.ts';
+import { emptyUsage, type ModelClient, type ModelMessage, type ModelRequest, type ModelUsage, type ToolCall, type ToolResultPart } from './types.ts';
 
 export type Observation = {
   call_id: string;
@@ -74,6 +74,7 @@ export async function runModelStep(options: ModelStepOptions) {
     ...(text ? [{ type: 'text' as const, text }] : []),
     ...toolCalls.map(call => ({ type: 'tool-call' as const, toolCallId: call.toolCallId, toolName: call.toolName, input: call.input })),
   ] }];
+  const toolResults: ToolResultPart[] = [];
   for (const call of toolCalls) {
     await guarded(options);
     const definition = options.tools[call.toolName];
@@ -81,10 +82,11 @@ export async function runModelStep(options: ModelStepOptions) {
     const parsed = definition.inputSchema.safeParse(call.input);
     if (!parsed.success) throw new ModelOutputError(`工具参数不符合结构：${call.toolName}`, { cause: parsed.error });
     const output: unknown = JSON.parse(JSON.stringify(await definition.execute(parsed.data, options.signal, call)));
-    responseMessages.push({ role: 'tool', content: [{ type: 'tool-result', toolCallId: call.toolCallId,
-      toolName: call.toolName, output: { type: 'json', value: output } }] });
+    toolResults.push({ type: 'tool-result', toolCallId: call.toolCallId,
+      toolName: call.toolName, output: { type: 'json', value: output } });
   }
   options.signal.throwIfAborted();
+  if (toolResults.length) responseMessages.push({ role: 'tool', content: toolResults });
   return { text, reasoning, toolCalls, finishReason, usage, responseMessages };
 }
 

@@ -366,7 +366,7 @@ export const runs=pgTable('runs',{
 },t=>[uniqueIndex('runs_ticket_generation').on(t.ticketId,t.generation),uniqueIndex('runs_one_running').on(t.ticketId).where(sql`${t.status} = 'running'`),check('runs_status',sql`${t.status} in ('pending','running','ended')`)]);
 export const runSteps=pgTable('run_steps',{
  id:id(),runId:uuid('run_id').notNull().references(()=>runs.id,{onDelete:'cascade'}),step:integer('step').notNull(),
- messages:jsonb('messages').$type<import('ai').ModelMessage[]>().notNull(),usage:jsonb('usage').$type<{outputTokens:number}>().notNull(),
+ messages:jsonb('messages').$type<import('../llm/types.ts').ModelMessage[]>().notNull(),usage:jsonb('usage').$type<{outputTokens:number}>().notNull(),
  finishedAt:timestamp('finished_at',{withTimezone:true}).notNull().defaultNow(),
 },t=>[uniqueIndex('run_steps_checkpoint').on(t.runId,t.step)]);
 

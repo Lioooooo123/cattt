@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, expect, test, vi } from 'vitest';
-import type { LanguageModelV4, LanguageModelV4CallOptions } from '@ai-sdk/provider';
-import { MockLanguageModelV4 } from 'ai/test';
+import { generateText, emptyUsage, type ModelClient, type ModelRequest } from '../src/llm/index.ts';
+import { scriptedClient } from '../src/llm/testing.ts';
 import { sql } from '../src/db/client.ts';
 import { acquire, admissionLane, admissionModel } from '../src/runtime/admission.ts';
 import { slotFrom } from '../src/runtime/model.ts';
@@ -9,7 +9,7 @@ import { config } from '../src/config.ts';
 
 const resources: string[] = [];
 const resource = () => { const r = `test:${randomUUID()}`; resources.push(r); return r; };
-const options: LanguageModelV4CallOptions = { prompt: [{ role: 'user', content: [{ type: 'text', text: '你好' }] }] };
+const options: ModelRequest = { messages: [{ role: 'user', content: '你好' }] };
 async function waiting(r: string, count: number) {
   await vi.waitFor(async () => {
     const [row] = await sql`select count(*)::int as n from model_admissions where resource = ${r} and state = 'waiting'`;
@@ -36,16 +36,17 @@ test('槽位包装：慢后台流结束后，聊天越过第二个后台', async
   resources.push('mock');
   try {
     const spec = { name: 'chat' as const, provider: 'mock' as const, model: 'mock-chat', thinking: 'disabled' as const };
-    const background = slotFrom(spec, 'cat_diary').model as LanguageModelV4;
-    const chat = slotFrom(spec, 'chat').model as LanguageModelV4;
-    const first = await background.doStream({ ...options, prompt: [{ role: 'user', content: [{ type: 'text', text: '[slow] 你好' }] }] });
+    const background = slotFrom(spec, 'cat_diary').client;
+    const chat = slotFrom(spec, 'chat').client;
+    const first = background.stream({ messages: [{ role: 'user', content: '[slow] 你好' }] })[Symbol.asyncIterator]();
+    await first.next();
     const order: string[] = [];
-    const consume = async (model: LanguageModelV4, label: string) => {
-      const result = await model.doStream(options); order.push(label); await result.stream.cancel();
+    const consume = async (model: ModelClient, label: string) => {
+      for await (const _ of model.stream(options)) { order.push(label); break; }
     };
     const b = consume(background, 'B'); await waiting('mock', 1);
     const c = consume(chat, 'C'); await waiting('mock', 2);
-    const reader = first.stream.getReader(); await reader.read(); await reader.cancel();
+    await first.return?.();
     await Promise.all([b, c]); expect(order).toEqual(['C', 'B']);
   } finally { config.MODEL_MOCK_CONCURRENCY = old; }
 });
@@ -68,48 +69,62 @@ test('等候时取消删除行，已经取消不入队', async () => {
   await expect(acquire(r, 'chat', 'chat', 1, abort.signal)).rejects.toThrow(); await done();
 });
 
-test('流取消、正常结束、流错误和调用抛错均释放', async () => {
-  for (const mode of ['cancel', 'finish', 'error', 'throw', 'part-error']) {
+test('流提前结束、正常完成、流错误和调用抛错均释放', async () => {
+  for (const mode of ['cancel', 'finish', 'error', 'throw']) {
     const r = resource();
-    const base = new MockLanguageModelV4({ doStream: async () => {
-      if (mode === 'throw') throw new Error('failed');
-      return { warnings: [], stream: new ReadableStream({ start(c) {
-        if (mode === 'finish') c.close();
-        if (mode === 'error') c.error(new Error('failed'));
-        if (mode === 'part-error') c.enqueue({ type: 'error', error: new Error('failed') });
-      } }) };
-    } });
-    const model = admissionModel(base, 'chat', r, 1) as LanguageModelV4;
-    if (mode === 'throw') await expect(model.doStream(options)).rejects.toThrow('failed');
-    else {
-      const result = await model.doStream(options);
-      if (mode === 'cancel') await result.stream.cancel();
-      else { const reader = result.stream.getReader(); if (mode === 'error') await expect(reader.read()).rejects.toThrow('failed'); else await reader.read(); await reader.cancel().catch(() => {}); }
-    }
+    const base: ModelClient = {provider:'mock',modelId:'release',async *stream(){
+      if(mode==='throw')throw new Error('failed');
+      yield {type:'text-delta',delta:'好'};
+      if(mode==='error')throw new Error('failed');
+      yield {type:'finish',finishReason:'stop',usage:emptyUsage()};
+    }};
+    const model=admissionModel(base,'chat',r,1);
+    if(mode==='cancel'){for await(const _ of model.stream(options))break;}
+    else if(mode==='error'||mode==='throw')await expect(generateText(model,options,{maxRetries:0})).rejects.toThrow('failed');
+    else await generateText(model,options);
     expect(await sql`select id from model_admissions where resource = ${r}`).toHaveLength(0);
   }
 });
 
-test('非流调用成功或失败都释放；关闭准入不访问数据库', async () => {
-  const r = resource();
-  const base = new MockLanguageModelV4({ doGenerate: async () => { throw new Error('provider_failed'); } });
-  const model = admissionModel(base, 'chat', r, 1) as LanguageModelV4;
-  await expect(model.doGenerate(options)).rejects.toThrow('provider_failed');
-  const success = new MockLanguageModelV4({ doGenerate: async () => ({
-    content: [{ type: 'text', text: '好' }], warnings: [], finishReason: { unified: 'stop', raw: 'stop' },
-    usage: { inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 1, text: 1, reasoning: 0 } },
-  }) });
-  await (admissionModel(success, 'chat', r, 1) as LanguageModelV4).doGenerate(options);
+test('生成成功或失败都释放；关闭准入不访问数据库', async () => {
+  const r=resource();
+  const base=scriptedClient([new Error('provider_failed')]);
+  const model=admissionModel(base,'chat',r,1);
+  await expect(generateText(model,options,{maxRetries:0})).rejects.toThrow('provider_failed');
+  const success=scriptedClient([[{type:'text-delta',delta:'好'},{type:'finish',finishReason:'stop',usage:emptyUsage()}]]);
+  await generateText(admissionModel(success,'chat',r,1),options);
   expect(await sql`select id from model_admissions where resource = ${r}`).toHaveLength(0);
-  const debug = sql.options.debug;
-  const queries = vi.fn(); sql.options.debug = queries;
+  const debug=sql.options.debug;
+  const queries=vi.fn();sql.options.debug=queries;
   try {
-    await sql`select 1`; expect(queries).toHaveBeenCalled(); queries.mockClear();
-    expect(admissionModel(base, 'chat', r, 0)).toBe(base);
-    await (await acquire(r, 'chat', 'chat', 0))();
-    await expect((admissionModel(base, 'chat', r, 0) as LanguageModelV4).doGenerate(options)).rejects.toThrow('provider_failed');
+    await sql`select 1`;expect(queries).toHaveBeenCalled();queries.mockClear();
+    expect(admissionModel(base,'chat',r,0)).toBe(base);
+    await(await acquire(r,'chat','chat',0))();
+    const failed=scriptedClient([new Error('provider_failed')]);
+    await expect(generateText(admissionModel(failed,'chat',r,0),options,{maxRetries:0})).rejects.toThrow('provider_failed');
     expect(queries).not.toHaveBeenCalled();
-  } finally { sql.options.debug = debug; }
+  }finally{sql.options.debug=debug;}
+});
+
+test('运行中任一调用信号取消均释放，未结束的空流也释放', async () => {
+  for(const mode of ['request','argument','empty']){
+    const r=resource(),request=new AbortController(),argument=new AbortController();
+    const base:ModelClient={provider:'mock',modelId:'abort',async *stream(_options,signal){
+      expect(await sql`select id from model_admissions where resource = ${r} and state = 'running'`).toHaveLength(1);
+      if(mode==='empty')return;
+      yield {type:'text-delta',delta:'好'};
+      signal?.throwIfAborted();
+      yield {type:'finish',finishReason:'stop',usage:emptyUsage()};
+    }};
+    const model=admissionModel(base,'chat',r,1);
+    const iterator=model.stream({...options,signal:request.signal},argument.signal)[Symbol.asyncIterator]();
+    await iterator.next();
+    if(mode!=='empty'){
+      (mode==='request'?request:argument).abort();
+      await expect(iterator.next()).rejects.toThrow();
+    }
+    expect(await sql`select id from model_admissions where resource = ${r}`).toHaveLength(0);
+  }
 });
 
 test('同步记忆保存和检索走聊天，其余用途后台', () => {

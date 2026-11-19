@@ -1,5 +1,5 @@
 import { rethrowForQueue } from './model-error.ts';
-import { generateText } from 'ai';
+import { generateText } from '../llm/index.ts';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { boundaries, messages } from '../db/schema.ts';
@@ -16,14 +16,12 @@ export async function summarizeBoundary(boundaryId: string, jobId: string) {
 
   const slot = extractSlot();
   const started = Date.now();
-  const { text, usage } = await generateText({
-    model: slot.model,
-    instructions:
+  const { text, usage } = await generateText(slot.client, {
+    system:
       '用户不想再聊下面这条消息涉及的话题。用一个短语概括这个话题，不超过 12 个字，只输出短语本身，不加标点和解释。',
     messages: [{ role: 'user', content: row.text }],
-    providerOptions: slot.providerOptions,
-    maxRetries: 2,
-  }).catch(rethrowForQueue);
+    extraBody: slot.extraBody,
+  }, { maxRetries: 2 }).catch(rethrowForQueue);
   await recordModelCall({ purpose: 'boundary_summarize', modelId: slot.modelId, usage, latencyMs: Date.now() - started, jobId });
 
   const description = text.trim().slice(0, 40);

@@ -155,6 +155,13 @@
       "when": 1795068059118,
       "tag": "0021_hot_path_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795070769745,
+      "tag": "0022_lan_pairing",
+      "breakpoints": true
     }
   ]
 }

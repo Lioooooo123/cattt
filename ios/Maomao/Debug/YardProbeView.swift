@@ -205,7 +205,7 @@ final class YardProbe: ObservableObject {
     }
 
     func findCat() {
-        guard running, !finishing else { return }
+        guard running, !finishing, web.canSendCommands else { return }
         Task { _ = try? await web.send(["type": "findCat"]) }
     }
 

@@ -84,11 +84,11 @@ final class YardRuntime {
         queue.append(value); flush()
     }
     private func flush() {
-        guard active, web.ready, !sending, !queue.isEmpty else { return }
+        guard active, web.canSendCommands, !sending, !queue.isEmpty else { return }
         sending = true
         Task { [weak self] in
             guard let self else { return }
-            while active, web.ready, !queue.isEmpty {
+            while active, web.canSendCommands, !queue.isEmpty {
                 let command = queue.removeFirst()
                 do {
                     let result = try await web.send(command)
@@ -157,7 +157,7 @@ final class YardRuntime {
         watchdog?.cancel()
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard !Task.isCancelled, let self, active, !web.surfaceReady else { return }
+            guard !Task.isCancelled, let self, web.needsWatchdogFailure(active: active) else { return }
             onUnavailable?("小院暂时无法打开，可以重试"); web.markUnavailable("小院暂时无法打开，可以重试")
         }
     }

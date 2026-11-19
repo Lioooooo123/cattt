@@ -4,6 +4,7 @@ PKG=$(cd "$(dirname "$0")/.." && pwd)
 APP=${CATTT_APP:-"$PKG/build/Cattt.app"}
 BIN="$APP/Contents/MacOS/CatttHost"
 PG="$APP/Contents/Resources/postgres/bin"
+if pgrep -x redis-server >/dev/null; then echo '烟测要求无 redis-server 进程'; exit 1; fi
 mkdir -p "$PKG/build/smoke"
 DATA=$(mktemp -d "$PKG/build/smoke/run.XXXXXX")
 PID=
@@ -28,6 +29,8 @@ pgrep -P "$PID" -fl 'api.mjs|worker.mjs'
 test -n "$(pgrep -P "$PID" -f worker.mjs)"
 cat "$DATA/health.json"
 echo
+"$APP/Contents/Resources/node/bin/node" -e 'const h=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(h.ok!==true || h.db!==true || "redis" in h) process.exit(1)' "$DATA/health.json"
+echo '无 Redis：/healthz 200，ok=true，db=true，无 redis 字段'
 echo '无模型 key / 无 MODEL_PROVIDER：API 和 worker 已启动，/healthz 200'
 if "$BIN" --headless --data-dir "$DATA" --backup >"$DATA/duplicate.log" 2>&1; then echo '单实例保护失效'; exit 1; fi
 rg '宿主已经运行' "$DATA/duplicate.log"

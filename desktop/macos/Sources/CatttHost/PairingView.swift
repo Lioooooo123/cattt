@@ -21,6 +21,21 @@ import HostCore
         do { try await client.removeDevice(id); devices = try await client.devices() }
         catch { self.error = error.localizedDescription }
     }
+    func pollDevices() async {
+        while !Task.isCancelled {
+            do { try await Task.sleep(for: .seconds(3)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            if loading { continue }
+            do {
+                let updated = try await client.devices()
+                guard !Task.isCancelled else { return }
+                if !loading { devices = updated }
+            } catch {
+                if Task.isCancelled { return }
+            }
+        }
+    }
 }
 
 struct PairingView: View {
@@ -76,7 +91,7 @@ struct PairingView: View {
                 }
             }.frame(maxHeight: 120)
         }.padding(24).frame(width: 460, alignment: .topLeading)
-            .task { await model.refresh() }
+            .task { await model.refresh(); await model.pollDevices() }
             .confirmationDialog("移除这个设备？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
                 Button("移除设备", role: .destructive) {
                     if let device = removing { Task { await model.remove(device.id) } }; removing = nil

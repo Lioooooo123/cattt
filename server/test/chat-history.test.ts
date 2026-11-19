@@ -8,6 +8,26 @@ import { eq } from 'drizzle-orm';
 import { db,sql } from '../src/db/client.ts';
 import { cats,conversations,messages,users,turns,boundaries } from '../src/db/schema.ts';
 import { historyTools } from '../src/runtime/chat-history.ts';
+import { app } from '../src/api/app.ts';
+import { hashToken } from '../src/auth-token.ts';
+it('历史消息参数只接受整数，非法值回退默认值',async()=>{
+ const token=randomUUID();
+ const [u]=await db.insert(users).values({name:'history-params-test',devTokenHash:hashToken(token)}).returning();
+ try{
+  const [c]=await db.insert(cats).values({userId:u!.id,name:'团子',appearance:'orange',temperament:'slow',traits:{energy:1,initiative:1,directness:1,closeness:1}}).returning();
+  const [conv]=await db.insert(conversations).values({catId:c!.id}).returning();
+  const request=(query:string)=>app.request('/v1/messages'+query,{headers:{authorization:'Bearer '+token}});
+  expect(await (await request('?limit=abc&after=abc&before=abc')).json()).toEqual({messages:[]});
+  const rows=await db.insert(messages).values(Array.from({length:55},(_,i)=>({conversationId:conv!.id,role:'user' as const,text:String(i)}))).returning();
+  const expected=rows.slice(-50).map(m=>m.id);
+  for(const query of ['', '?limit=abc&after=abc&before=abc','?limit=1.5&after=1.5&before=1.5','?limit=Infinity&after=Infinity&before=Infinity']){
+   const response=await request(query);expect(response.status).toBe(200);
+   expect((await response.json()).messages.map((m:any)=>m.id)).toEqual(expected);
+  }
+  const response=await request('?limit=2&after='+rows[0]!.seq+'&before='+rows[3]!.seq);
+  expect((await response.json()).messages.map((m:any)=>m.id)).toEqual(rows.slice(1,3).map(m=>m.id));
+ }finally{await db.delete(users).where(eq(users.id,u!.id));}
+});
 it('中文旧原话按字面搜索、展开，隔离未来和跨猫，来源先登记',async()=>{
  const [u]=await db.insert(users).values({name:'history-test'}).returning();
  const [otherUser]=await db.insert(users).values({name:'foreign-history-test'}).returning();

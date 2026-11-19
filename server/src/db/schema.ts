@@ -137,7 +137,8 @@ export const turns = pgTable(
     remembered: boolean('remembered').notNull().default(false),
     createdAt: createdAt(),
   },
-  (t) => [index('turns_conversation_status').on(t.conversationId, t.status)],
+  (t) => [index('turns_conversation_status').on(t.conversationId, t.status),
+    index('turns_stale_active').on(sql`coalesce(${t.heartbeatAt}, ${t.createdAt})`).where(sql`${t.status} in ('queued', 'generating')`)],
 );
 
 export const modelCalls = pgTable('model_calls', {
@@ -215,7 +216,7 @@ export const boundaries = pgTable('boundaries', {
   /** worker 从那条消息整理出的一句话；整理好之前为空，先用原文 */
   description: text('description'),
   createdAt: createdAt(),
-});
+}, (t) => [index('boundaries_cat_created').on(t.catId, t.createdAt)]);
 
 /** PG 是异步待办的真相源，pg-boss 负责可重建的投递。 */
 export const asyncJobs = pgTable('async_jobs', {
@@ -231,7 +232,9 @@ export const asyncJobs = pgTable('async_jobs', {
   error: text('error'),
   remembered: boolean('remembered').notNull().default(false),
   createdAt: createdAt(),
-}, (t) => [uniqueIndex('async_jobs_source_kind_version').on(t.sourceId, t.kind, t.version)]);
+}, (t) => [uniqueIndex('async_jobs_source_kind_version').on(t.sourceId, t.kind, t.version),
+  index('async_jobs_state_next_attempt').on(t.state, t.nextAttemptAt),
+  index('async_jobs_state_lease').on(t.state, t.leaseUntil)]);
 
 /** 即使候选仅确认已有记忆，也保存来源凭证，重放不能再次改变状态。 */
 export const memoryReceipts = pgTable('memory_receipts', {
@@ -240,7 +243,9 @@ export const memoryReceipts = pgTable('memory_receipts', {
   sourceMessageId: uuid('source_message_id').notNull(),
   fingerprint: text('fingerprint').notNull(),
   accepted: boolean('accepted').notNull(),
-}, (t) => [uniqueIndex('memory_receipts_source_fingerprint').on(t.sourceMessageId, t.fingerprint)]);
+}, (t) => [uniqueIndex('memory_receipts_source_fingerprint').on(t.sourceMessageId, t.fingerprint),
+  index('memory_receipts_cat_question').on(t.catId, t.questionId),
+  index('memory_receipts_cat_source').on(t.catId, t.sourceMessageId)]);
 
 /** 同步保存与模型读取是两种许可；private 记录可同步但不能进入模型。 */
 export const diaryEntries = pgTable('diary_entries', {

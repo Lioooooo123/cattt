@@ -276,10 +276,16 @@ final class AppStore: ObservableObject {
 
     /// 聊天走本地模拟还是本机后端。切换走 `setBackendMode(_:)`。
     @Published var backend = BackendConfig.load() {
-        didSet { backend.save(); if backend != oldValue { loadCreation(); loadDiary() } }
+        didSet { backend.save(); if backend.storageIdentity != oldValue.storageIdentity { loadCreation(); loadDiary() } }
     }
     /// 调试面板上显示的连接状态。
     @Published var backendStatus: String?
+    @Published var showsPairing = false
+    @Published var pairInvitation: PairInvitation?
+    @Published var pairingError: String?
+    @Published var pairingBusy = false
+    var pairedProbeTask: Task<Void, Never>?
+    var lastPairProbe = Date.distantPast
     @Published var identityError: String?
     @Published var identityBusy = false
     @Published var appleLoginNonce: String?

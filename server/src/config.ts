@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
 import { z } from 'zod';
+import { fileURLToPath } from 'node:url';
 
 // 本机开发从 server/.env 读；已经在环境里的变量优先（部署时靠环境变量，测试时靠它临时切 mock）。
 // 环境里的值和 .env 不一样时记下来，启动时提醒，免得被 shell 里的全局变量悄悄盖掉。
@@ -35,6 +36,10 @@ const schema = z
     DATABASE_URL: z.string().default('postgres://maomao:maomao@localhost:5432/maomao'),
     REDIS_URL: z.string().default('redis://localhost:6379'),
     PORT: z.coerce.number().int().default(8787),
+    HOST: z.string().default('127.0.0.1'),
+    LAN_HTTPS_HOST: z.string().default('0.0.0.0'),
+    LAN_HTTPS_PORT: z.coerce.number().int().min(0).max(65535).default(8788),
+    CATTT_DATA_DIR: z.string().default(fileURLToPath(new URL('../.local', import.meta.url))),
     /** 默认来源；每个槽位可用 CHAT_PROVIDER 等单独改。mock 时全部槽位都用假模型 */
     MODEL_PROVIDER: z.enum([...modelSources, 'mock']).default('openai-compatible'),
     /** 本机 OpenAI 兼容服务（Ollama / LM Studio / llama.cpp server 等）；默认 Ollama */

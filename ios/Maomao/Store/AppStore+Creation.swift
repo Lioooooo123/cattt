@@ -15,7 +15,7 @@ extension AppStore {
 
     /// 只迁移原本机空间，不能把全局旧资料猜成某个远端账号的资料。
     func loadCreation() {
-        if backend.mode == .service {
+        if backend.mode == .service || backend.mode == .paired {
             onboardingTask?.cancel()
             onboarding = nil
             creationArchive = CreationArchive()

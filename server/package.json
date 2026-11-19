@@ -9,6 +9,7 @@
     "@ai-sdk/deepseek": "^3.0.42",
     "@ai-sdk/provider": "4.0.13",
     "@hono/node-server": "^2.1.1",
+    "@peculiar/x509": "1.12.3",
     "ai": "^7.0.97",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
@@ -16,10 +17,12 @@
     "jose": "^6.2.16",
     "pg-boss": "^12.38.1",
     "postgres": "^3.4.9",
+    "qrcode-terminal": "0.12.0",
     "zod": "^4.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
+    "@types/qrcode-terminal": "0.12.2",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
@@ -27,6 +30,7 @@
   },
   "scripts": {
     "eval:memory": "vitest run --silent=false --no-file-parallelism test/memory-eval.test.ts",
+    "pair": "tsx scripts/pair.ts",
     "dev": "pnpm run --parallel \"/^dev:/\"",
     "dev:api": "tsx watch src/api.ts",
     "dev:worker": "tsx watch src/worker.ts",

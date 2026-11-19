@@ -3,14 +3,13 @@ import { afterAll, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
 import { users, cats, conversations, messages, turns, boundaries, memoryBlocks } from '../src/db/schema.ts';
-import { redis } from '../src/redis.ts';
 import { turnGuardSnapshot, turnPublicationChecks } from '../src/agent/publisher.ts';
 import { acquireConversationLock, releaseConversationLock, requestCancel, readCancel, subscribeCancel } from '../src/turns/events.ts';
 
 const ids: string[] = [];
 afterAll(async () => {
   for (const id of ids) await db.delete(users).where(eq(users.id, id));
-  await redis.quit(); await sql.end();
+  await sql.end();
 });
 
 it('取消通知及时到达，保留晚读与作废优先', async () => {
@@ -25,7 +24,7 @@ it('取消通知及时到达，保留晚读与作废优先', async () => {
     remove();
     await requestCancel(id, 'supersede');
     expect(received).toEqual(['supersede']);
-  } finally { remove(); await redis.del(`turn:${id}:cancel`); }
+  } finally { remove(); await sql`delete from turn_controls where turn_id=${id}`; }
 });
 
 it('释放锁唤醒等待者，错误持有者不能释放；短等待仍立即尝试', async () => {
@@ -36,7 +35,7 @@ it('释放锁唤醒等待者，错误持有者不能释放；短等待仍立即�
   const waiter = acquireConversationLock(id, 'waiter', 1500);
   await new Promise(resolve => setTimeout(resolve, 80));
   await releaseConversationLock(id, 'wrong');
-  expect(await redis.get(`conv:${id}:lock`)).toBe('owner');
+  expect((await sql`select token from conversation_locks where conversation_id=${id}`)[0]?.token).toBe('owner');
   await releaseConversationLock(id, 'owner');
   expect(await waiter).toBe(true);
   expect(performance.now() - started).toBeLessThan(700);
@@ -68,7 +67,7 @@ it('合并快照与原有 revision/boundaryStamp 字符串完全一致', async (
 
 it('锁过期而没有发布通知时，低频重试仍可取得锁', async () => {
   const id = randomUUID();
-  await redis.set(`conv:${id}:lock`, 'expired', 'PX', 100);
+  await sql`insert into conversation_locks values (${id}, 'expired', now() + interval '100 milliseconds')`;
   expect(await acquireConversationLock(id, 'next', 1600)).toBe(true);
   await releaseConversationLock(id, 'next');
 });

@@ -8,7 +8,7 @@ import { config } from '../src/config.ts';
 const base=process.env.BASE_URL??'https://localhost:8843';
 if(!['localhost','127.0.0.1'].includes(new URL(base).hostname)||new URL(config.DATABASE_URL).port!=='15432')throw new Error('只允许本机隔离数据库/HTTPS端点');
 const envFile=process.env.COMPOSE_ENV_FILE;if(!envFile)throw new Error('COMPOSE_ENV_FILE required');
-const composeEnv={...process.env};for(const key of ['DATABASE_URL','REDIS_URL','MODEL_PROVIDER','APP_ENV','CATTT_IMAGE','AGENT_ENABLED','MAOMAO_DEEPSEEK_API_KEY','APNS_TOPIC'])delete composeEnv[key];
+const composeEnv={...process.env};for(const key of ['DATABASE_URL','MODEL_PROVIDER','APP_ENV','CATTT_IMAGE','AGENT_ENABLED','MAOMAO_DEEPSEEK_API_KEY','APNS_TOPIC'])delete composeEnv[key];
 const files=['--env-file',envFile,'-f','deploy/compose.staging.yml','-f','deploy/compose.local.yml'];
 const a=await createDevUser('phase5-rollback-probe');const token=randomUUID();const headers={authorization:'Bearer '+token,'content-type':'application/json'};
 const expect=(value:unknown,message:string)=>{if(!value)throw new Error(message);};

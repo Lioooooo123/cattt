@@ -1,4 +1,4 @@
-/** 模拟器→真实Hono→PG/Redis完整恢复联调。只替换模型为可控mock，HTTP层仅注入断流/回执丢失。 */
+/** 模拟器→真实Hono→PG完整恢复联调。只替换模型为可控mock，HTTP层仅注入断流/回执丢失。 */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -9,13 +9,11 @@ import { app } from '../src/api/app.ts';
 import { db, sql } from '../src/db/client.ts';
 import { createDevUser } from '../src/dev-user.ts';
 import { cats, conversations, messages, turns } from '../src/db/schema.ts';
-import { redis } from '../src/redis.ts';
 import { closeQueues } from '../src/queue.ts';
 import { drainTurns } from '../src/turns/run.ts';
 import { config } from '../src/config.ts';
 assert.equal(config.MODEL_PROVIDER, 'mock');
 assert.ok(config.DATABASE_URL.includes('maomao_continuity_e2e_'), '必须使用独立验收库');
-assert.ok(config.REDIS_URL.includes(':16389'), '必须使用独立Redis');
 const port = 18789;
 let mode = ''; let broken = false; let turnId = ''; let hide = false;
 let routes: string[] = []; let wire = ''; let conversationId = '';
@@ -33,8 +31,8 @@ const server=serve({hostname:'127.0.0.1',port,fetch:async(req)=>{
   const path=new URL(req.url).pathname; routes.push(req.method+' '+path);
   if(mode==='expired' && broken && path.endsWith('/stream')) {
     await terminal();
-    await redis.pexpire(`turn:${turnId}:events`,1); await sleep(20);
-    assert.equal(await redis.exists(`turn:${turnId}:events`),0);
+    await sql`delete from turn_events where turn_id=${turnId}`;
+    assert.equal((await sql`select 1 from turn_events where turn_id=${turnId}`).length,0);
   }
   const response=await app.fetch(req);
   if(!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) return response;
@@ -124,9 +122,9 @@ try {
     results.push({scenario:name,turns:rounds.length,messages:stored.length,status:turn.status,snapshot:wire.includes('event: snapshot'),passed:true});
     console.log('PASS '+name);
   }
-  writeFileSync(process.env.E2E_REPORT ?? '../outputs/chat-continuity-review/e2e-checks.json',JSON.stringify({date:new Date().toISOString(),model:'mock',transport:'真实Hono HTTP/SSE',database:'独立PostgreSQL + Redis',device:'iPhone 17 Pro simulator',results},null,2)+'\n');
+  writeFileSync(process.env.E2E_REPORT ?? '../outputs/chat-continuity-review/e2e-checks.json',JSON.stringify({date:new Date().toISOString(),model:'mock',transport:'真实Hono HTTP/SSE',database:'独立PostgreSQL',device:'iPhone 17 Pro simulator',results},null,2)+'\n');
 } finally {
   stop();server.close();
   if ('closeAllConnections' in server) server.closeAllConnections();
-  await drainTurns(20000);await closeQueues();redis.disconnect();await sql.end();
+  await drainTurns(20000);await closeQueues();await sql.end();
 }

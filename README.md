@@ -22,12 +22,12 @@
 | 3D 世界与展示页 | TypeScript、Three.js、Vite |
 | 服务端 | Node.js、TypeScript、Hono、AI SDK |
 | 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
-| 实时消息 | SSE、Redis |
+| 实时消息 | SSE、PostgreSQL LISTEN/NOTIFY |
 | 模型与资源 | DeepSeek / mock 模型、Blender 3D 资源 |
 
 SwiftUI 承载原生页面，WKWebView 渲染小院，首页与聊天共享同一个世界。后端分为 API 和 worker 两个进程：API 处理聊天与最终回应，worker 执行后台托付、记忆提取和日记处理，再提交持久化汇报。API 发布前重新检查上下文、用户许可和安静时段。
 
-PostgreSQL 保存业务状态、执行检查点与汇报，pg-boss 投递后台工作；Redis 用于聊天事件流和断线续传。Agent 的事项与执行分离设计参考了 [DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)，实现按 Cattt 的陪伴场景组织。
+PostgreSQL 保存业务状态、执行检查点与汇报，pg-boss 投递后台工作；PG 表与 LISTEN/NOTIFY 用于聊天事件流和断线续传。Agent 的事项与执行分离设计参考了 [DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)，实现按 Cattt 的陪伴场景组织。
 
 ## 快速开始
 
@@ -37,7 +37,7 @@ PostgreSQL 保存业务状态、执行检查点与汇报，pg-boss 投递后台�
 
 - Node.js 22.12+、pnpm 11。
 - 构建 iOS：macOS、Xcode、Python 3。
-- 运行后端：PostgreSQL、Redis；仓库提供 Docker Compose 配置。
+- 运行后端：PostgreSQL；仓库提供 Docker Compose 配置。
 - 修改 3D 源资源时需要 Blender，运行现有资源不需要。
 
 安装依赖：
@@ -100,7 +100,7 @@ pnpm --dir web dev
 sh tools/check_all.sh
 ```
 
-包括仓库规范、跨端规则、iOS 逻辑测试、网页测试和前后端类型检查。后端集成测试另需一套已迁移的独立测试数据库与 Redis，配置 `DATABASE_URL`、`REDIS_URL` 后执行：
+包括仓库规范、跨端规则、iOS 逻辑测试、网页测试和前后端类型检查。后端集成测试另需一套已迁移的独立测试数据库，配置 `DATABASE_URL` 后执行：
 
 ```bash
 MODEL_PROVIDER=mock pnpm --dir server test --maxWorkers=1

@@ -9,14 +9,13 @@ import { createIdentityRoutes, revokeSession } from '../src/identity/service.ts'
 import { app } from '../src/api/app.ts';
 import { config } from '../src/config.ts';
 import { hashToken } from '../src/auth-token.ts';
-import { redis } from '../src/redis.ts';
 let keys:Awaited<ReturnType<typeof generateKeyPair>>, identity:Hono;
 const ids:string[]=[];const nonces:string[]=[];const prefix=randomUUID();
 beforeAll(async()=>{
  keys=await generateKeyPair('RS256');const jwk=await exportJWK(keys.publicKey);jwk.kid='local-test';jwk.alg='RS256';
  identity=new Hono().route('/auth',createIdentityRoutes({audience:'local.test.cat',jwks:createLocalJWKSet({keys:[jwk]})}));
 });
-afterAll(async()=>{for(const id of ids)await db.delete(users).where(eq(users.id,id));if(nonces.length)await db.delete(authNonces).where(inArray(authNonces.hash,nonces));await redis.quit();await sql.end();});
+afterAll(async()=>{for(const id of ids)await db.delete(users).where(eq(users.id,id));if(nonces.length)await db.delete(authNonces).where(inArray(authNonces.hash,nonces));await sql.end();});
 const request=(path:string,body:unknown)=>identity.request('/auth/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
 const challenge=async()=>{const r=await request('nonce',{});expect(r.status).toBe(200);const value=(await r.json()).nonce as string;nonces.push(hashToken(value));return value;};
 async function token(nonce:string,subject:string=prefix,change:Record<string,unknown>={}){return new SignJWT({nonce:hashToken(nonce),...change}).setProtectedHeader({alg:'RS256',kid:'local-test'}).setIssuer('https://appleid.apple.com').setAudience('local.test.cat').setSubject(subject).setIssuedAt().setExpirationTime('5m').sign(keys.privateKey);}

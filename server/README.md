@@ -14,7 +14,7 @@
 cd server
 pnpm install
 cp .env.example .env          # 填 MAOMAO_DEEPSEEK_API_KEY；没有 key 就把 MODEL_PROVIDER 改成 mock
-docker compose up -d --wait   # PG 和 Redis，只绑 127.0.0.1
+docker compose up -d --wait   # PG，只绑 127.0.0.1
 pnpm db:migrate
 pnpm create-dev-user 你的名字  # 打印 token，只显示这一次
 pnpm dev                      # api（:8787）和 worker 一起起
@@ -44,7 +44,7 @@ pnpm smoke                     # 逐条走验收：流式、续传、作废、�
 | 目录 | 内容 |
 |---|---|
 | `src/api/` | 路由、SSE、token 校验 |
-| `src/turns/` | 一轮回复：建轮次、生成、Redis 事件流、停止与作废、对话锁 |
+| `src/turns/` | 一轮回复：建轮次、生成、PG 事件流、停止与作废、对话锁 |
 | `src/runtime/` | 模型适配（DeepSeek / 假模型）、性格、上下文组装 |
 | `src/worker/` | 记忆提取、边界整理、清理卡住的回复 |
 | `src/db/` | 表定义；迁移 SQL 在 `drizzle/` |
@@ -76,7 +76,7 @@ docker compose exec postgres psql -U maomao -c \
 
 ## 2026-11-11 异步 Agent 第一段底座
 
-后台投递改用 `pg-boss` 12.x（当前锁定 12.38.1）；Node 需 22.12+。`async_jobs` 仍是唯一权威待办：PG 认领、续租、控制最多三次尝试，永久失败直接结束。投递只有一次执行机会（`retryLimit: 0`），同一待办按 `ID.已尝试次数` 分开投递；同次未领取的投递合并，旧的失败或进行中投递不挡住下一次。投递失败不会删除 PG 待办，worker 每 15 秒恢复补投并独立清扫失去心跳的聊天。记忆/边界/日记读取/清扫的处理并发分别为 4/2/2/1。Redis 保留聊天事件流、续传及既有聊天控制协议，后台三类待办的投递与执行不再依赖 Redis。
+后台投递改用 `pg-boss` 12.x（当前锁定 12.38.1）；Node 需 22.12+。`async_jobs` 仍是唯一权威待办：PG 认领、续租、控制最多三次尝试，永久失败直接结束。投递只有一次执行机会（`retryLimit: 0`），同一待办按 `ID.已尝试次数` 分开投递；同次未领取的投递合并，旧的失败或进行中投递不挡住下一次。投递失败不会删除 PG 待办，worker 每 15 秒恢复补投并独立清扫失去心跳的聊天。记忆/边界/日记读取/清扫的处理并发分别为 4/2/2/1。聊天事件流、续传、取消和对话锁也使用 PG 表与 LISTEN/NOTIFY，不再需要额外进程。
 
 `pg-boss.start()` 使用同一数据库中的独立 **`pgboss` schema**，由 pg-boss 自己建表、升级；连接用户需拥有创建该 schema/表的权限。本仓库的业务表位于 `public`，Drizzle 只从 `src/db/schema.ts` 及其显式导出生成迁移，迁移历史放在 `drizzle` schema；不要把 `pgboss` 表加入 Drizzle 定义，也不要用 push/introspect 接管它们。`pnpm db:migrate` 不迁移、不删除 pg-boss 的表。增量迁移 `0007_user_time_zone` 只为 `users` 加 `time_zone`（默认 `Asia/Shanghai`）；升级时先停旧 API/worker，迁移后再启动，首次启动自动准备投递 schema。回退时停新 API/worker 后恢复旧 BullMQ 代码；`async_jobs` 无变更，恢复扫描会补投，新增用户字段和 `pgboss` schema 可保留，不需要删数据。
 
@@ -94,7 +94,7 @@ API 前台 Router 每30秒把到期约定写成 `clock:<ticket_id>:<due_at>` 事
 
 `GET /v1/tickets?status=open`、`PATCH /v1/tickets/:id`（`{when: ISO}`）、`POST /v1/tickets/:id/cancel`、`GET /v1/mailbox?after=seq`、`POST /v1/mailbox/:id/read` 均从鉴权账号取得归属。聊天历史新增 `ticket_id`；`GET /v1/messages?after=seq&limit=100` 由旧到新补拉，可连续翻页。世界流 `inbox` 只提示收据序号，聊天与信的内容仍从 PG 拉取。
 
-主动消息持有既有 Redis 对话锁，发布时锁猫与会话行，`turn_id` 空、`ticket_id` 非空；不递增只代表用户输入的 `conversation.version`。iOS 生成回复时暂缓拉取，完成后合并新消息，不改待恢复轮次。发信及 outbox 收据在同一事务提交，每件每用途唯一；本段提示由持久化收据轮询重放，无外部推送副作用。
+主动消息持有既有 PG 对话锁，发布时锁猫与会话行，`turn_id` 空、`ticket_id` 非空；不递增只代表用户输入的 `conversation.version`。iOS 生成回复时暂缓拉取，完成后合并新消息，不改待恢复轮次。发信及 outbox 收据在同一事务提交，每件每用途唯一；本段提示由持久化收据轮询重放，无外部推送副作用。
 
 pg-boss 连接的 `statement_timeout` 从2秒放宽到60秒，让大表维护查询有合理时间完成。`dispatchJob` 请求侧仍最多等待2.5秒；失败不撤销已写的 PG 待办，恢复扫描继续补投。
 
@@ -109,7 +109,7 @@ pg-boss 连接的 `statement_timeout` 从2秒放宽到60秒，让大表维护查
 
 最多20步、累计8000输出token（含供应商计入output的思考token）、累计10分钟活动执行时间；等待回答和安静时段延期不占活动时间。崩溃后未完成步骤至恢复认领的时间保守计入预算，避免重启清零。408/429/5xx与明确网络错误在同一步递增退避重试3次，其余报failed；每次尝试入成本账本。report先按call_id存凭证再返回；progress不发布，ready写信+一句短通知，waiting只问一句，blocked/failed如实说明，dropped安静结束。等待问题按各次report凭证去重，同一最终用途只有一份收据。
 
-出口在同一事务里复核归属、授权、消息/日记来源、边界、记忆开关与修订、新鲜度、安静时段和去重，持有既有Redis对话锁。会话version变化先重新判断；撤回来源后不继续把旧检查点观察交给模型。22:00–09:00的结果推迟到09:00；waiting产生24小时后无回答只安静等，不再追问。详情、自动化证据与未验边界见[实施记录](../docs/方案/团子异步Agent与后端架构-实施与验收-2026-11-10.md)。
+出口在同一事务里复核归属、授权、消息/日记来源、边界、记忆开关与修订、新鲜度、安静时段和去重，持有既有PG对话锁。会话version变化先重新判断；撤回来源后不继续把旧检查点观察交给模型。22:00–09:00的结果推迟到09:00；waiting产生24小时后无回答只安静等，不再追问。详情、自动化证据与未验边界见[实施记录](../docs/方案/团子异步Agent与后端架构-实施与验收-2026-11-10.md)。
 
 ## 第六段：推断开口保持observe
 
@@ -147,6 +147,6 @@ API 现在同时运行前台 Router，消费 `report/followup/inference/push`；
 
 请求副本先删旧完整用户轮次，再删旧完整工具调用与结果；保留当前用户原话、系统指令和最新工具轮次。worker 保留全部原托付与用户补充。持久原话和检查点不裁剪，已完成 report 的恢复路径不变。必需内容仍超限时不请求模型：聊天返回 `model_input_budget`（不可直接重试），托付以明确预算原因失败。无额外摘要模型调用、摘要表、HTTP接口、服务或迁移。
 
-隔离集成测试应串行运行，避免 PG 全局通知和共享队列干扰：`DATABASE_URL=<本轮新库> REDIS_URL=<本轮Redis> MODEL_PROVIDER=mock pnpm exec vitest run --no-file-parallelism`。不要将既有开发／生产库用于本轮测试。
+隔离集成测试应串行运行，避免 PG 全局通知和共享队列干扰：`DATABASE_URL=<本轮新库> MODEL_PROVIDER=mock pnpm exec vitest run --no-file-parallelism`。不要将既有开发／生产库用于本轮测试。
 
 真实模型验收：`MODEL_PROVIDER=deepseek node --import tsx scripts/accept-agent-live.mjs`，只允许显式本机隔离库，八类场景与证据见[报告](../outputs/personal-agent-live-review/验收报告.md)。DeepSeek思考模式不接受强制工具调用，worker启用思考时用auto，仍只通过结构化report汇报；关闭记忆读取返回明确的不可用状态，不再混同于检索无命中。

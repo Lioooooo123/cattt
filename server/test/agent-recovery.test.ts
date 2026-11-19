@@ -9,7 +9,6 @@ import { processErrand } from '../src/agent/executor.ts';
 import { deliverReports } from './report-pipeline.ts';
 import { mockWorkerModel } from '../src/runtime/mock.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 
 const now = new Date('2026-11-17T04:00:00Z');
 const traits = { energy: 1, initiative: 1, directness: 1, closeness: 1 };
@@ -27,7 +26,7 @@ afterAll(async () => {
     await db.delete(workerReports).where(inArray(workerReports.catId, db.select({ id: cats.id }).from(cats).where(eq(cats.userId, id))));
     await db.delete(users).where(eq(users.id, id));
   }
-  await closeQueues(); await redis.quit(); await sql.end();
+  await closeQueues();  await sql.end();
 });
 const runFor = async (id: string) => (await db.select().from(runs).where(eq(runs.ticketId, id)))[0]!;
 const ticketFor = async (id: string) => (await db.select().from(tickets).where(eq(tickets.id, id)))[0]!;

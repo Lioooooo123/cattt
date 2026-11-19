@@ -13,12 +13,10 @@ services:
     ports: ["127.0.0.1:8887:8787"]
     depends_on:
       pg: {condition: service_healthy}
-      redis: {condition: service_healthy}
   worker:
     environment: *local-environment
     depends_on:
       pg: {condition: service_healthy}
-      redis: {condition: service_healthy}
   migrate:
     environment: *local-environment
   proxy:
@@ -38,16 +36,6 @@ services:
       test: ["CMD-SHELL", "pg_isready -U cattt_test"]
       interval: 2s
       retries: 20
-  redis:
-    image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
-    ports: ["127.0.0.1:16379:6379"]
-    volumes: [local-redis:/data]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      retries: 20
 volumes:
   local-pg:
-  local-redis:
   local-tls:

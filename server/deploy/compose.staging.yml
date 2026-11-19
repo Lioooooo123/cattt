@@ -7,7 +7,6 @@ x-runtime: &runtime
     APP_ENV: ${APP_ENV:-staging}
     MODEL_PROVIDER: ${MODEL_PROVIDER:-deepseek}
     DATABASE_URL: ${DATABASE_URL:?set isolated staging PG URL}
-    REDIS_URL: ${REDIS_URL:?set isolated staging Redis URL}
     MAOMAO_DEEPSEEK_API_KEY: ${MAOMAO_DEEPSEEK_API_KEY:-}
     APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
     APNS_TOPIC: ${APNS_TOPIC:-}

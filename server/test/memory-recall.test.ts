@@ -9,7 +9,6 @@ import { buildTurnContext } from '../src/runtime/context.ts';
 import { changeSettings, editMemory, lockMemory, settings, withdrawSources } from '../src/memory/control.ts';
 import { deleteMemory } from '../src/worker/memory.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { createSendTurn, loadOwner } from '../src/turns/create.ts';
 import { drainTurns } from '../src/turns/run.ts';
 import * as expansion from '../src/memory/query.ts';
@@ -36,7 +35,7 @@ beforeEach(async () => {
   ({ catId, convId, userId } = await account());
   expand.mockReset().mockResolvedValue([]);
 });
-afterAll(async () => { await drainTurns(10000); for (const id of userIds) await db.delete(users).where(eq(users.id, id)); await closeQueues(); await redis.quit(); await sql.end(); });
+afterAll(async () => { await drainTurns(10000); for (const id of userIds) await db.delete(users).where(eq(users.id, id)); await closeQueues();  await sql.end(); });
 it('没有边界时许可抑制集合和话题为空', async () => {
   const expected = {suppressedSources:new Set(),suppressedMemories:new Set(),boundaryTopics:[]};
   expect(await recallPermissions(catId)).toEqual(expected);

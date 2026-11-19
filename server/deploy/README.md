@@ -1,6 +1,6 @@
 # 第五段测试部署与本机演练
 
-本目录是可使用的部署包，不代表已有云测试环境。云账号、地区、主机、域名和托管PG/Redis尚未确定；不要把开发库作为测试部署库。没有自动部署工作流，也没有操作任何Apple或云账户。
+本目录是可使用的部署包，不代表已有云测试环境。云账号、地区、主机、域名和托管PG尚未确定；不要把开发库作为测试部署库。没有自动部署工作流，也没有操作任何Apple或云账户。
 
 ## 镜像与配置
 
@@ -18,7 +18,7 @@ docker build -t <registry>/cattt:<immutable-version> server
 |---|---|
 | `CATTT_IMAGE` | 不可变镜像标签或digest，API/worker/migrate共用 |
 | `APP_ENV` | staging或production；两者均不接受开发者token |
-| `DATABASE_URL` / `REDIS_URL` | 独立测试环境的PG/Redis地址，不能指向开发库 |
+| `DATABASE_URL` | 独立测试环境的PG地址，不能指向开发库 |
 | `SITE_HOST` | 已配置DNS的HTTPS域名，Caddy反向代理并即时转发SSE |
 | `MODEL_PROVIDER` / `MAOMAO_DEEPSEEK_API_KEY` | 真实环境明确选deepseek；本机验收明确选mock，不隐式降级 |
 | `APPLE_CLIENT_ID` | 原生App ID对应的身份token audience，须与最终bundle ID一致 |
@@ -38,11 +38,11 @@ docker compose --env-file <environment-file> -f server/deploy/compose.staging.ym
 docker compose --env-file <environment-file> -f server/deploy/compose.staging.yml up -d --wait api worker proxy
 ```
 
-API的 `/healthz` 同时检查PG/Redis；worker健康检查读取其15秒心跳文件，并实际查询PG。45秒无心跳即不健康。代理只公开HTTPS/HTTP重定向端口，API不直接公开宿主端口。托管PG/Redis的TLS、网络ACL、备份、容量和具体域名证书仍需在确定目标后配置并实际验证。
+API的 `/healthz` 检查PG；worker健康检查读取其15秒心跳文件，并实际查询PG。45秒无心跳即不健康。代理只公开HTTPS/HTTP重定向端口，API不直接公开宿主端口。托管PG的TLS、网络ACL、备份、容量和具体域名证书仍需在确定目标后配置并实际验证。
 
 ## 独立本机验收
 
-`compose.local.yml` 是本机覆盖层：创建独立卷/网络的PG与Redis，分别绑定127.0.0.1的15432/16379端口；API为8887，HTTPS为8843。它显式强制mock、development及空模型/APNs密钥，避免继承宿主凭证。本机夹具账号`cattt_test`和密码`local-only`仅用于这一隔离数据库，不能拿到云上。
+`compose.local.yml` 是本机覆盖层：创建独立卷/网络的PG，绑定127.0.0.1的15432端口；API为8887，HTTPS为8843。它显式强制mock、development及空模型/APNs密钥，避免继承宿主凭证。本机夹具账号`cattt_test`和密码`local-only`仅用于这一隔离数据库，不能拿到云上。
 
 在仓库外创建本机环境文件：
 
@@ -51,7 +51,6 @@ CATTT_IMAGE=cattt-phase5:current
 APP_ENV=development
 MODEL_PROVIDER=mock
 DATABASE_URL=postgres://cattt_test:local-only@pg:5432/cattt_test
-REDIS_URL=redis://redis:6379
 SITE_HOST=localhost
 APNS_TOPIC=com.maomao.app
 ```
@@ -62,7 +61,7 @@ APNS_TOPIC=com.maomao.app
 
 ```sh
 DATABASE_URL=postgres://cattt_test:local-only@localhost:15432/cattt_test \
-REDIS_URL=redis://localhost:16379 MODEL_PROVIDER=mock APNS_TOPIC=com.maomao.app \
+MODEL_PROVIDER=mock APNS_TOPIC=com.maomao.app \
 BASE_URL=https://localhost:8843 NODE_EXTRA_CA_CERTS=<root.crt> pnpm --dir server smoke
 ```
 
@@ -76,7 +75,7 @@ BASE_URL=https://localhost:8843 NODE_EXTRA_CA_CERTS=<root.crt> pnpm --dir server
 sh server/deploy/rollback.sh <previous-image> --env-file <environment-file> -f server/deploy/compose.staging.yml
 ```
 
-脚本停API/worker，再以旧镜像和 `AGENT_ENABLED=false` 启动，停止主动产出；检查健康、正式会话、既有事项读取/取消和日记后再决定恢复。恢复时使用环境文件中的当前镜像正常 `up -d --wait`。Compose优先读取shell里的同名变量；控制端连接宿主数据库的DATABASE_URL/REDIS_URL不能泄漏覆盖容器环境文件。
+脚本停API/worker，再以旧镜像和 `AGENT_ENABLED=false` 启动，停止主动产出；检查健康、正式会话、既有事项读取/取消和日记后再决定恢复。恢复时使用环境文件中的当前镜像正常 `up -d --wait`。Compose优先读取shell里的同名变量；控制端连接宿主数据库的DATABASE_URL不能泄漏覆盖容器环境文件。
 
 本机的 `scripts/rehearse-rollback.ts` 只允许localhost端点和15432隔离库。它在临时账号写一条日记，切到本轮保留的较早第五段镜像，再恢复当前镜像，核对健康、正式会话、日记和迁移数；子进程清除控制端同名URL变量。它证明的只是这两个本机镜像之间的代码回退，不证明托管云、数据库灾备、旧生产版本兼容或公网切流。
 
@@ -92,7 +91,7 @@ sh server/deploy/rollback.sh <previous-image> --env-file <environment-file> -f s
 
 iOS生成器维护Sign in with Apple和APNs entitlements，Debug选择development，Release选择production；通过 `CATTT_API_URL` 构建设置注入正式HTTPS端点。没有配置端点时显示未连接，不回退到localhost或开发者token。真实bundle/App ID、签名团队、provisioning profile及Apple后台能力尚未配置，模拟器构建不能证明这些能力可用。
 
-尚需父代理取得非敏感目标：云/项目/地区、主机架构、测试域名、独立PG/Redis地址、最终bundle ID/audience、Team ID/Key ID和APNs环境。模型key与p8由父代理通过秘密输入流程取得；本轮不重复索取。之后必须实际核对原生Apple登录、退出/撤销、换账号/重登的本地档案、真实设备token、App关闭时收到推送、点推送到真实聊天/信件、失效token及公网回退。
+尚需父代理取得非敏感目标：云/项目/地区、主机架构、测试域名、独立PG地址、最终bundle ID/audience、Team ID/Key ID和APNs环境。模型key与p8由父代理通过秘密输入流程取得；本轮不重复索取。之后必须实际核对原生Apple登录、退出/撤销、换账号/重登的本地档案、真实设备token、App关闭时收到推送、点推送到真实聊天/信件、失效token及公网回退。
 
 ## 协议与SDK依据
 

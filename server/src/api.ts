@@ -4,7 +4,6 @@ import { app } from './api/app.ts';
 import { assertModelConfig, config, describeModelConfig } from './config.ts';
 import { sql } from './db/client.ts';
 import { closeQueues } from './queue.ts';
-import { redis } from './redis.ts';
 import { drainTurns } from './turns/run.ts';
 
 assertModelConfig();
@@ -23,7 +22,6 @@ async function shutdown() {
   await drainTurns(20_000);
   await stopRouter();
   await closeQueues();
-  redis.disconnect();
   await sql.end({ timeout: 5 });
   process.exit(0);
 }

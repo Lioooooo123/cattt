@@ -9,6 +9,7 @@ struct BackendConfig: Equatable {
         case mock
         case local
         case service
+        case paired
     }
 
     var mode: Mode
@@ -17,8 +18,10 @@ struct BackendConfig: Equatable {
     var token: String
 
     var accountID: String? = nil
+    var pairedHost: PairedHost? = nil
     var isRemote: Bool { mode != .mock }
     var storageIdentity: String {
+        if let pairedHost, mode == .paired { return pairedHost.storageIdentity }
         if mode == .service { return baseURL.absoluteString + "\naccount:" + (accountID ?? "signed-out") }
         return isRemote ? baseURL.absoluteString + "\n" + token : "local-only"
     }
@@ -31,10 +34,13 @@ struct BackendConfig: Equatable {
     static let localURL = URL(string: "http://localhost:8787")!
 
     static func load() -> BackendConfig {
+        if let paired = PairVault.load() {
+            return BackendConfig(mode: .paired, baseURL: paired.url(host: paired.hosts[0]), token: paired.deviceToken, accountID: paired.accountID, pairedHost: paired)
+        }
         let defaults = UserDefaults.standard
         #if DEBUG
         let mode = Mode(rawValue: defaults.string(forKey: "backendMode") ?? "") ?? .mock
-        if mode != .service {
+        if mode != .service && mode != .paired {
             return BackendConfig(mode: mode, baseURL: defaults.string(forKey: "backendURL").flatMap(URL.init(string:)) ?? localURL,
                                  token: defaults.string(forKey: "backendToken") ?? "")
         }
@@ -106,6 +112,7 @@ enum APIError: LocalizedError {
         switch self {
         case let .http(status, code):
             switch (status, code) {
+            case (401, "pairing_code_invalid"): return "配对码不对或已过期，请在电脑上重新生成"
             case (401, _): return "登录已失效，请重新登录"
             case (409, "no_cat"): return "这个账号还没有猫"
             case (404, "diary_unavailable"): return "这条日记已停止共享，请重新选择"
@@ -122,6 +129,12 @@ struct APIClient {
     let config: BackendConfig
 
     var session: URLSession = APIClient.defaultSession
+    init(config: BackendConfig, session: URLSession? = nil) {
+        self.config = config
+        if config.mode == .paired {
+            self.session = PairTransport.session(fingerprint: config.pairedHost?.fingerprint ?? "")
+        } else { self.session = session ?? Self.defaultSession }
+    }
     private static let defaultSession: URLSession = {
         let configuration = URLSessionConfiguration.default
         // 流式回复期间服务端每 15 秒发一次心跳，60 秒没动静才算断
@@ -151,9 +164,17 @@ struct APIClient {
     }
 
     func json<T: Decodable>(_ type: T.Type, _ request: URLRequest) async throws -> T {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request)
         try Self.check(response, body: data)
         return try Self.decode(type, from: data)
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        do { return try await session.data(for: request) }
+        catch {
+            if config.mode == .paired { NotificationCenter.default.post(name: .pairedConnectionFailed, object: config.storageIdentity) }
+            throw error
+        }
     }
 
     private static func check(_ response: URLResponse, body: Data) throws {
@@ -269,6 +290,7 @@ struct APIClient {
                     }
                     continuation.finish()
                 } catch {
+                    if config.mode == .paired { NotificationCenter.default.post(name: .pairedConnectionFailed, object: config.storageIdentity) }
                     continuation.finish(throwing: error)
                 }
             }

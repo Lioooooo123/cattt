@@ -49,7 +49,7 @@ public final class Host {
         case "openai-compatible":
             guard let request = modelHealthRequest(env), let url = request.url, let host = url.host else { return "本地 · 服务地址无效" }
             let address = host + (url.port.map { ":\($0)" } ?? "")
-            let model = env["CHAT_MODEL"] ?? env["OPENAI_COMPAT_MODEL"] ?? ""
+            let model = (env["CHAT_PROVIDER"] ?? "openai-compatible") == "openai-compatible" ? env["CHAT_MODEL"] ?? env["OPENAI_COMPAT_MODEL"] ?? "" : env["OPENAI_COMPAT_MODEL"] ?? ""
             let source = "\(address)/\(model.isEmpty ? "未配置模型名" : model)"
             if httpStatus == 0 { return "本地服务未启动 · \(source)" }
             if let code = httpStatus, !(200..<300).contains(code) { return "本地服务返回错误（\(code)） · \(source)" }
@@ -58,8 +58,8 @@ public final class Host {
         }
     }
     public static func modelHealthRequest(_ env: [String: String]) -> URLRequest? {
-        guard (env["MODEL_PROVIDER"] ?? "openai-compatible") == "openai-compatible",
-              let base = URL(string: env["OPENAI_COMPAT_BASE_URL"] ?? "http://127.0.0.1:11434/v1"),
+        guard (env["MODEL_PROVIDER"] ?? "openai-compatible") == "openai-compatible" || !(env["OPENAI_COMPAT_MODEL"] ?? "").isEmpty else { return nil }
+        guard let base = URL(string: env["OPENAI_COMPAT_BASE_URL"] ?? "http://127.0.0.1:11434/v1"),
               ["http", "https"].contains(base.scheme), base.host != nil else { return nil }
         var request = URLRequest(url: base.appendingPathComponent("models")); request.timeoutInterval = 2
         if let key = env["MAOMAO_OPENAI_COMPAT_API_KEY"], !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
@@ -72,25 +72,16 @@ public final class Host {
         }.compactMap { try $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
     }
     public static func writeDeepSeekConfiguration(_ key: String, in data: URL) throws {
-        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty, !key.contains("\n"), !key.contains("\r") else { throw HostError("请输入有效的 DeepSeek key") }
-        let url = data.appendingPathComponent("env")
-        let original = try String(contentsOf: url)
-        _ = try parseEnv(original)
-        let kept = original.components(separatedBy: .newlines).filter {
-            let name = $0.components(separatedBy: "=").first?.trimmingCharacters(in: .whitespaces)
-            return name != "MODEL_PROVIDER" && name != "MAOMAO_DEEPSEEK_API_KEY"
-        }
-        let text = kept.joined(separator: "\n") + "\nMODEL_PROVIDER=deepseek\nMAOMAO_DEEPSEEK_API_KEY=\(key)\n"
-        try Data(text.utf8).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try writeCombinedModelConfiguration(in: data, deepSeekKey: key)
     }
     public func configureDeepSeek(_ key: String) throws {
         guard ready else { throw HostError("宿主未能启动，请先解决菜单中的启动错误") }
         try Self.writeDeepSeekConfiguration(key, in: data)
-        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        environment["MODEL_PROVIDER"] = "deepseek"; environment["MAOMAO_DEEPSEEK_API_KEY"] = key
-        stopServices(); try startServices()
+        try reloadModelConfiguration()
+    }
+    public func completeLocalModelSetup() throws {
+        try Self.writeCombinedModelConfiguration(in: data)
+        try reloadModelConfiguration()
     }
     public func modelSetupEnvironment() throws -> [String: String] {
         guard ready else { throw HostError("请先解决宿主启动错误") }
@@ -227,7 +218,7 @@ public final class Host {
         throw HostError("数据库启动超时")
     }
     private func startServices() throws {
-        status["模型"] = Self.modelStatus(environment)
+        updateModelStatus()
         for name in ["api", "worker"] where children[name]?.isRunning != true {
             children[name] = try launch(resources.appendingPathComponent("node/bin/node"), [resources.appendingPathComponent("server/\(name).mjs").path], name: name)
             status[name == "api" ? "API" : name] = "启动中"
@@ -263,13 +254,15 @@ public final class Host {
         if Date().timeIntervalSince(lastHealth) >= 5 { lastHealth = Date(); pollHealth() }
     }
     private func pollHealth() {
+        var modelCode: Int?
         if let request = Self.modelHealthRequest(environment) {
             let semaphore = DispatchSemaphore(value: 0)
             var code = 0
             let task = URLSession.shared.dataTask(with: request) { _, response, _ in code = (response as? HTTPURLResponse)?.statusCode ?? 0; semaphore.signal() }
             task.resume(); semaphore.wait()
-            status["模型"] = Self.modelStatus(environment, httpStatus: code)
+            modelCode = code
         }
+        updateModelStatus(httpStatus: modelCode)
         for endpoint in ["healthz", "host/status"] {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:8787/\(endpoint)")!); request.timeoutInterval = 2
             if endpoint == "host/status", let token = try? String(contentsOf: path("host-admin.token")) {
@@ -282,6 +275,10 @@ public final class Host {
             status[endpoint == "healthz" ? "API" : "局域网 HTTPS"] = code == 200 ? "正常" : code == 404 ? "此版本不支持" : "未就绪"
         }
         status["worker"] = children["worker"]?.isRunning == true ? "运行中" : status["worker"]
+    }
+    private func updateModelStatus(httpStatus: Int? = nil) {
+        status["模型"] = Self.modelStatus(environment, httpStatus: httpStatus)
+        status.merge(Self.modelSourceStatus(environment, httpStatus: httpStatus)) { _, new in new }
     }
     @discardableResult public func backup(preUpgrade: Bool = false) throws -> URL {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"

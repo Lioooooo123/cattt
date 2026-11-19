@@ -46,7 +46,9 @@ import HostCore
             guard let self, self.generation == id else { return }
             self.running = false
             switch result {
-            case .success(.saved): self.success = true; self.step = "已切换到本地模型 \(self.selectedModel ?? "")"
+            case .success(.saved):
+                self.success = true
+                self.step = host.status["DeepSeek"]?.hasPrefix("已配置") == true ? "本地模型 \(self.selectedModel ?? "") 已配置；已保留 DeepSeek，分工见菜单。" : "已切换到本地模型 \(self.selectedModel ?? "")"
             case .success(.cancelled): self.step = "已取消，原配置保持不变"
             case .success(.stopped) where !consent && self.hardware != nil:
                 self.step = "请选择是否下载并测试推荐模型"
@@ -85,7 +87,7 @@ struct LocalModelSetupView: View {
                 }
             }
             if model.running { ProgressView(value: model.progress) }
-            Text(model.step).foregroundStyle(model.success ? .primary : .secondary)
+            Text(model.step).foregroundStyle(model.success ? .primary : .secondary).fixedSize(horizontal: false, vertical: true)
             if let smoke = model.smoke {
                 Text("中文陪伴回复：\(smoke.chinese == true ? "通过" : "未通过")\n工具调用：\(smoke.correctTool == true ? "通过" : "未通过")").font(.callout)
             }

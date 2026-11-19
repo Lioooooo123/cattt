@@ -18,7 +18,6 @@ bash desktop/macos/scripts/smoke-host.sh
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
 当前构建为 ad-hoc 签名，下载副本会被 Gatekeeper 拦截。确认来源可信后可右键打开，或对应用执行 `xattr -dr com.apple.quarantine /path/to/Cattt.app`。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。
-烟测需要本机 `redis-server`（或通过 `REDIS_URL` 指向隔离 Redis）；不会打包 Redis。
 
 首次启动无需模型密钥：API 和 worker 照常运行，菜单只显示“模型：未配置”警告；模型调用返回不可重试的配置错误，不内置开发者密钥，也不会自动切换 mock。烟测使用全新数据目录、不设置模型 provider 或密钥，验证服务进程和健康接口。
 

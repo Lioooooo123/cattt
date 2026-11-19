@@ -1,14 +1,10 @@
 #!/bin/sh
-# 独立数据库和 Redis，只用合成数据与 mock 模型；保留验收库供追查。
+# 独立数据库，只用合成数据与 mock 模型；保留验收库供追查。
 set -eu
 cd "$(dirname "$0")/.."
 review_db="maomao_memory_review_$(date +%Y%m%d%H%M%S)_$$"
-review_redis="maomao-memory-review-redis-$$"
 docker exec maomao-postgres-1 createdb -U maomao "$review_db"
-docker run --rm -d --name "$review_redis" -p 127.0.0.1:16390:6379 redis:7.4-alpine >/dev/null
-trap 'docker stop "$review_redis" >/dev/null 2>&1 || true' EXIT INT TERM
 export DATABASE_URL="postgres://maomao:maomao@127.0.0.1:5432/$review_db"
-export REDIS_URL=redis://127.0.0.1:16390
 export MODEL_PROVIDER=mock
 export MOCK_DELAY_MS=1
 printf '验收数据库：%s\n' "$review_db"

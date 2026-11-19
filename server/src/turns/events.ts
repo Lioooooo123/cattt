@@ -1,7 +1,6 @@
 import { TURN_EVENTS_TTL_S } from '../config.ts';
-import { redis } from '../redis.ts';
 import { eq } from 'drizzle-orm';
-import { db } from '../db/client.ts';
+import { db, sql } from '../db/client.ts';
 import { turns } from '../db/schema.ts';
 import { subscribe } from './subscriber.ts';
 
@@ -22,91 +21,77 @@ export type StoredEvent = TurnEvent & { id: string };
 const TERMINAL = new Set(['done', 'superseded', 'error']);
 export const isTerminal = (event: string) => TERMINAL.has(event);
 
-const eventsKey = (turnId: string) => `turn:${turnId}:events`;
+const eventsChannel = (id: string) => `turn:${id}:events`;
 
-/**
- * 每一段都写进 Redis Stream。HTTP 响应只是跟着读，断线后带 Last-Event-ID 从断点接着读。
- * 结束事件写完后只留 10 分钟；进行中的留 1 小时兜底，防止进程崩了留下孤儿键。
- */
 export async function publish(turnId: string, ev: TurnEvent) {
-  const key = eventsKey(turnId);
-  const results = await redis
-    .multi()
-    .xadd(key, '*', 'event', ev.event, 'data', JSON.stringify(ev.data))
-    .expire(key, isTerminal(ev.event) ? TURN_EVENTS_TTL_S : 3600)
-    .exec();
-  if (!results) throw new Error('Redis transaction aborted');
-  for (const [error] of results) if (error) throw error;
+  await sql.begin(async tx => {
+    // 序号和提交顺序一致，续传不会跳过并发发布的事件。
+    await tx`select pg_advisory_xact_lock(hashtextextended(${turnId}, 0))`;
+    await tx`insert into turn_events (turn_id, seq, event, data)
+      select ${turnId}, coalesce(max(seq), 0) + 1, ${ev.event}, ${JSON.stringify(ev.data)}::jsonb
+      from turn_events where turn_id = ${turnId}`;
+    await tx`select pg_notify('turn_updates', ${JSON.stringify({ channel: eventsChannel(turnId), message: '' })})`;
+  });
 }
 
-function parse(id: string, fields: string[]): StoredEvent {
-  const map: Record<string, string> = {};
-  for (let i = 0; i + 1 < fields.length; i += 2) map[fields[i]!] = fields[i + 1]!;
-  return { id, event: map.event, data: JSON.parse(map.data ?? '{}') } as StoredEvent;
+export async function readEvents(turnId: string) {
+  return sql`select e.*, 'pg-' || e.seq::text as id from turn_events e
+    where e.turn_id = ${turnId}
+    and (select max(created_at) from turn_events where turn_id = ${turnId}) >
+      now() - make_interval(secs => case when exists (
+        select 1 from turns where id = ${turnId} and status not in ('queued', 'generating')
+      ) then ${TURN_EVENTS_TTL_S} else 3600 end)
+    order by seq`;
 }
 
-/**
- * 从 afterId 之后开始读这一轮的事件，读到结束事件为止。
- * 键不存在（已过期或从没有过）返回 'missing'，由调用方回库里查。
- * 每 15 秒没新事件吐一个 'ping'，用来给 SSE 保活。
- */
+/** 通知立即唤醒，定时读取兜底；看到终态后再读一次，避免遗漏尾字。 */
 export async function* tail(
   turnId: string,
   afterId: string,
   signal: AbortSignal,
 ): AsyncGenerator<StoredEvent | 'ping', 'missing' | 'end' | 'aborted'> {
-  if (afterId === 'snapshot') return 'missing';
-  const key = eventsKey(turnId);
-  if ((await redis.exists(key)) === 0) return 'missing';
-  if (afterId !== '0' && (await redis.xrange(key, afterId, afterId)).length === 0) return 'missing';
-
-  // 阻塞读会占住连接，每个监听者单独一条
-  const conn = redis.duplicate({ lazyConnect: true });
-  const onAbort = () => conn.disconnect();
+  if (afterId !== '0' && !/^pg-[1-9]\d*$/.test(afterId)) return 'missing';
+  let wake: (() => void) | undefined;
+  let notified = false;
+  const remove = await subscribe(eventsChannel(turnId), () => { notified = true; wake?.(); });
+  const onAbort = () => wake?.();
   signal.addEventListener('abort', onAbort, { once: true });
-  let lastId = afterId;
+  let last = afterId === '0' ? 0n : BigInt(afterId.slice(3));
   try {
-    if (signal.aborted) return 'aborted';
-    await conn.connect();
+    let rows = await readEvents(turnId);
+    if (!rows.length || (afterId !== '0' && !rows.some(row => row.id === afterId))) return 'missing';
     while (!signal.aborted) {
-      const res = await conn.xread('BLOCK', 1_000, 'STREAMS', key, lastId);
-      if (!res) {
-        if (!await redis.exists(key)) return 'missing';
+      notified = false;
+      const remaining = rows.filter(row => BigInt(row.seq) > last);
+      for (const row of remaining) {
+        last = BigInt(row.seq);
+        yield { id: row.id, event: row.event, data: row.data } as StoredEvent;
+        if (isTerminal(row.event)) return 'end';
+      }
+      if (!remaining.length) {
         const terminal = await terminalEvent(turnId);
         if (terminal) {
-          // 最后 delta 可能在空读之后、PG 终态之前写入。终态不可变，
-          // 此时再读完已落入流的内容，才能补结束标记，避免漏尾字。
-          const remaining = await conn.xrange(key, `(${lastId}`, '+');
-          if (!await redis.exists(key)) return 'missing';
-          for (const [id, fields] of remaining) {
-            lastId = id;
-            const ev = parse(id, fields);
-            yield ev;
-            if (isTerminal(ev.event)) return 'end';
+          rows = await readEvents(turnId);
+          if (!rows.length) return 'missing';
+          for (const row of rows.filter(row => BigInt(row.seq) > last)) {
+            last = BigInt(row.seq);
+            yield { id: row.id, event: row.event, data: row.data } as StoredEvent;
+            if (isTerminal(row.event)) return 'end';
           }
-          yield { ...terminal, id: lastId };
+          yield { ...terminal, id: `pg-${last}` };
           return 'end';
         }
         yield 'ping';
-        continue;
       }
-      for (const [, entries] of res) {
-        for (const [id, fields] of entries) {
-          lastId = id;
-          const ev = parse(id, fields);
-          yield ev;
-          if (isTerminal(ev.event)) return 'end';
-        }
-      }
+      if (!notified && !signal.aborted) await new Promise<void>(resolve => {
+        const timer = setTimeout(() => { wake = undefined; resolve(); }, 1000);
+        wake = () => { clearTimeout(timer); wake = undefined; resolve(); };
+      });
+      rows = await readEvents(turnId);
+      if (!rows.length) return 'missing';
     }
     return 'aborted';
-  } catch (err) {
-    if (signal.aborted) return 'aborted';
-    throw err;
-  } finally {
-    signal.removeEventListener('abort', onAbort);
-    conn.disconnect();
-  }
+  } finally { remove(); signal.removeEventListener('abort', onAbort); }
 }
 
 export async function terminalEvent(turnId: string): Promise<TurnEvent | null> {
@@ -124,7 +109,6 @@ export async function terminalEvent(turnId: string): Promise<TurnEvent | null> {
 // ---- 停止与作废 ----
 
 export type CancelReason = 'stop' | 'supersede';
-const cancelKey = (turnId: string) => `turn:${turnId}:cancel`;
 const cancelChannel = (turnId: string) => `turn:${turnId}:cancelled`;
 
 export function subscribeCancel(turnId: string, listener: (reason: CancelReason) => void) {
@@ -134,37 +118,46 @@ export function subscribeCancel(turnId: string, listener: (reason: CancelReason)
 }
 
 export async function requestCancel(turnId: string, reason: CancelReason) {
-  // 作废优先于停止：两者都来时按作废处理
-  const saved = reason === 'stop'
-    ? await redis.set(cancelKey(turnId), reason, 'EX', 600, 'NX')
-    : await redis.set(cancelKey(turnId), reason, 'EX', 600);
-  if (saved) await redis.publish(cancelChannel(turnId), reason).catch(() => {});
+
+  await sql.begin(async tx => {
+    const saved = await tx`insert into turn_controls (turn_id, cancel_reason, cancel_expires_at)
+      values (${turnId}, ${reason}, now() + interval '10 minutes')
+      on conflict (turn_id) do update set cancel_reason = excluded.cancel_reason,
+      cancel_expires_at = excluded.cancel_expires_at
+      where turn_controls.cancel_expires_at <= now() or turn_controls.cancel_reason is null or ${reason} = 'supersede'
+      returning turn_id`;
+    if (saved.length) await tx`select pg_notify('turn_updates', ${JSON.stringify({ channel: cancelChannel(turnId), message: reason })})`;
+  });
 }
 
 export async function readCancel(turnId: string): Promise<CancelReason | null> {
-  return (await redis.get(cancelKey(turnId))) as CancelReason | null;
+  const [row] = await sql`select cancel_reason from turn_controls where turn_id = ${turnId} and cancel_expires_at > now()`;
+  return row?.cancel_reason ?? null;
 }
 
-/** 停止时客户端屏幕上显示了多少（UTF-16 长度），存库时截到这里 */
-const visibleKey = (turnId: string) => `turn:${turnId}:visible`;
-
+/** 客户端显示的 UTF-16 长度，停止时按此截断。 */
 export async function recordVisibleLength(turnId: string, length: number) {
-  await redis.set(visibleKey(turnId), String(length), 'EX', 600);
+  await sql.begin(async tx => {
+    await tx`insert into turn_controls (turn_id, visible_length, visible_expires_at)
+      values (${turnId}, ${length}, now() + interval '10 minutes')
+      on conflict (turn_id) do update set visible_length = excluded.visible_length, visible_expires_at = excluded.visible_expires_at`;
+    await tx`select pg_notify('turn_updates', ${JSON.stringify({ channel: `turn:${turnId}:visible`, message: String(length) })})`;
+  });
 }
 
 export async function readVisibleLength(turnId: string): Promise<number | null> {
-  const raw = await redis.get(visibleKey(turnId));
-  return raw === null ? null : Number(raw);
+  const [row] = await sql`select visible_length from turn_controls where turn_id = ${turnId} and visible_expires_at > now()`;
+  return row?.visible_length ?? null;
 }
 
 // ---- 同一段对话同一时间只生成一轮 ----
 
-const lockKey = (conversationId: string) => `conv:${conversationId}:lock`;
 const lockChannel = (conversationId: string) => `conv:${conversationId}:lock-released`;
 
 /** 只用于避免聊天忙碌时做无用措辞；发布仍必须实际取得锁。 */
-export async function conversationBusy(conversationId: string) { return await redis.exists(lockKey(conversationId)) > 0; }
-const LOCK_TTL_MS = 30_000;
+export async function conversationBusy(conversationId: string) {
+  return (await sql`select 1 from conversation_locks where conversation_id = ${conversationId} and expires_at > now()`).length > 0;
+}
 
 export async function acquireConversationLock(
   conversationId: string,
@@ -180,8 +173,11 @@ export async function acquireConversationLock(
   try {
     do {
       notified = false;
-      const ok = await redis.set(lockKey(conversationId), token, 'PX', LOCK_TTL_MS, 'NX');
-      if (ok) return true;
+      const ok = await sql`insert into conversation_locks (conversation_id, token, expires_at)
+        values (${conversationId}, ${token}, now() + interval '30 seconds')
+        on conflict (conversation_id) do update set token = excluded.token, expires_at = excluded.expires_at
+        where conversation_locks.expires_at <= now() returning token`;
+      if (ok.length) return true;
       if (performance.now() >= deadline) return false;
       if (!unsubscribe) {
         let expired = false;
@@ -208,14 +204,27 @@ export async function acquireConversationLock(
   } finally { unsubscribe?.(); }
 }
 
-// 只删自己持有的锁
-const RELEASE = `if redis.call('get', KEYS[1]) == ARGV[1] then local removed = redis.call('del', KEYS[1]); redis.call('publish', ARGV[2], 'released'); return removed else return 0 end`;
-const REFRESH = `if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end`;
-
 export async function releaseConversationLock(conversationId: string, token: string) {
-  await redis.eval(RELEASE, 1, lockKey(conversationId), token, lockChannel(conversationId));
+  await sql.begin(async tx => {
+    const removed = await tx`delete from conversation_locks where conversation_id = ${conversationId} and token = ${token} returning token`;
+    if (removed.length) await tx`select pg_notify('turn_updates', ${JSON.stringify({ channel: lockChannel(conversationId), message: 'released' })})`;
+  });
 }
 
 export async function refreshConversationLock(conversationId: string, token: string) {
-  return (await redis.eval(REFRESH, 1, lockKey(conversationId), token, LOCK_TTL_MS)) === 1;
+  return (await sql`update conversation_locks set expires_at = now() + interval '30 seconds'
+    where conversation_id = ${conversationId} and token = ${token} and expires_at > now() returning token`).length > 0;
+}
+
+/** 保留窗口与读取过滤一致；过期控制和锁也定期回收。 */
+export async function cleanupTurnState() {
+  await sql`delete from turn_events where turn_id in (
+    select e.turn_id from turn_events e left join turns t on t.id = e.turn_id
+    group by e.turn_id, t.status having max(e.created_at) <= now() -
+      make_interval(secs => case when t.status not in ('queued', 'generating')
+        then ${TURN_EVENTS_TTL_S} else 3600 end)
+  )`;
+  await sql`delete from turn_controls where coalesce(cancel_expires_at, '-infinity') <= now()
+    and coalesce(visible_expires_at, '-infinity') <= now()`;
+  await sql`delete from conversation_locks where expires_at <= now()`;
 }

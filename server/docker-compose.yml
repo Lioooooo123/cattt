@@ -1,4 +1,4 @@
-# 本机开发用的 PG 和 Redis。端口只绑 127.0.0.1。
+# 本机开发用的 PG。端口只绑 127.0.0.1。
 name: maomao
 services:
   postgres:
@@ -13,16 +13,5 @@ services:
       test: ["CMD-SHELL", "pg_isready -U maomao"]
       interval: 2s
       retries: 15
-  redis:
-    image: redis:7.4-alpine
-    # 聊天逐字流与断线续传：不驱逐事件，AOF 保留重启前的流
-    command: ["redis-server", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
-    ports: ["127.0.0.1:6379:6379"]
-    volumes: [redisdata:/data]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      retries: 15
 volumes:
   pgdata:
-  redisdata:

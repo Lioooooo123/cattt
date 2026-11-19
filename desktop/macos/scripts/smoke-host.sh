@@ -7,17 +7,10 @@ PG="$APP/Contents/Resources/postgres/bin"
 mkdir -p "$PKG/build/smoke"
 DATA=$(mktemp -d "$PKG/build/smoke/run.XXXXXX")
 PID=
-REDIS_PID=
 stop() { if [ -n "$PID" ]; then kill -TERM "$PID"; wait "$PID"; PID=; fi; }
-cleanup() { stop; if [ -n "$REDIS_PID" ]; then kill "$REDIS_PID"; wait "$REDIS_PID" || true; fi; }
-trap cleanup EXIT
+trap stop EXIT
 echo "烟测数据：$DATA"
-if [ -z "${REDIS_URL:-}" ]; then
-  redis-server --bind 127.0.0.1 --port 56379 --save '' --appendonly no >"$DATA/redis.log" 2>&1 &
-  REDIS_PID=$!
-  export REDIS_URL=redis://127.0.0.1:56379
-fi
-printf 'REDIS_URL=%s\n' "$REDIS_URL" > "$DATA/env"
+printf '# 烟测\n' > "$DATA/env"
 chmod 600 "$DATA/env"
 start() {
   "$BIN" --headless --data-dir "$DATA" >"$DATA/stdout.log" 2>&1 & PID=$!

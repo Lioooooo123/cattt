@@ -97,8 +97,8 @@ chatRoutes.get('/turns/:id/stream', async (c) => {
   const turn = await ownTurn(c.req.param('id'), c.get('owner').conversationId);
   if (!turn) return c.json(notFound, 404);
   const after = c.req.header('last-event-id') ?? c.req.query('last_event_id') ?? '0';
-  // 只接受 Redis Stream 的 id 格式；db-* 是从库里补发的，续传就从头读
-  return streamTurn(c, turn.id, /^db-\d+$/.test(after) ? 'snapshot' : /^\d+-\d+$/.test(after) ? after : '0');
+  // PG 游标直接续传；旧游标和库内快照走缺流恢复
+  return streamTurn(c, turn.id, /^db-\d+$/.test(after) ? 'snapshot' : /^pg-[1-9]\d*$/.test(after) ? after : after === '0' ? '0' : 'missing');
 });
 
 const cancelBody = z.object({ visible_length: z.number().int().min(0).optional() });

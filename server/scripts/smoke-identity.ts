@@ -8,7 +8,6 @@ import { hashToken } from '../src/auth-token.ts';
 import { db,sql } from '../src/db/client.ts';
 import { users,authNonces,asyncJobs } from '../src/db/schema.ts';
 import { eq,inArray } from 'drizzle-orm';
-import { redis } from '../src/redis.ts';
 import { closeQueues } from '../src/queue.ts';
 const key=await generateKeyPair('RS256');const publicKey=await exportJWK(key.publicKey);publicKey.kid='ephemeral-smoke';publicKey.alg='RS256';
 const application=createApp({audience:'local.identity.smoke',jwks:createLocalJWKSet({keys:[publicKey]})});
@@ -29,5 +28,5 @@ try{
 }finally{
  server.close();
  for(const id of new Set(ids)){await sql`delete from async_jobs where source_id in(select id from triggers where cat_id in(select id from cats where user_id=${id})) or source_id in(select m.id from messages m join conversations v on v.id=m.conversation_id join cats c on c.id=v.cat_id where c.user_id=${id})`;await db.delete(users).where(eq(users.id,id));}
- if(hashes.length)await db.delete(authNonces).where(inArray(authNonces.hash,hashes));await closeQueues();redis.disconnect();await sql.end();
+ if(hashes.length)await db.delete(authNonces).where(inArray(authNonces.hash,hashes));await closeQueues();await sql.end();
 }

@@ -17,7 +17,6 @@ import { drainTurns } from '../src/turns/run.ts';
 import { applyCandidate } from '../src/worker/memory.ts';
 import { lockMemory, withdrawSources } from '../src/memory/control.ts';
 import { closeQueues } from '../src/queue.ts';
-import { redis } from '../src/redis.ts';
 import { config } from '../src/config.ts';
 import { buildTurnContext } from '../src/runtime/context.ts';
 config.MODEL_PROVIDER = 'mock'; config.MOCK_DELAY_MS = 1;
@@ -29,7 +28,7 @@ async function fixture() {
   const [older] = await db.insert(messages).values({conversationId:conversation!.id,role:'user',text:'我喜欢清淡的饭菜。'}).returning();
   return {owner:(await loadOwner(user!.id))!,older:older!};
 }
-afterAll(async()=>{hook.afterBuild=undefined;await drainTurns(5000);for(const id of ids)await db.delete(users).where(eq(users.id,id));await closeQueues();await redis.quit();await sql.end();});
+afterAll(async()=>{hook.afterBuild=undefined;await drainTurns(5000);for(const id of ids)await db.delete(users).where(eq(users.id,id));await closeQueues();await sql.end();});
 it('后台旧记忆在上下文读完后提交，当前回复在首字前刷新上下文并完成',async()=>{
   const {owner,older}=await fixture(); let writes=0;
   hook.afterBuild=async()=>{

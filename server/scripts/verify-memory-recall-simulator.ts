@@ -24,5 +24,5 @@ for (const [i, row] of rows.entries()) {
   const [reply] = await db.select().from(messages).where(eq(messages.id, row.catMessageId!));
   checks.push({ query: input!.text, status: row.status, memoryIds: row.memoryIds, expected: expected[i], oldSourcesOutsideRecent30: true, reply: reply!.text });
 }
-await writeFile(new URL('../../outputs/memory-recall-review/模拟器链路.json', import.meta.url), JSON.stringify({ evidence: '实际模拟器客户端→HTTP/SSE→正式回复执行器→真实PG/Redis；回复模型与扩词模型均为mock；中文问题由调试启动脚本发送', passed: checks.length, checks }, null, 2));
+await writeFile(new URL('../../outputs/memory-recall-review/模拟器链路.json', import.meta.url), JSON.stringify({ evidence: '实际模拟器客户端→HTTP/SSE→正式回复执行器→真实PG；回复模型与扩词模型均为mock；中文问题由调试启动脚本发送', passed: checks.length, checks }, null, 2));
 console.log(JSON.stringify({ passed: checks.length })); await sql.end();

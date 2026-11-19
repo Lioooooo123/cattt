@@ -6,7 +6,6 @@ import { eq } from 'drizzle-orm';
 import { ticketRoutes } from './tickets.ts';
 import { Hono } from 'hono';
 import { sql } from '../db/client.ts';
-import { redis } from '../redis.ts';
 import { auth, type Env } from './auth.ts';
 import { catRoutes } from './cat.ts';
 import { chatRoutes } from './chat.ts';
@@ -24,11 +23,8 @@ const app = new Hono();
 if (hostIdentity) app.route('/host', hostRoutes(hostIdentity));
 app.route('/', pairingRoutes);
 app.get('/healthz', async (c) => {
-  const [dbOk, redisOk] = await Promise.all([
-    sql`select 1`.then(() => true).catch(() => false),
-    redis.ping().then(r => r === 'PONG').catch(() => false),
-  ]);
-  return c.json({ release: 'phase5', ok: dbOk && redisOk, db: dbOk, redis: redisOk }, dbOk && redisOk ? 200 : 503);
+  const dbOk = await sql`select 1`.then(() => true).catch(() => false);
+  return c.json({ release: 'phase5', ok: dbOk, db: dbOk }, dbOk ? 200 : 503);
 });
 app.route('/auth',createIdentityRoutes(identityOptions));
 const v1 = new Hono<Env>();

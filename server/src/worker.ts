@@ -6,7 +6,6 @@ import { scanErrands } from './agent/errands.ts';
 import { config, assertModelConfig, describeModelConfig } from './config.ts';
 import { sql } from './db/client.ts';
 import { closeQueues, startQueueWorkers } from './queue.ts';
-import { redis } from './redis.ts';
 import { summarizeBoundary } from './worker/boundary.ts';
 import { extractMemories } from './worker/memory.ts';
 import { sweepStaleTurns } from './worker/sweep.ts';
@@ -44,7 +43,6 @@ async function shutdown() {
   try{unlinkSync('/tmp/cattt-worker-heartbeat');}catch{}
   await stopWake();
   await closeQueues();
-  redis.disconnect();
   await sql.end({ timeout: 5 });
   process.exit(0);
 }

@@ -38,6 +38,19 @@ extension AppStore {
 
     private func performDiarySync(client: APIClient, generation: UUID) async throws {
         try checkDiarySync(generation, client)
+        var firstPage: APIClient.DiaryChanges?
+        do {
+            firstPage = try await client.diaryChanges(after: diaryChangeCursor ?? 0, epoch: diarySyncEpoch)
+            try checkDiarySync(generation, client)
+        } catch APIError.http(status: 404, code: _) {
+            // 旧版服务端只支持创建序号分页。
+        }
+        let supportsChanges = firstPage != nil
+        if let page = firstPage, page.reset == true, let epoch = page.epoch {
+            try await reloadRestoredDiary(epoch: epoch, client: client, generation: generation)
+            firstPage = nil
+        }
+        let writeEpoch = firstPage?.epoch ?? diarySyncEpoch
         var prepared = diaryArchive
         let pending = diaryReadIndex.pendingUploads
         let missingKeys = pending.filter { prepared.entries[$0].pendingMutationID == nil }
@@ -47,7 +60,7 @@ extension AppStore {
         for id in pendingIDs {
             for _ in 0..<3 {
                 guard let sent = entries.first(where: { $0.id == id }), let mutation = sent.pendingMutationID else { break }
-                let result = try await client.saveDiary(sent)
+                let result = try await client.saveDiary(sent, epoch: writeEpoch)
                 try checkDiarySync(generation, client)
                 var archive = diaryArchive
                 switch result {
@@ -64,21 +77,23 @@ extension AppStore {
                 guard persistDiary(archive) else { throw APIError.badResponse }
             }
         }
-        do {
+        if supportsChanges {
+            var prefetched = pendingIDs.isEmpty ? firstPage : nil
             repeat {
-                let page = try await client.diaryChanges(after: diaryChangeCursor ?? 0)
+                let page: APIClient.DiaryChanges
+                if let first = prefetched { page = first; prefetched = nil }
+                else { page = try await client.diaryChanges(after: diaryChangeCursor ?? 0, epoch: diarySyncEpoch) }
                 try checkDiarySync(generation, client)
-                if page.entries.isEmpty { return }
-                try applyDiaryPage(page.entries, cursor: page.cursor)
+                if page.reset == true { diarySyncAgain = true; return }
+                try applyDiaryPage(page.entries, cursor: page.cursor, epoch: page.epoch)
                 if !page.hasMore { return }
             } while !Task.isCancelled
-        } catch APIError.http(status: 404, code: _) {
-            // 服务端尚未升级时沿用创建序号分页；两种游标不能混用。
+        } else {
             var after = 0
             repeat {
                 let page = try await client.diaryPage(after: after)
                 try checkDiarySync(generation, client)
-                try applyDiaryPage(page.entries, cursor: nil)
+                try applyDiaryPage(page.entries, cursor: nil, epoch: nil)
                 guard let next = page.nextSeq else { return }
                 guard next > after else { throw APIError.badResponse }
                 after = next
@@ -86,9 +101,33 @@ extension AppStore {
         }
     }
 
-    private func applyDiaryPage(_ rows: [APIDiaryEntry], cursor: Int?) throws {
+    private func reloadRestoredDiary(epoch: String, client: APIClient, generation: UUID) async throws {
+        var restored: [String: DiaryEntry] = [:]
+        var cursor = 0
+        while true {
+            let page = try await client.diaryChanges(after: cursor, epoch: epoch)
+            try checkDiarySync(generation, client)
+            guard page.epoch == epoch, page.reset != true else { throw APIError.badResponse }
+            for row in page.entries {
+                let entry = try row.local()
+                restored[entry.id] = entry
+            }
+            cursor = page.cursor
+            if !page.hasMore { break }
+        }
+        var archive = diaryArchive
+        let reviewSharing = archive.applyRestoredSnapshot(Array(restored.values), cursor: cursor, epoch: epoch)
+        guard persistDiary(archive) else { throw APIError.badResponse }
+        chatSource = nil
+        if mailboxOpen { markCatDiariesRead(on: diaryDay) }
+        if entries.contains(where: \.hasUnreadCatDiary) { hasMail = true }
+        if reviewSharing { flash("已同步恢复后的日记，请重新选择分享权限") }
+    }
+
+    private func applyDiaryPage(_ rows: [APIDiaryEntry], cursor: Int?, epoch: String?) throws {
         var archive = diaryArchive
         archive.changeCursor = cursor
+        archive.syncEpoch = epoch
         var mail = false
         for row in rows {
             let remote = try row.local()

@@ -51,12 +51,45 @@ struct DiaryReadIndex {
 struct DiaryArchive: Codable, Equatable {
     var version = 1
     var changeCursor: Int?
+    var syncEpoch: String?
     var entries: [DiaryEntry] = []
 
     var days: [String] { Array(Set(entries.map(\.dayKey))).sorted(by: >) }
 
     func entries(on day: String) -> [DiaryEntry] {
         entries.filter { $0.dayKey == day }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 恢复后的服务器版本可变小。本机未传的内容和撤回保留，旧分享不能自动重新授权。
+    mutating func applyRestoredSnapshot(_ restored: [DiaryEntry], cursor: Int, epoch: String) -> Bool {
+        var localEntries = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0) })
+        var reviewSharing = false
+        entries = restored.map { remote in
+            guard let local = localEntries.removeValue(forKey: remote.id) else { return remote }
+            var next = remote
+            if remote.isServerCatDiary { next.catDiaryRead = local.catDiaryRead }
+            if local.kind != .cat && local.needsSync {
+                next.text = local.text
+                next.isPrivate = local.isPrivate || remote.isPrivate
+                if !local.isPrivate && next.isPrivate { reviewSharing = true }
+                next.pendingMutationID = UUID().uuidString
+            }
+            return next
+        }
+        for var local in localEntries.values where local.kind != .cat && local.needsSync {
+            if local.cloudID != nil {
+                if !local.isPrivate { reviewSharing = true }
+                local.isPrivate = true
+                local.cloudID = nil
+                local.cloudRevision = nil
+                local.cloudIsPrivate = nil
+                local.pendingMutationID = UUID().uuidString
+            }
+            entries.append(local)
+        }
+        changeCursor = cursor
+        syncEpoch = epoch
+        return reviewSharing
     }
 
     /// 同一天的模板与模型改写复用一条猫日记，历史日期保留。

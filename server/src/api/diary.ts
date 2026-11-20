@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, asc, eq, gt } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { diaryEntries } from '../db/schema.ts';
+import { config } from '../config.ts';
 import type { Env } from './auth.ts';
 import { bad } from './responses.ts';
 import { DiaryConflict, diaryJSON, saveDiary } from '../diary/service.ts';
@@ -27,6 +28,10 @@ const body = z.object({
   } catch { return false; }
 }, { message: '日期与记录时间不一致' });
 diaryRoutes.put('/diary', async c => {
+  const epoch = c.req.header('x-cattt-diary-epoch');
+  if (epoch !== undefined && config.CATTT_DIARY_SYNC_EPOCH !== undefined && epoch !== config.CATTT_DIARY_SYNC_EPOCH) {
+    return c.json({ error: { code: 'diary_sync_reset' } }, 409);
+  }
   const parsed = body.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json(bad('日记格式不正确'), 400);
   const entry = await saveDiary(c.get('owner').catId, parsed.data);
@@ -37,14 +42,19 @@ diaryRoutes.get('/diary/changes', async c => {
   const query = z.object({
     after: z.coerce.number().int().min(0).default(0),
     limit: z.coerce.number().int().min(1).max(100).default(100),
+    epoch: z.string().min(1).max(64).optional(),
   }).safeParse(c.req.query());
   if (!query.success) return c.json(bad('分页位置不正确'), 400);
-  const { after, limit } = query.data;
+  const { after, limit, epoch } = query.data;
+  const currentEpoch = config.CATTT_DIARY_SYNC_EPOCH;
+  if (epoch !== undefined && currentEpoch !== undefined && epoch !== currentEpoch) {
+    return c.json({ entries: [], cursor: 0, has_more: false, epoch: currentEpoch, reset: true });
+  }
   const rows = await db.select().from(diaryEntries)
     .where(and(eq(diaryEntries.catId, c.get('owner').catId), gt(diaryEntries.changeSeq, after)))
     .orderBy(asc(diaryEntries.changeSeq)).limit(limit + 1);
   const page = rows.slice(0, limit);
-  return c.json({ entries: page.map(diaryJSON), cursor: page.at(-1)?.changeSeq ?? after, has_more: rows.length > limit });
+  return c.json({ entries: page.map(diaryJSON), cursor: page.at(-1)?.changeSeq ?? after, has_more: rows.length > limit, epoch: currentEpoch });
 });
 
 diaryRoutes.get('/diary', async c => {

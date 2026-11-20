@@ -41,13 +41,19 @@ export async function recoverJobs(kinds: JobKind[]) {
     or(and(eq(asyncJobs.state, 'pending'), lte(asyncJobs.nextAttemptAt, dbNow())),
       and(eq(asyncJobs.state, 'running'), lte(asyncJobs.leaseUntil, dbNow()))))).limit(100);
   const { dispatchJob } = await import('../queue.ts');
+  const overdueBefore = Date.now() - 5 * 60_000;
+  const overdue = due.some(job => {
+    const dueAt = job.state === 'pending' ? job.nextAttemptAt : job.leaseUntil;
+    return dueAt !== null && dueAt.getTime() < overdueBefore;
+  });
   for (const job of due) {
     try { await dispatchJob(job); }
     catch (error) {
       console.error(`[outbox ${job.id}] 投递失败，下轮继续`, error);
-      break; // 同一投递故障不逐条等待整批；待办留在 PG。
+      return { dispatchOK: false, overdue }; // 同一投递故障不逐条等待整批；待办留在 PG。
     }
   }
+  return { dispatchOK: true, overdue };
 }
 
 export async function executeJob(id: string, execute: (job: typeof asyncJobs.$inferSelect) => Promise<boolean | void | {retryAt:Date}>) {

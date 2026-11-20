@@ -1,5 +1,5 @@
 import { startJobWakeup } from "./jobs/wake.ts";
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { rename, unlink, writeFile } from 'node:fs/promises';
 import { scanDailyDiaries, processDailyDiary } from './agent/daily-diary.ts';
 import { processErrand } from './agent/executor.ts';
 import { scanErrands } from './agent/errands.ts';
@@ -23,10 +23,15 @@ const kinds = await startQueueWorkers({
   sweep: sweepStaleTurns,
 });
 
-const stopWake = await startJobWakeup(kinds);
+const healthFile = config.CATTT_WORKER_HEALTH_FILE;
+const stopWake = await startJobWakeup(kinds, healthFile ? async status => {
+  const staging = healthFile + '.tmp';
+  await writeFile(staging, JSON.stringify({ pid: process.pid, ...status }), { mode: 0o600 });
+  await rename(staging, healthFile);
+} : undefined);
 const scan = recoveryScanner(async()=>{}, sweepStaleTurns);
-const scanTimer = setInterval(() => void scan().then(()=>writeFileSync('/tmp/cattt-worker-heartbeat','ready')), 15_000);
-void scan().then(()=>writeFileSync('/tmp/cattt-worker-heartbeat','ready'));
+const scanTimer = setInterval(() => void scan(), 15_000);
+void scan();
 const followupScan = () => config.AGENT_ENABLED==='false'?Promise.resolve():scanErrands().then(()=>scanDailyDiaries()).then(() => recoverJobs(kinds)).catch(error=>console.error('[followup scan]',error));
 const followupTimer = setInterval(() => void followupScan(),30_000);
 void followupScan();
@@ -40,8 +45,8 @@ async function shutdown() {
   console.log('[worker] 收到退出信号，等手上的任务做完');
   clearInterval(scanTimer);
   clearInterval(followupTimer);
-  try{unlinkSync('/tmp/cattt-worker-heartbeat');}catch{}
   await stopWake();
+  if (healthFile) await unlink(healthFile).catch(() => {});
   await closeQueues();
   await sql.end({ timeout: 5 });
   process.exit(0);

@@ -22,7 +22,9 @@ final class HostModel: ObservableObject {
     private var quitting = false
     var icon: String {
         if !error.isEmpty { return "exclamationmark.triangle.fill" }
-        if status.values.contains(where: { $0.contains("退出") || $0 == "未就绪" }) { return "exclamationmark.triangle.fill" }
+        if status.values.contains(where: { $0.contains("退出") || $0 == "未就绪" || $0 == "队列投递失败" || $0 == "有待办积压" }) {
+            return "exclamationmark.triangle.fill"
+        }
         if busy || status["API"] != "正常" { return "clock" }
         return "cat.fill"
     }

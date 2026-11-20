@@ -34,13 +34,25 @@ struct APIDiaryEntry: Decodable {
 extension APIClient {
     struct DiaryPage: Decodable { let entries: [APIDiaryEntry]; let nextSeq: Int? }
     enum DiarySave { case saved(APIDiaryEntry), conflict(APIDiaryEntry) }
-    struct DiaryChanges: Decodable { let entries: [APIDiaryEntry]; let cursor: Int; let hasMore: Bool }
+    struct DiaryChanges: Decodable {
+        let entries: [APIDiaryEntry]
+        let cursor: Int
+        let hasMore: Bool
+        let epoch: String?
+        let reset: Bool?
+    }
 
-    func diaryChanges(after cursor: Int) async throws -> DiaryChanges {
+    func diaryChanges(after cursor: Int, epoch: String?) async throws -> DiaryChanges {
         var req = request("GET", "v1/diary/changes")
-        req.url?.append(queryItems: [URLQueryItem(name: "after", value: String(cursor))])
+        req.url?.append(queryItems: [URLQueryItem(name: "after", value: String(cursor)),
+                                     URLQueryItem(name: "epoch", value: epoch ?? "initial")])
         req.timeoutInterval = 12
         let page = try await json(DiaryChanges.self, req)
+        if page.reset == true {
+            guard let restoredEpoch = page.epoch, restoredEpoch != (epoch ?? "initial"),
+                  page.entries.isEmpty, !page.hasMore, page.cursor == 0 else { throw APIError.badResponse }
+            return page
+        }
         guard page.entries.isEmpty ? (!page.hasMore && page.cursor == cursor) : page.cursor > cursor else {
             throw APIError.badResponse
         }
@@ -54,7 +66,7 @@ extension APIClient {
         return try await json(DiaryPage.self, r)
     }
 
-    func saveDiary(_ entry: DiaryEntry) async throws -> DiarySave {
+    func saveDiary(_ entry: DiaryEntry, epoch: String?) async throws -> DiarySave {
         guard let mutation = entry.pendingMutationID else { throw APIError.badResponse }
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var r = request("PUT", "v1/diary", body: [
@@ -63,6 +75,7 @@ extension APIClient {
             "day": entry.dayKey, "time": entry.time, "cat_allowed": !entry.isPrivate,
             "revision": entry.cloudRevision ?? 0, "mutation_id": mutation,
         ])
+        r.setValue(epoch, forHTTPHeaderField: "X-Cattt-Diary-Epoch")
         r.timeoutInterval = 12
         let (data, response) = try await data(for: r)
         guard let http = response as? HTTPURLResponse else { throw APIError.badResponse }

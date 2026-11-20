@@ -61,7 +61,7 @@ private struct ModelKeyView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("填写 DeepSeek key").font(.headline)
-            Text("密钥仅保存在这台电脑上，不会删除本地模型配置。已有本地模型时，记忆默认用本地；聊天、路由和后台处理用 DeepSeek。保存后重启 API 和 worker。").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("密钥保存在这台电脑上。已有本地模型时，默认在本机提取记忆。DeepSeek 处理聊天、路由和托付，相关请求可能包含经你允许使用的记忆和日记内容。保存后会重启电脑端服务。").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             SecureField("DeepSeek API key", text: $key).textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()

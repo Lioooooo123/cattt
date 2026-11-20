@@ -49,4 +49,6 @@ desktop/macos/build/Cattt.app/Contents/MacOS/CatttHost --headless --data-dir /pa
 desktop/macos/build/Cattt.app/Contents/MacOS/CatttHost --headless --data-dir /path/to/data --restore /path/to/backup
 ```
 
-备份含数据库、TLS、管理令牌和模型配置（包含密钥，务必妥善保管）。保留普通备份 7 份、升级前备份 3 份。恢复前自动备份当前状态；恢复后重新运行宿主。数据库主版本不符会拒绝启动，不自动升级。
+备份含数据库、TLS、管理令牌和模型配置（包含密钥，务必妥善保管）。保留普通备份 7 份、升级前及恢复前备份 3 份。恢复前暂停服务并备份当前状态，应用备份后验证本机 API 和 HTTPS。恢复出错时尝试自动回退，回退也失败时保留恢复前备份并报告其名称。数据库主版本不符会拒绝启动，不自动升级。
+
+恢复后的宿主用新的日记同步世代让已配对的新版 iOS 重新拉取，手机保留尚未上传的内容，旧分享需要重新确认。若备份早于当前手机的配对，手机需重新配对。菜单的「局域网 HTTPS」验证本机 TLS 监听和证书，手机到电脑的网络可达性由手机连接确认。worker 状态来自最近的队列检查，可显示投递失败或有待办积压。

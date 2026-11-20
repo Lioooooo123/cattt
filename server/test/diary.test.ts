@@ -11,6 +11,7 @@ import { executeJob } from '../src/jobs/store.ts';
 import { buildTurnContext } from '../src/runtime/context.ts';
 import { commitOutcome } from '../src/turns/store.ts';
 import { closeQueues } from '../src/queue.ts';
+import { config } from '../src/config.ts';
 
 const accounts: { userId: string; catId: string; convId: string; token: string }[] = [];
 let owner: typeof accounts[number];
@@ -70,6 +71,26 @@ it('私密文字同步、重复回执只存一条，不创建读取任务', asyn
   expect(await db.select().from(asyncJobs).where(eq(asyncJobs.sourceId, first.entry.id))).toHaveLength(0);
   let calls = 0; await readDiary(first.entry.id, '1', randomUUID(), async () => { calls++; return '不能读到'; });
   expect(calls).toBe(0);
+});
+it('恢复后拒绝旧世代的日记游标和写入，允许从新世代重新读取', async () => {
+  const original = config.CATTT_DIARY_SYNC_EPOCH;
+  config.CATTT_DIARY_SYNC_EPOCH = 'restored';
+  try {
+    const diary = input();
+    const kept = await saveDiary(owner.catId, diary);
+    const reset = await req('diary/changes?after=' + (kept.changeSeq + 100) + '&epoch=initial');
+    expect(await reset.json()).toEqual({ entries: [], cursor: 0, has_more: false, epoch: 'restored', reset: true });
+    const rejected = await app.request('/v1/diary', {
+      method: 'PUT', headers: { authorization: 'Bearer ' + owner.token, 'content-type': 'application/json', 'x-cattt-diary-epoch': 'initial' },
+      body: JSON.stringify(change(diary, 1, true)),
+    });
+    expect(rejected.status).toBe(409);
+    expect((await row(kept.id)).catAllowed).toBe(false);
+    const current = await req('diary/changes?after=0&epoch=restored');
+    expect(await current.json()).toMatchObject({ entries: [{ id: kept.id }], cursor: kept.changeSeq, epoch: 'restored' });
+  } finally {
+    config.CATTT_DIARY_SYNC_EPOCH = original;
+  }
 });
 it('开放记录与读取待办同时落库，重复执行不重复读取', async () => {
   const entry = await saveDiary(owner.catId, input({ cat_allowed: true }));

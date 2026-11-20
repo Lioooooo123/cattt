@@ -57,6 +57,17 @@ start
 db -c 'UPDATE host_smoke SET value=$$修改$$'
 stop
 printf 'changed' > "$DATA/tls/smoke"
+BAD_BACKUP="$DATA/bad-backup"
+cp -R "$BACKUP" "$BAD_BACKUP"
+printf 'invalid env line\n' > "$BAD_BACKUP/env"
+if "$BIN" --headless --data-dir "$DATA" --restore "$BAD_BACKUP" >"$DATA/failed-restore.log" 2>&1; then
+  echo '损坏配置的备份恢复应失败'; exit 1
+fi
+rg '已恢复操作前的数据' "$DATA/failed-restore.log"
+start
+test "$(db -tAc 'SELECT value FROM host_smoke')" = 修改
+test "$(cat "$DATA/tls/smoke")" = changed
+stop
 "$BIN" --headless --data-dir "$DATA" --restore "$BACKUP"
 start
 test "$(db -tAc 'SELECT value FROM host_smoke')" = 保留
@@ -65,6 +76,13 @@ test "$(cat "$DATA/host-admin.token")" = token-test
 test "$(stat -f %Lp "$DATA/env")" = 600
 test "$(stat -f %Lp "$DATA/pg-password")" = 600
 cmp "$DATA/env" "$BACKUP/env"
+test -s "$DATA/diary-sync-epoch"
+curl --fail --silent --show-error --cacert "$DATA/tls/ca.crt" https://127.0.0.1:8788/healthz >/dev/null
+for _ in $(seq 1 10); do
+  if [ -s "$DATA/run/worker-health.json" ]; then break; fi
+  sleep 1
+done
+"$APP/Contents/Resources/node/bin/node" -e 'const h=require(process.argv[1]); if(h.dispatchOK!==true || typeof h.pid!=="number") process.exit(1)' "$DATA/run/worker-health.json"
 stop
 printf '{"lastVersion":"older-version"}' > "$DATA/host-state.json"
 start

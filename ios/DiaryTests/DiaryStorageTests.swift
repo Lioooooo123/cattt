@@ -20,6 +20,24 @@ struct DiaryStorageTests {
         check(readIndex.entries(on: "2026-11-06") == [readOld])
         check(readIndex.entries(on: "2026-11-05").isEmpty)
         check(DiaryReadIndex(entries: []).days.isEmpty)
+        var stale = readLate
+        stale.cloudID = "cloud-late"
+        stale.cloudRevision = 8
+        var pending = readEarly
+        pending.pendingMutationID = "offline"
+        var pendingShare = stale
+        pendingShare.isPrivate = false
+        pendingShare.pendingMutationID = "old-share"
+        var recovered = stale
+        recovered.cloudRevision = 3
+        var oldServerOnly = readOld
+        oldServerOnly.cloudID = "cloud-old"
+        var resetArchive = DiaryArchive(changeCursor: 120, syncEpoch: "initial", entries: [pendingShare, pending, oldServerOnly])
+        check(resetArchive.applyRestoredSnapshot([recovered], cursor: 80, epoch: "restored"), "过期的分享需要重新授权")
+        check(resetArchive.changeCursor == 80 && resetArchive.syncEpoch == "restored")
+        let kept = resetArchive.entries.first { $0.id == stale.id }
+        check(kept?.cloudRevision == 3 && kept?.isPrivate == true && kept?.needsSync == true)
+        check(resetArchive.entries.contains(pending) && !resetArchive.entries.contains(oldServerOnly))
         var readChanged = readLate
         readChanged.text = "已修改"; readChanged.isPrivate = false; readChanged.visit = .readNoComment
         let readReplaced = DiaryReadIndex(entries: [readChanged])

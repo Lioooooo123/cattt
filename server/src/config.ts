@@ -41,6 +41,8 @@ const schema = z
     LAN_HTTPS_HOST: z.string().default('0.0.0.0'),
     LAN_HTTPS_PORT: z.coerce.number().int().min(0).max(65535).default(8788),
     CATTT_DATA_DIR: z.string().default(fileURLToPath(new URL('../.local', import.meta.url))),
+    CATTT_DIARY_SYNC_EPOCH: z.string().min(1).max(64).optional(),
+    CATTT_WORKER_HEALTH_FILE: z.string().min(1).optional(),
     /** 默认来源；每个槽位可用 CHAT_PROVIDER 等单独改。mock 时全部槽位都用假模型 */
     MODEL_PROVIDER: z.enum([...modelSources, 'mock']).default('openai-compatible'),
     /** 本机 OpenAI 兼容服务（Ollama / LM Studio / llama.cpp server 等）；默认 Ollama */

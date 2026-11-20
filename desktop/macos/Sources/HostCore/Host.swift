@@ -1,9 +1,34 @@
 import Foundation
 import Darwin
+import Security
 
 public struct HostError: Error, CustomStringConvertible {
     public let description: String
     public init(_ message: String) { description = message }
+}
+
+private final class HostTrustDelegate: NSObject, URLSessionDelegate {
+    private let anchor: SecCertificate
+
+    init?(_ pem: String) {
+        let base64 = pem.split(whereSeparator: \.isNewline).filter { !$0.hasPrefix("-----") }.joined()
+        guard let bytes = Data(base64Encoded: base64),
+              let anchor = SecCertificateCreateWithData(nil, bytes as CFData) else { return nil }
+        self.anchor = anchor
+    }
+
+    func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust,
+              SecTrustSetAnchorCertificates(trust, [anchor] as CFArray) == errSecSuccess,
+              SecTrustSetAnchorCertificatesOnly(trust, true) == errSecSuccess,
+              SecTrustEvaluateWithError(trust, nil) else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(trust: trust))
+    }
 }
 
 public final class Host {
@@ -86,7 +111,8 @@ public final class Host {
     public func modelSetupEnvironment() throws -> [String: String] {
         guard ready else { throw HostError("请先解决宿主启动错误") }
         let values = try Self.parseEnv(String(contentsOf: path("env")))
-        let reserved = ["DATABASE_URL", "PGPASSWORD", "CATTT_DATA_DIR", "HOST", "PORT", "LAN_HTTPS_HOST", "LAN_HTTPS_PORT", "NODE_ENV"]
+        let reserved = ["DATABASE_URL", "PGPASSWORD", "CATTT_DATA_DIR", "CATTT_DIARY_SYNC_EPOCH", "CATTT_WORKER_HEALTH_FILE",
+                        "HOST", "PORT", "LAN_HTTPS_HOST", "LAN_HTTPS_PORT", "NODE_ENV"]
         return environment.filter { key, _ in
             !key.hasPrefix("MODEL_") && !key.hasPrefix("OPENAI_COMPAT_") && !key.hasPrefix("MAOMAO_") && !["CHAT", "WORKER", "ROUTER", "EXTRACT"].contains(key.components(separatedBy: "_").first ?? "")
         }.merging(values.filter { !reserved.contains($0.key) }) { _, new in new }
@@ -164,9 +190,6 @@ public final class Host {
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return try String(contentsOf: url).trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    private func sql(_ statement: String) throws {
-        try run(pg("psql"), ["-h", "127.0.0.1", "-p", "54329", "-U", "cattt", "-d", "cattt", "-v", "ON_ERROR_STOP=1", "-c", statement])
-    }
     public func start() throws {
         try fm.createDirectory(at: data, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         lockFD = open(path("host.lock").path, O_CREAT | O_RDWR, 0o600)
@@ -176,11 +199,15 @@ public final class Host {
         lastBackup = try Self.newestRegularBackup(in: path("backups")) ?? .distantPast
         if !fm.fileExists(atPath: path("env").path) { try Data().write(to: path("env")) }
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path("env").path)
-        environment = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]
-        environment.merge(try Self.parseEnv(String(contentsOf: path("env")))) { _, new in new }
+        var startup = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()]
+        startup.merge(try Self.parseEnv(String(contentsOf: path("env")))) { _, new in new }
         let password = try secret("pg-password")
-        environment.merge(["DATABASE_URL": "postgres://cattt:\(password)@127.0.0.1:54329/cattt", "PGPASSWORD": password,
-                           "CATTT_DATA_DIR": data.path, "HOST": "127.0.0.1", "PORT": "8787", "LAN_HTTPS_HOST": "0.0.0.0", "LAN_HTTPS_PORT": "8788", "NODE_ENV": "production"]) { _, new in new }
+        let diaryEpochURL = path("diary-sync-epoch")
+        let diaryEpoch = fm.fileExists(atPath: diaryEpochURL.path) ? try String(contentsOf: diaryEpochURL, encoding: .utf8) : "initial"
+        startup.merge(["DATABASE_URL": "postgres://cattt:\(password)@127.0.0.1:54329/cattt", "PGPASSWORD": password,
+                       "CATTT_DATA_DIR": data.path, "CATTT_DIARY_SYNC_EPOCH": diaryEpoch, "CATTT_WORKER_HEALTH_FILE": path("run/worker-health.json").path,
+                       "HOST": "127.0.0.1", "PORT": "8787", "LAN_HTTPS_HOST": "0.0.0.0", "LAN_HTTPS_PORT": "8788", "NODE_ENV": "production"]) { _, new in new }
+        environment = startup
         if fm.fileExists(atPath: path("pg/PG_VERSION").path) {
             guard try String(contentsOf: path("pg/PG_VERSION")).trimmingCharacters(in: .whitespacesAndNewlines) == "17" else { throw HostError("数据库版本不匹配") }
         } else {
@@ -254,33 +281,56 @@ public final class Host {
         if Date().timeIntervalSince(lastHealth) >= 5 { lastHealth = Date(); pollHealth() }
     }
     private func pollHealth() {
-        var modelCode: Int?
-        if let request = Self.modelHealthRequest(environment) {
-            let semaphore = DispatchSemaphore(value: 0)
-            var code = 0
-            let task = URLSession.shared.dataTask(with: request) { _, response, _ in code = (response as? HTTPURLResponse)?.statusCode ?? 0; semaphore.signal() }
-            task.resume(); semaphore.wait()
-            modelCode = code
+        updateModelStatus(httpStatus: Self.modelHealthRequest(environment).map { httpStatus($0) })
+        let code = httpStatus(healthRequest("http://127.0.0.1:8787/healthz"))
+        status["API"] = code == 200 ? "正常" : "未就绪"
+        if code == 200 || code == 503 { status["数据库"] = code == 200 ? "正常" : "未就绪" }
+        status["局域网 HTTPS"] = lanHealth() ? "本机监听正常" : "未就绪"
+        if let worker = children["worker"], worker.isRunning {
+            status["worker"] = workerHealth(pid: worker.processIdentifier)
         }
-        updateModelStatus(httpStatus: modelCode)
-        for endpoint in ["healthz", "host/status"] {
-            var request = URLRequest(url: URL(string: "http://127.0.0.1:8787/\(endpoint)")!); request.timeoutInterval = 2
-            if endpoint == "host/status", let token = try? String(contentsOf: path("host-admin.token")) {
-                request.setValue("Bearer \(token.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
-            }
-            let semaphore = DispatchSemaphore(value: 0)
-            var code = 0
-            let task = URLSession.shared.dataTask(with: request) { _, response, _ in code = (response as? HTTPURLResponse)?.statusCode ?? 0; semaphore.signal() }
-            task.resume(); semaphore.wait()
-            status[endpoint == "healthz" ? "API" : "局域网 HTTPS"] = code == 200 ? "正常" : code == 404 ? "此版本不支持" : "未就绪"
+    }
+    private func healthRequest(_ url: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: url)!)
+        request.timeoutInterval = 2
+        return request
+    }
+    private func httpStatus(_ request: URLRequest, session: URLSession = .shared) -> Int {
+        let semaphore = DispatchSemaphore(value: 0)
+        var code = 0
+        let task = session.dataTask(with: request) { _, response, _ in
+            code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            semaphore.signal()
         }
-        status["worker"] = children["worker"]?.isRunning == true ? "运行中" : status["worker"]
+        task.resume()
+        semaphore.wait()
+        return code
+    }
+    private func lanHealth() -> Bool {
+        guard let certificate = try? String(contentsOf: path("tls/ca.crt"), encoding: .utf8),
+              let delegate = HostTrustDelegate(certificate) else { return false }
+        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        return httpStatus(healthRequest("https://127.0.0.1:8788/healthz"), session: session) == 200
+    }
+    private func workerHealth(pid: Int32) -> String {
+        struct Sample: Decodable { let pid: Int32; let dispatchOK: Bool; let overdue: Bool }
+        let url = path("run/worker-health.json")
+        guard let timestamp = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+              Date().timeIntervalSince(timestamp) < 45,
+              let bytes = try? Data(contentsOf: url),
+              let sample = try? JSONDecoder().decode(Sample.self, from: bytes), sample.pid == pid else { return "未就绪" }
+        if !sample.dispatchOK { return "队列投递失败" }
+        return sample.overdue ? "有待办积压" : "队列正常"
     }
     private func updateModelStatus(httpStatus: Int? = nil) {
         status["模型"] = Self.modelStatus(environment, httpStatus: httpStatus)
         status.merge(Self.modelSourceStatus(environment, httpStatus: httpStatus)) { _, new in new }
     }
     @discardableResult public func backup(preUpgrade: Bool = false) throws -> URL {
+        try backup(preUpgrade: preUpgrade, preserving: nil)
+    }
+    private func backup(preUpgrade: Bool, preserving source: URL?) throws -> URL {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
         let dest = path("backups/cattt-\(formatter.string(from: Date()))\(preUpgrade ? "-pre-upgrade" : "")")
         let staging = dest.appendingPathExtension("incomplete")
@@ -292,25 +342,64 @@ public final class Host {
         } catch { try? fm.removeItem(at: staging); throw error }
         for kind in [false, true] {
             let entries = try fm.contentsOfDirectory(at: path("backups"), includingPropertiesForKeys: nil).filter { $0.lastPathComponent.hasPrefix("cattt-") && !$0.lastPathComponent.hasSuffix(".incomplete") && $0.lastPathComponent.hasSuffix("-pre-upgrade") == kind }.sorted { $0.lastPathComponent > $1.lastPathComponent }
-            for old in entries.dropFirst(kind ? 3 : 7) { try fm.removeItem(at: old) }
+            for old in entries.dropFirst(kind ? 3 : 7) where old.standardizedFileURL != source?.standardizedFileURL {
+                try fm.removeItem(at: old)
+            }
         }
         if !preUpgrade { lastBackup = Date() }
         log("备份完成：\(dest.path)"); return dest
     }
     public func restore(_ source: URL) throws {
         guard fm.fileExists(atPath: source.appendingPathComponent("db.dump").path), source.standardizedFileURL != data.standardizedFileURL else { throw HostError("备份无效") }
-        _ = try backup(preUpgrade: true)
+        try run(pg("pg_restore"), ["--list", source.appendingPathComponent("db.dump").path])
         stopServices()
-        try sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='cattt' AND pid<>pg_backend_pid()")
+        let recovery: URL
+        do {
+            recovery = try backup(preUpgrade: true, preserving: source)
+        } catch {
+            try startServices()
+            throw error
+        }
+        do {
+            try installBackup(source)
+            try Data(UUID().uuidString.utf8).write(to: path("diary-sync-epoch"), options: .atomic)
+            try restartAfterRestore()
+            log("恢复完成")
+        } catch {
+            let restoreError = error
+            log("恢复失败，尝试从 \(recovery.lastPathComponent) 回退：\(restoreError)")
+            do {
+                stopServices()
+                if children["postgres"]?.isRunning != true { try startPostgres() }
+                try installBackup(recovery)
+                try restartAfterRestore()
+            } catch {
+                shutdown()
+                throw HostError("恢复和自动回退均失败。请保留备份 \(recovery.lastPathComponent)，并查看日志。恢复：\(restoreError)；回退：\(error)")
+            }
+            throw HostError("恢复失败，已恢复操作前的数据与服务：\(restoreError)")
+        }
+    }
+    private func installBackup(_ source: URL) throws {
+        try run(pg("psql"), ["-h", "127.0.0.1", "-p", "54329", "-U", "cattt", "-d", "postgres", "-v", "ON_ERROR_STOP=1",
+                             "-c", "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='cattt'"])
         try run(pg("pg_restore"), ["-h", "127.0.0.1", "-p", "54329", "-U", "cattt", "-d", "postgres", "--clean", "--if-exists", "--create", "--exit-on-error", source.appendingPathComponent("db.dump").path])
         for name in ["tls", "host-admin.token", "env"] {
             let from = source.appendingPathComponent(name)
             if fm.fileExists(atPath: path(name).path) { try fm.removeItem(at: path(name)) }
             if fm.fileExists(atPath: from.path) { try fm.copyItem(at: from, to: path(name)) }
         }
-        log("恢复完成；重新启动以加载配置")
+    }
+    private func restartAfterRestore() throws {
         shutdown()
         try start()
+        let deadline = Date().addingTimeInterval(10)
+        let request = healthRequest("http://127.0.0.1:8787/healthz")
+        while Date() < deadline, children["api"]?.isRunning == true {
+            if httpStatus(request) == 200, lanHealth() { return }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        throw HostError("恢复后 API 或局域网 HTTPS 未就绪，请查看 logs/api.log")
     }
     private func stop(_ process: Process, signal: Int32 = SIGTERM) {
         guard process.isRunning else { return }

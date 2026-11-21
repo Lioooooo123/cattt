@@ -27,7 +27,7 @@ for binary in postgres initdb pg_dump pg_restore pg_isready psql; do
 done
 pnpm --dir "$ROOT/server" exec node scripts/bundle-host.mjs "$APP/Contents/Resources/server"
 test -f "$APP/Contents/Resources/server/model-setup.mjs"
-swift build --package-path "$PKG" -c release
+swift build --package-path "$PKG" -c release --arch arm64
 cp "$PKG/.build/release/CatttHost" "$APP/Contents/MacOS/CatttHost"
 /usr/libexec/PlistBuddy -c 'Clear dict' "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string app.cattt.host' "$APP/Contents/Info.plist"
@@ -35,8 +35,10 @@ cp "$PKG/.build/release/CatttHost" "$APP/Contents/MacOS/CatttHost"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string 团子' "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 14.0' "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSUIElement bool false' "$APP/Contents/Info.plist"
+if [ "${CATTT_ASSEMBLE_ONLY:-0}" = 1 ]; then exit 0; fi
 find "$APP/Contents/Resources" -type f -perm +111 -print0 | while IFS= read -r -d '' file; do
   if file "$file" | rg -q Mach-O; then codesign --force -s - "$file"; fi
 done

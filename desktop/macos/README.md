@@ -1,5 +1,7 @@
 # macOS 团子客户端与宿主
 
+DMG、签名、公证与首次启动：[发布说明 / Releasing](RELEASING.md)。
+
 F 批宿主能力继续保留：SwiftPM 宿主、无界面运行、应用打包、状态菜单、手机配对窗口和模型设置；本版在同一个 `Cattt.app` 增加 Dock 可见的小院与聊天主窗口。主窗口直接加载已打包的 3D 小院，聊天使用宿主 loopback API 和一次性配对码；设备凭证按数据目录归属保存在 macOS 钥匙串中。没有新增服务端接口，也不把管理令牌或设备凭证交给网页。云部署交付物已移除，保留 `server/docker-compose.yml` 供源码开发使用。
 
 宿主初始化、健康轮询、备份恢复及退出都在后台串行队列运行；菜单通过可观察状态更新，不等待数据库或网络请求。菜单提供各组件状态、启动错误、配对、DeepSeek 密钥设置、备份恢复、目录入口和登录自启动。普通备份的每日到期时间以现有最新完整普通备份的修改时间为准，不因重新启动宿主而延期。
@@ -21,7 +23,7 @@ bash desktop/macos/scripts/build-app.sh
 bash desktop/macos/scripts/smoke-host.sh
 ```
 
-构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
+构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；`build-app.sh` 输出 `build/Cattt.app` 和开发 DMG，仅临时签名，未公证。正式发布或生成可安装开发镜像请使用下面的发布流程。
 构建脚本执行 `pnpm --dir web build:ios`，并将输出复制到 `Cattt.app/Contents/Resources/YardWeb`；运行时不需要网页开发服务器。正常启动会显示小院主窗口；关闭窗口不会退出菜单栏宿主，Dock 重开和菜单中的「打开小院」均可重新打开。宿主就绪后自动加载聊天历史；网络中断后按事件游标续接，未确认接收时用稳定 `client_message_id` 重试，已接收的消息改走既有回复接口。停止回复时，按屏幕已显示的 UTF-16 长度保存。
 发送时可停止等待，尚未确认送达的消息可安全重试。本机聊天连接空闲 12 秒超时，健康连接上的 SSE 心跳不会打断模型生成。客户端收到文本增量即显示；后端允许调用工具的阶段会先缓冲文本，可能整段送达。
 开发 DMG 未公证，从浏览器下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。开发试用无需更改 Gatekeeper：从源码构建后直接打开本机生成的应用。

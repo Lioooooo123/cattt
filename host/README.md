@@ -75,3 +75,15 @@ Gateway 默认只监听 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口�
 `LeaseKeeper` 可作为运行时组件使用。启动后调用 `hold(name, { ttlMs, renewEveryMs })`，续租间隔须小于租期。默认持有者为 hostId，构造参数 `worker` 可追加为 `<hostId>:<worker>`，`skewMs` 可覆盖接管宽限。重复持有同名有效租约复用原维护配置；`epoch(name)` 校验并返回当前 token，失效返回 undefined。维护器发布带名称、持有者和 epoch 的 `lease:acquired` / `lease:lost`；续租失败后不自动抢回，停止时释放持有租约并发布 lost。
 
 `withLease(name, fn)` 要求事先持有租约，在调用前及完成后检查持有权，并向回调传入 epoch。它不自动获取或释放，不会取消回调或撤销外部副作用；数据库写入仍须使用上述事务内断言。当前入口尚未启用具体租约角色。
+
+## 聊天事件与 SSE 回放
+
+`chat_events` 是本地持久事件日志；每个 stream 的 seq 从 1 递增，terminal 事件之后拒绝追加。streamId 应为一次性轮次标识，清扫后也不要复用。数据必须可 JSON 序列化，事件类型不能包含换行或空字符。
+
+`store/chat-events.ts` 提供 `appendChatEvent(db, clock, input)`，可独立运行或放入调用方的立即写事务；`readChatEvents(db, clock, streamId, afterSeq, limit)` 显式接收 Clock，读取时即过滤过期数据。保留窗口沿用旧 PG 语义：从流内最后事件时间（最大 created_at）起，终态保留 10 分钟，非终态保留 1 小时，到达边界即过期。清扫按整条流删除，不删除仍有效流的早期事件。入口注册 `ChatEventSweeper`，每 60 秒按 Clock 清扫一次。
+
+业务推荐使用 `new ChatEvents(ctx).append(input)`；需要与其它业务写入原子提交时，使用 `events.write((db, append) => { ... })`。该同步回调中的 append 与业务写入共用立即事务，只有最外层提交成功后才发布 `chat:event { streamId, seq }`；回滚不唤醒。不要在其它事务中调用这两个服务方法（会拒绝），应由 events.write 拥有最外层事务。直接调用 store 的追加函数不发布通知。
+
+`events.subscribe(streamId, cursor?, signal?)` 返回 `status: "ok"` 和异步迭代器，或 `status: "unknown"`。迭代器先回放后等待总线唤醒，并以 1 秒轮询兜底；跨批次排空尾部事件，到 terminal 后结束。通过 AbortSignal 中止等待并清理订阅。游标为不透明的 `<hostId>.<seq>`；不带游标从头读取。异宿主、格式错误、超出流尾、未知或过期的流返回 unknown，调用方应恢复快照；已读到终态的有效游标直接结束。订阅过程中流过期则结束，不伪造终态。
+
+`GET /v2/streams/:streamId/events` 提供 SSE：`Last-Event-ID` 优先于 `?cursor=`，每条消息包含 id、event 和 JSON data。连接开始发送注释，每 15 秒发送心跳注释；客户端断开或宿主停止会清理订阅。未知游标在发送 SSE 之前返回 HTTP 410 JSON `{ error, reason: "cursor_unknown" }`。成员鉴权、业务表快照回退、取消、可见长度与取代控制属于 R3，当前不实现；默认只监听回环地址，不应将此接口暴露给不可信网络。

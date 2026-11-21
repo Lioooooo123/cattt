@@ -1,0 +1,20 @@
+{
+  "name": "cattt-host",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.5",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.6.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^7.0.2"
+  }
+}

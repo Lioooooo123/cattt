@@ -10,17 +10,13 @@ import type { LanTlsOptions } from "../identity/tls.ts";
 import { DEFAULT_LAN_HTTPS_PORT } from "../runtime/config.ts";
 import { memberInviteRoutes } from "../identity/invites.ts";
 import { conversationRoutes } from "../conversations/routes.ts";
+import { actorDto, memberProfile } from "../identity/dto.ts";
 
 interface GatewayOptions {
   heartbeatIntervalMs?: number;
   lanPort?: number;
   tlsRefreshIntervalMs?: number;
   tls?: LanTlsOptions;
-}
-
-function memberProfile(member: NonNullable<ReturnType<typeof getMember>>) {
-  const { id, householdId, displayName, homeHostId } = member;
-  return { id, householdId, displayName, homeHostId };
 }
 
 export class Gateway implements Component {
@@ -65,12 +61,19 @@ export class Gateway implements Component {
     }
     const identity = await initializeLan(ctx.config.dataDir, ctx.clock, this.options.tls);
     const app = new Hono<IdentityEnv>();
+    const internalError = (error: Error) => {
+      try {
+        Promise.resolve(ctx.config.onError ? ctx.config.onError(error, "gateway:http") : console.error("接口处理失败", error)).catch(() => {});
+      } catch {}
+      return Response.json({ error: { code: "internal_error" } }, { status: 500 });
+    };
+    app.onError(internalError);
     const lanStatus = () => ({ enabled: this.lanPort !== undefined, port: this.lanPort ?? 0 });
     const auth = requireActor(ctx);
     app.route("/v2", phonePairingRoutes(ctx));
     app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
     app.route("/v2", conversationRoutes(ctx, (request, turnId, cursor) => this.stream(request, ctx, turnId, cursor)));
-    app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
+    app.get("/v2/healthz", (c) => c.json({ ok: true, host_id: ctx.hostId, protocol_version: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");
       const member = getMember(ctx.store.db, actor.memberId);
@@ -78,16 +81,17 @@ export class Gateway implements Component {
       if (!member || !household) {
         return c.json({ error: { code: "unauthorized" } }, 401);
       }
-      return c.json({ actor, member: memberProfile(member), household: { id: household.id, name: household.name } });
+      return c.json({ actor: actorDto(actor), member: memberProfile(member), household: { id: household.id, name: household.name } });
     });
     app.get("/v2/members", auth, (c) => {
       return c.json({ members: listMembers(ctx.store.db, c.get("actor").householdId).map(memberProfile) });
     });
-    app.notFound((c) => c.json({ error: "未找到接口" }, 404));
+    app.notFound((c) => c.json({ error: { code: "not_found", message: "未找到接口" } }, 404));
     const loopback = new Hono<IdentityEnv>();
+    loopback.onError(internalError);
     loopback.route("/", app);
     loopback.route("/host", hostAdminRoutes(ctx, identity, lanStatus));
-    loopback.notFound((c) => c.json({ error: "未找到接口" }, 404));
+    loopback.notFound((c) => c.json({ error: { code: "not_found", message: "未找到接口" } }, 404));
     const lanEnabled = this.options.lanPort !== undefined || lanPort !== 0;
     const bindLan = (port: number) => Bun.serve({
       hostname: "0.0.0.0", port, idleTimeout: 0, tls: identity.serverOptions(), fetch: app.fetch,

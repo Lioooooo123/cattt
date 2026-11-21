@@ -6,7 +6,7 @@ import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
 
 interface Joined {
-  member: { id: string; displayName: string; householdId: string };
+  member: { id: string; display_name: string; household_id: string };
   device_id: string;
   device_token: string;
   household: { id: string };
@@ -67,7 +67,7 @@ for (const maxMembers of [2, 3]) {
       for (const joined of [first, second]) {
         const me = await phone("/v2/me", "GET", undefined, joined.device_token);
         expect(await me.json()).toMatchObject({
-          actor: { memberId: joined.member.id, householdId: host.householdId }, member: { id: joined.member.id },
+          actor: { member_id: joined.member.id, household_id: host.householdId }, member: { id: joined.member.id },
         });
         const list = await phone("/v2/members", "GET", undefined, joined.device_token);
         expect((await list.json() as { members: { id: string }[] }).members.map((member) => member.id))

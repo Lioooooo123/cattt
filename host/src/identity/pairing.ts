@@ -8,8 +8,9 @@ import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
 import { memberInviteRoutes } from "./invites.ts";
+import { memberProfile } from "./dto.ts";
 
-const badRequest = { error: { code: "bad_request" } };
+const badRequest = { error: { code: "invalid_request" } };
 
 export function phonePairingRoutes(ctx: HostContext) {
   const app = new Hono<IdentityEnv>();
@@ -25,7 +26,7 @@ export function phonePairingRoutes(ctx: HostContext) {
       code: parsed.data.code, deviceName: parsed.data.device_name,
     });
     return result ? c.json({
-      device_id: result.deviceId, device_token: result.token, member: result.member, household: result.household,
+      device_id: result.deviceId, device_token: result.token, member: memberProfile(result.member), household: result.household,
     }) : c.json({ error: { code: "pairing_code_invalid" } }, 401);
   });
   app.post("/device/unpair", requireActor(ctx), (c) => {

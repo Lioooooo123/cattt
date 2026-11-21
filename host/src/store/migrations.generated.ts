@@ -64,5 +64,20 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795282767505,
     "hash": "a436664f7e8a6491391a18a5c6d68786d3e90a90642a9bfb76c431e2cae1a5bb"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `conversations` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`origin_host_id` text NOT NULL,\n\t`hlc` text NOT NULL,\n\t`rev` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\t`deleted_at` integer,\n\t`household_id` text NOT NULL,\n\t`kind` text NOT NULL,\n\t`owner_member_id` text,\n\t`publisher_host_id` text NOT NULL,\n\tFOREIGN KEY (`household_id`) REFERENCES `households`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`publisher_host_id`) REFERENCES `hosts`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"conversations_kind_owner\" CHECK((\"conversations\".\"kind\" = 'group' AND \"conversations\".\"owner_member_id\" IS NULL)\n    OR (\"conversations\".\"kind\" = 'direct' AND \"conversations\".\"owner_member_id\" IS NOT NULL))\n);\n",
+      "\nCREATE UNIQUE INDEX `conversations_one_group` ON `conversations` (`household_id`) WHERE \"conversations\".\"kind\" = 'group';",
+      "\nCREATE UNIQUE INDEX `conversations_one_direct` ON `conversations` (`owner_member_id`) WHERE \"conversations\".\"kind\" = 'direct';",
+      "\nCREATE TABLE `messages` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`origin_host_id` text NOT NULL,\n\t`hlc` text NOT NULL,\n\t`rev` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\t`deleted_at` integer,\n\t`conversation_id` text NOT NULL,\n\t`author_member_id` text,\n\t`text` text NOT NULL,\n\t`modality` text NOT NULL,\n\t`status` text NOT NULL,\n\t`client_message_id` text,\n\t`reply_to_message_id` text,\n\t`turn_id` text,\n\tFOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`author_member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`reply_to_message_id`) REFERENCES `messages`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"messages_modality\" CHECK(\"messages\".\"modality\" = 'text'),\n\tCONSTRAINT \"messages_status\" CHECK(\"messages\".\"status\" IN ('complete', 'stopped'))\n);\n",
+      "\nCREATE UNIQUE INDEX `messages_client_idempotency` ON `messages` (`conversation_id`,`author_member_id`,`client_message_id`);",
+      "\nCREATE INDEX `messages_conversation_order` ON `messages` (`conversation_id`,`hlc`,`id`);",
+      "\nCREATE TABLE `participants` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`origin_host_id` text NOT NULL,\n\t`hlc` text NOT NULL,\n\t`rev` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\t`deleted_at` integer,\n\t`conversation_id` text NOT NULL,\n\t`member_id` text NOT NULL,\n\tFOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE no action\n);\n",
+      "\nCREATE UNIQUE INDEX `participants_conversation_member` ON `participants` (`conversation_id`,`member_id`);"
+    ],
+    "bps": true,
+    "folderMillis": 1795283431688,
+    "hash": "00a203512319feb776a127ec7c8a1ee203e7c79230ae81c359d05f2974d80f03"
   }
 ];

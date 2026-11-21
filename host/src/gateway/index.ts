@@ -9,6 +9,7 @@ import { initializeLan } from "../identity/tls.ts";
 import type { LanTlsOptions } from "../identity/tls.ts";
 import { DEFAULT_LAN_HTTPS_PORT } from "../runtime/config.ts";
 import { memberInviteRoutes } from "../identity/invites.ts";
+import { conversationRoutes } from "../conversations/routes.ts";
 
 interface GatewayOptions {
   heartbeatIntervalMs?: number;
@@ -69,6 +70,7 @@ export class Gateway implements Component {
     const auth = requireActor(ctx);
     app.route("/v2", phonePairingRoutes(ctx));
     app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
+    app.route("/v2", conversationRoutes(ctx));
     app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");

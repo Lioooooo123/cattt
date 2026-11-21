@@ -10,6 +10,7 @@ import type { Store } from "../store/index.ts";
 
 export interface HostEvents {
   "host:ready": { hostId: string };
+  "jobs:wake": { queue: string };
 }
 
 export interface HostConfig {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getHostMeta, setHostMeta } from "../src/store/host-meta.ts";
 import { openStore, writeTransaction } from "../src/store/index.ts";
 import type { Store } from "../src/store/index.ts";
+import { migrations } from "../src/store/migrations.generated.ts";
 
 const stores: Store[] = [];
 const directories: string[] = [];
@@ -55,7 +56,7 @@ describe("store", () => {
 
     expect(getHostMeta(second.db, "host_id")).toBe("本机");
     expect(second.raw.query("SELECT count(*) AS count FROM __drizzle_migrations").get())
-      .toEqual({ count: 1 });
+      .toEqual({ count: migrations.length });
   });
 
   test("元数据支持缺失、空值和覆盖", () => {

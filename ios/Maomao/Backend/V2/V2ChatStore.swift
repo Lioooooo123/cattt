@@ -15,10 +15,24 @@ final class V2ChatStore: ObservableObject {
     @Published var loading = false
     private var client: V2Client?
     private var sending = Set<String>()
+    let replyRequests: V2ReplyRequests
+    struct ActiveTurn {
+        let turn: V2.Turn
+        var stream = V2TurnStream()
+        var reconnecting = false
+        var stopping = false
+        var phase: V2.Turn.Status { stream.status ?? turn.status }
+    }
+    @Published var activeTurns: [String: ActiveTurn] = [:]
+    @Published var replyErrors: [String: String] = [:]
+    @Published var replying = Set<String>()
+    private var replyTargets: [String: String] = [:]
+    private var streamTasks: [String: Task<Void, Never>] = [:]
 
     init(connection: V2Connection) {
         self.connection = connection
         outbox = V2Outbox(identity: connection.identity.deviceId)
+        replyRequests = V2ReplyRequests(deviceID: connection.identity.deviceId)
         pending = outbox.entries
         members[connection.identity.member.id] = connection.identity.member.displayName
     }
@@ -59,12 +73,7 @@ final class V2ChatStore: ObservableObject {
             do {
                 if client == nil { client = try await connection.select() }
                 if let client {
-                    var more = true
-                    while more && !Task.isCancelled {
-                        let page = try await client.messages(id, after: messages[id]?.last?.cursor)
-                        merge(page.messages, into: id)
-                        more = page.hasMoreAfter && !page.messages.isEmpty
-                    }
+                    try await refresh(id, client: client)
                     error = nil
                 }
                 for entry in pending where entry.conversationID == id && failures[entry.id] == nil { await transmit(entry) }
@@ -95,7 +104,7 @@ final class V2ChatStore: ObservableObject {
             if let page = try? await client.messages(entry.conversationID, after: messages[entry.conversationID]?.last?.cursor) {
                 merge(page.messages, into: entry.conversationID)
             }
-            if let turn = result.turn { await follow(turn, client: client) }
+            if let turn = result.turn { follow(turn, client: client) }
         } catch { failures[entry.id] = error.localizedDescription }
     }
     private func merge(_ incoming: [V2.Message], into id: String) {
@@ -105,19 +114,105 @@ final class V2ChatStore: ObservableObject {
             else { current.append(message) }
         }
         messages[id] = current
+        reconcile(id)
         if let last = current.last, let index = conversations.firstIndex(where: { $0.id == id }) { conversations[index].lastMessage = last }
     }
-    @Published var streams: [String: V2TurnStream] = [:]
-    private(set) var streamConversations: [String: String] = [:]
-    private func follow(_ turn: V2.Turn, client: V2Client) async {
-        streamConversations[turn.id] = turn.conversationId
+    private func refresh(_ id: String, client: V2Client) async throws {
+        var more = true
+        while more && !Task.isCancelled {
+            let page = try await client.messages(id, after: messages[id]?.last?.cursor)
+            merge(page.messages, into: id)
+            more = page.hasMoreAfter && !page.messages.isEmpty
+        }
+    }
+    private func reconcile(_ conversation: String) {
+        guard let active = activeTurns[conversation], active.stream.terminal == "done" else { return }
+        if hasPersistedReply(active, conversation: conversation) || (active.stream.replyMessageID == nil && active.phase != .stopped) {
+            activeTurns[conversation] = nil
+        }
+    }
+    func hasPersistedReply(_ active: ActiveTurn, conversation: String) -> Bool {
+        (messages[conversation] ?? []).contains {
+            $0.author.kind == .cat && ($0.turnId == active.turn.id || $0.id == active.stream.replyMessageID)
+        }
+    }
+    func latestMember(_ conversation: String) -> V2.Message? {
+        messages[conversation]?.last { $0.author.kind == .member }
+    }
+    func canReply(_ message: V2.Message) -> Bool {
+        let id = message.conversationId
+        guard message.author.kind == .member, !replying.contains(id) else { return false }
+        return activeTurns[id]?.stream.terminal != nil || activeTurns[id] == nil
+    }
+    func reply(to message: V2.Message) async {
+        let id = message.conversationId
+        guard !replying.contains(id) else { return }
+        replying.insert(id); replyErrors[id] = nil
+        replyTargets[id] = message.id
+        let requestID = replyRequests.requestID(message: message.id)
+        defer { replying.remove(id) }
         do {
-            try await client.stream(conversation: turn.conversationId, turn: turn.id, lastEventID: streams[turn.id]?.lastEventID) { [weak self] event in
-                guard let self else { return }
-                var state = self.streams[turn.id] ?? V2TurnStream()
-                try state.apply(event)
-                self.streams[turn.id] = state
-            }
-        } catch { self.error = error.localizedDescription }
+            if client == nil { client = try await connection.select() }
+            guard let client else { throw PairingError.unavailable }
+            let turn = try await client.reply(conversation: id, message: message.id, requestID: requestID)
+            replyRequests.acknowledge(message: message.id)
+            follow(turn, client: client)
+        } catch { replyErrors[id] = error.localizedDescription }
+    }
+    func failedReplyTarget(_ conversation: String) -> V2.Message? {
+        messages[conversation]?.first { $0.id == replyTargets[conversation] }
+    }
+    func stop(_ conversation: String) async {
+        guard var active = activeTurns[conversation], active.stream.terminal == nil, !active.stopping, let client else { return }
+        active.stopping = true; activeTurns[conversation] = active
+        do {
+            _ = try await client.cancel(conversation: conversation, turn: active.turn.id, visibleLength: active.stream.text.utf16.count)
+        } catch {
+            if activeTurns[conversation]?.turn.id == active.turn.id { activeTurns[conversation]?.stopping = false }
+            replyErrors[conversation] = error.localizedDescription
+        }
+    }
+    private func follow(_ turn: V2.Turn, client: V2Client) {
+        let id = turn.conversationId
+        if activeTurns[id]?.turn.id == turn.id, streamTasks[id] != nil { return }
+        streamTasks[id]?.cancel()
+        activeTurns[id] = ActiveTurn(turn: turn)
+        replyErrors[id] = nil
+        streamTasks[id] = Task { [weak self] in
+            await self?.consume(turn, client: client)
+        }
+    }
+    private func consume(_ turn: V2.Turn, client: V2Client) async {
+        let id = turn.conversationId
+        defer { if activeTurns[id]?.turn.id == turn.id || activeTurns[id] == nil { streamTasks[id] = nil } }
+        var delay = 1
+        while !Task.isCancelled, activeTurns[id]?.turn.id == turn.id {
+            do {
+                try await client.stream(path: turn.streamUrl, lastEventID: activeTurns[id]?.stream.lastEventID) { [weak self] event in
+                    guard let self, var active = self.activeTurns[id], active.turn.id == turn.id else { return true }
+                    try active.stream.apply(event)
+                    active.reconnecting = false
+                    self.activeTurns[id] = active
+                    return active.stream.terminal != nil
+                }
+                guard !Task.isCancelled, let active = activeTurns[id], active.turn.id == turn.id else { return }
+                if active.stream.terminal != nil {
+                    if active.stream.terminal == "superseded" { activeTurns[id] = nil }
+                    try? await refresh(id, client: client)
+                    reconcile(id)
+                    return
+                }
+            } catch is CancellationError { return }
+            catch let failure as V2.APIError {
+                guard activeTurns[id]?.turn.id == turn.id else { return }
+                try? activeTurns[id]?.stream.apply(.init(id: nil, name: "error", data: #"{"code":"stream_unavailable","retryable":false}"#))
+                replyErrors[id] = failure.localizedDescription
+                return
+            } catch { }
+            guard !Task.isCancelled, activeTurns[id]?.turn.id == turn.id else { return }
+            activeTurns[id]?.reconnecting = true
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            delay = min(delay + 1, 5)
+        }
     }
 }

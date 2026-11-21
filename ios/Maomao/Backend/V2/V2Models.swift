@@ -41,9 +41,12 @@ enum V2 {
         var title: String { kind == .group ? "我们仨" : "我和团子" }
     }
     struct Turn: Codable {
+        enum Status: String, Codable {
+            case queued, generating, completed, stopped, superseded, failed
+        }
         let id: String
         let conversationId: String
-        let status: String
+        let status: Status
         let triggerMessageId: String
         let replyMessageId: String?
         let errorCode: String?

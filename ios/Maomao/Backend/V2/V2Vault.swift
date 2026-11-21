@@ -74,3 +74,21 @@ final class V2Outbox {
     func acknowledge(_ id: String) { entries.removeAll { $0.id == id }; persist() }
     private func persist() { defaults.set(try? JSONEncoder().encode(entries), forKey: storageKey) }
 }
+
+@MainActor
+final class V2ReplyRequests {
+    private let defaults: UserDefaults
+    private let prefix: String
+    init(deviceID: String, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        prefix = "v2.reply." + deviceID + "."
+    }
+    func requestID(message: String) -> String {
+        let key = prefix + message
+        if let existing = defaults.string(forKey: key) { return existing }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: key)
+        return id
+    }
+    func acknowledge(message: String) { defaults.removeObject(forKey: prefix + message) }
+}

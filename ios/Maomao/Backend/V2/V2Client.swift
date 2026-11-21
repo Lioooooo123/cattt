@@ -57,21 +57,35 @@ struct V2Client {
         try await json(V2.Turn.self, request("GET", "conversations/\(conversation)/turns/\(id)"))
     }
     func cancel(conversation: String, turn: String, visibleLength: Int? = nil) async throws -> V2.Turn {
+        try await json(V2.Turn.self, cancelRequest(conversation: conversation, turn: turn, visibleLength: visibleLength))
+    }
+    func cancelRequest(conversation: String, turn: String, visibleLength: Int?) throws -> URLRequest {
         var body: [String: Any] = [:]
         if let visibleLength { body["visible_length"] = visibleLength }
-        return try await json(V2.Turn.self, request("POST", "conversations/\(conversation)/turns/\(turn)/cancel", body: body))
+        return try request("POST", "conversations/\(conversation)/turns/\(turn)/cancel", body: body)
     }
     func reply(conversation: String, message: String, requestID: String) async throws -> V2.Turn {
-        try await json(V2.Turn.self, request("POST", "conversations/\(conversation)/messages/\(message)/reply", body: ["request_id": requestID]))
+        try await json(V2.Turn.self, replyRequest(conversation: conversation, message: message, requestID: requestID))
+    }
+    func replyRequest(conversation: String, message: String, requestID: String) throws -> URLRequest {
+        try request("POST", "conversations/\(conversation)/messages/\(message)/reply", body: ["request_id": requestID])
     }
     func unpair() async throws {
         let (data, response) = try await session.data(for: request("POST", "device/unpair", body: [:]))
         try validate(response, data: data)
     }
-    func stream(conversation: String, turn: String, lastEventID: String?, receive: @escaping (V2SSE.Event) async throws -> Void) async throws {
-        var req = try request("GET", "conversations/\(conversation)/turns/\(turn)/stream")
+    func streamRequest(path: String, lastEventID: String?) throws -> URLRequest {
+        guard path.hasPrefix("/v2/conversations/"), !path.contains(".."),
+              let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+              url.scheme == baseURL.scheme, url.host == baseURL.host, url.port == baseURL.port else { throw V2.APIError.invalidRequest }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         if let lastEventID { req.setValue(lastEventID, forHTTPHeaderField: "Last-Event-ID") }
+        return req
+    }
+    func stream(path: String, lastEventID: String?, receive: @escaping (V2SSE.Event) async throws -> Bool) async throws {
+        let req = try streamRequest(path: path, lastEventID: lastEventID)
         let (bytes, response) = try await session.bytes(for: req)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             var data = Data()
@@ -80,9 +94,11 @@ struct V2Client {
             return
         }
         var parser = V2SSE()
-        for try await line in bytes.lines {
+        var lines = V2SSE.Lines()
+        // AsyncBytes.lines 会跳过 SSE 帧边界的空行。
+        for try await byte in bytes {
             try Task.checkCancellation()
-            if let event = parser.line(line) { try await receive(event) }
+            if let line = lines.append(byte), let event = parser.line(line), try await receive(event) { return }
         }
     }
 }

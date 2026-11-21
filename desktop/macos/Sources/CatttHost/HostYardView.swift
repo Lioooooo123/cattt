@@ -149,6 +149,10 @@ final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate
             surfaceReady = true
             failure = nil
             readinessTask?.cancel()
+        case "tap":
+            if active, surfaceReady, envelope["target"] as? String == "cat" {
+                send(["type": "poke"])
+            }
         case "error":
             failure = envelope["message"] as? String ?? "小院暂时没有响应"
             surfaceReady = false

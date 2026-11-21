@@ -25,16 +25,24 @@ private struct HostMenuLabel: View {
     @ObservedObject var model: HostModel
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Label("团子", systemImage: model.icon).onAppear {
+        Label {
+            Text("团子状态菜单")
+        } icon: {
+            if let icon = NSImage(systemSymbolName: model.icon, accessibilityDescription: "团子状态菜单") {
+                Image(nsImage: icon)
+            }
+        }
+        .accessibilityLabel("团子状态菜单")
+        .onAppear {
             model.start()
             CompanionWindowAction.open = {
                 openWindow(id: "yard")
                 NSApp.activate(ignoringOtherApps: true)
             }
         }
-            .onChange(of: model.showLocalModelSetup) { _, show in
-                if show { openWindow(id: "local-model"); NSApp.activate(ignoringOtherApps: true); model.showLocalModelSetup = false }
-            }
+        .onChange(of: model.showLocalModelSetup) { _, show in
+            if show { openWindow(id: "local-model"); NSApp.activate(ignoringOtherApps: true); model.showLocalModelSetup = false }
+        }
     }
 }
 
@@ -77,6 +85,7 @@ private struct ModelKeyView: View {
             HStack {
                 Spacer()
                 Button("取消") { key = ""; dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("保存并启动") { model.saveKey(key); key = ""; dismiss() }
                     .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy || model.setupRunning).keyboardShortcut(.defaultAction)
             }

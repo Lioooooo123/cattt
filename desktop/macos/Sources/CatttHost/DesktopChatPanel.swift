@@ -215,6 +215,7 @@ struct DesktopChatPanel: View {
             HStack(alignment: .center, spacing: 10) {
                 Image(systemName: "bubble.left.and.bubble.right.fill")
                     .foregroundStyle(CompanionPalette.accent)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("和团子说会儿话")
                         .font(.headline)
@@ -228,7 +229,8 @@ struct DesktopChatPanel: View {
                 Button {
                     Task { await model.reload() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Label("刷新聊天", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("刷新聊天")
@@ -285,7 +287,9 @@ struct DesktopChatPanel: View {
                 Button {
                     if model.sending { model.cancel() } else { model.send() }
                 } label: {
-                    Image(systemName: model.sending ? "stop.fill" : "arrow.up")
+                    Label(model.sending ? "停止回复" : "发送给团子",
+                          systemImage: model.sending ? "stop.fill" : "arrow.up")
+                        .labelStyle(.iconOnly)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(width: 34, height: 34)

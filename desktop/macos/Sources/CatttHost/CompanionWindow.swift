@@ -39,12 +39,12 @@ struct CompanionWindow: View {
                 Button("配对手机", systemImage: "iphone.gen3") {
                     openWindow(id: "pairing")
                 }
-                Menu {
+                Menu("设置", systemImage: "gearshape") {
                     Button("设置本地模型…") { openWindow(id: "local-model") }
                     Button("填写 DeepSeek key…") { openWindow(id: "model") }
-                } label: {
-                    Label("设置", systemImage: "gearshape")
                 }
+                .accessibilityLabel("设置")
+                .help("设置")
             }
         }
         .task(id: hostReady) {

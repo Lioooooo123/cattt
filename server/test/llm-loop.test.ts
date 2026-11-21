@@ -22,6 +22,16 @@ async function run(client: ModelClient, tools: Record<string, RuntimeTool> = { l
 }
 
 describe('自研前台循环', () => {
+  it.each([2, 3])('陪坐未获确认后的回答步骤含失败约束，maxSteps=%s', async maxSteps => {
+    const client = scriptedClient([step('', [{ name: 'sit_together', id: 'sit' }]), step('院子那边没回应，我先在这儿陪你说说话。')]);
+    const failed = { ...observation, status: 'failed' as const, error: { code: 'accept_unknown', retryable: false },
+      data: { status: 'requested', destinationId: 'tree', fact: '院子尚未确认接收这次动作，是否开始移动未知，没有到达或坐稳凭证。目的地只是请求目标，不是当前位置。' } };
+    await run(client, { sit_together: { ...fake, execute: async () => failed } }, { maxSteps });
+    expect(client.requests[1]!.toolChoice).toBe(maxSteps === 2 ? 'none' : 'auto');
+    expect(client.requests[1]!.system).toContain('陪坐或移动返回 failed（包括 accept_unknown、action_*）时，必须明确说明动作未获确认或未完成');
+    expect(client.requests[1]!.system).toContain('不得声称或承诺正在过来、去目的地、已经到达或坐下');
+    expect(client.requests[1]!.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ output: { value: failed } }] });
+  });
   it('首步长回答越过缓冲后在最后增量之前发布，短回答等结束', async () => {
     for (const long of [true, false]) {
       const order: string[] = [], published: string[] = [];

@@ -76,7 +76,10 @@ export async function catTools(owner: { catId: string; turnId: string; userMessa
     const data = result.data as { status: string };
     if (['accepted', 'running'].includes(data.status)) return { ...result, status: 'accepted' as const };
     if (data.status === 'arrived') return result;
-    return { ...result, status: 'failed' as const, error: { code: data.status === 'requested' ? 'accept_unknown' : `action_${data.status}`, retryable: false } };
+    return { ...result, data: { ...data, fact: data.status === 'requested'
+      ? '院子尚未确认接收这次动作，是否开始移动未知，没有到达或坐稳凭证。目的地只是请求目标，不是当前位置。'
+      : '这次动作未成功完成，没有到达或坐稳凭证。目的地只是请求目标，不是当前位置。' },
+      status: 'failed' as const, error: { code: data.status === 'requested' ? 'accept_unknown' : `action_${data.status}`, retryable: false } };
   };
   const world = await getWorldState(owner.catId);
   if (world.available) tools.move_cat = {

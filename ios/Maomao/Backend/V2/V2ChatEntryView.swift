@@ -75,8 +75,23 @@ private struct V2ConversationView: View {
                                 .frame(maxWidth: .infinity).padding(.vertical, 40)
                         }
                         ForEach(chat.messages[conversation.id] ?? []) { message in
-                            bubble(message.text, sender: chat.sender(message.author), mine: message.author.memberId == chat.connection.identity.member.id)
-                                .id(message.id)
+                            VStack(alignment: .leading, spacing: 6) {
+                                bubble(message.text, sender: chat.sender(message.author), mine: message.author.memberId == chat.connection.identity.member.id)
+                                    .contextMenu {
+                                        if chat.canReply(message) {
+                                            Button("请团子重答") { Task { await chat.reply(to: message) } }
+                                        }
+                                    }
+                                if message.status == "stopped" {
+                                    Text("已停止").font(Typo.sans(12)).foregroundStyle(Palette.ink2)
+                                }
+                                if message.author.kind == .cat,
+                                   let trigger = chat.latestMember(conversation.id), message.replyToMessageId == trigger.id,
+                                   message.id == chat.messages[conversation.id]?.last(where: { $0.replyToMessageId == trigger.id })?.id,
+                                   chat.canReply(trigger) {
+                                    Button("重答") { Task { await chat.reply(to: trigger) } }.font(Typo.sans(13))
+                                }
+                            }.id(message.id)
                         }
                         ForEach(chat.pending.filter { $0.conversationID == conversation.id }) { entry in
                             VStack(alignment: .trailing, spacing: 6) {
@@ -87,9 +102,30 @@ private struct V2ConversationView: View {
                                 } else { Text("正在发送…").font(Typo.sans(12)).foregroundStyle(Palette.ink2) }
                             }.frame(maxWidth: .infinity, alignment: .trailing).id(entry.id)
                         }
-                        ForEach(chat.streams.keys.sorted(), id: \.self) { id in
-                            if chat.streamConversations[id] == conversation.id, let stream = chat.streams[id], stream.terminal == nil, !stream.text.isEmpty {
-                                bubble(stream.text, sender: "团子", mine: false)
+                        if let active = chat.activeTurns[conversation.id] {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if !chat.hasPersistedReply(active, conversation: conversation.id) {
+                                    bubble(active.stream.text.isEmpty ? (active.stream.terminal == nil ? "团子正在想…" : "这次还没有留下回复") : active.stream.text, sender: "团子", mine: false)
+                                }
+                                if active.stream.terminal == nil {
+                                    HStack(spacing: 12) {
+                                        Text(active.reconnecting ? "正在重新连接…" : "团子正在回复…").foregroundStyle(Palette.ink2)
+                                        Button(active.stopping ? "正在停止…" : "停止") { Task { await chat.stop(conversation.id) } }
+                                            .disabled(active.stopping)
+                                    }.font(Typo.sans(13))
+                                } else if active.stream.terminal == "error" {
+                                    Text("这次回复没能完成").font(Typo.sans(13)).foregroundStyle(Palette.ink2)
+                                    retryButton(active)
+                                } else if active.phase == .stopped {
+                                    Text("已停止").font(Typo.sans(12)).foregroundStyle(Palette.ink2)
+                                    retryButton(active)
+                                }
+                            }
+                        }
+                        if let failure = chat.replyErrors[conversation.id] {
+                            Text(failure).font(Typo.sans(13)).foregroundStyle(Palette.ink2)
+                            if let trigger = chat.failedReplyTarget(conversation.id), chat.canReply(trigger) {
+                                Button("重答") { Task { await chat.reply(to: trigger) } }.font(Typo.sans(13))
                             }
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -99,6 +135,7 @@ private struct V2ConversationView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: chat.messages[conversation.id]?.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: chat.pending.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: chat.activeTurns[conversation.id]?.stream.text) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -120,6 +157,11 @@ private struct V2ConversationView: View {
         .task { await chat.poll(conversation.id) }
     }
     private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.count <= 4000 }
+    @ViewBuilder private func retryButton(_ active: V2ChatStore.ActiveTurn) -> some View {
+        if let message = chat.messages[conversation.id]?.first(where: { $0.id == active.turn.triggerMessageId }) {
+            Button("重答") { Task { await chat.reply(to: message) } }.font(Typo.sans(13)).disabled(chat.replying.contains(conversation.id))
+        }
+    }
     private func bubble(_ text: String, sender: String, mine: Bool) -> some View {
         HStack {
             if mine { Spacer(minLength: 44) }

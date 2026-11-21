@@ -26,6 +26,15 @@ function fixture(deepseek = false, chunks: object[] = [chunk({ content: '好' },
 }
 
 describe('流式模型客户端', () => {
+  it('首个工具参数片段只发一次开始事件，先于同块文字与完整调用', async () => {
+    const f = fixture(false, [
+      chunk({ content: '缓冲', tool_calls: [{ index: 0, id: 'a', function: { name: 'lookup', arguments: '{' } }] }),
+      chunk({ tool_calls: [{ index: 0, function: { arguments: '}' } }] }, 'tool_calls'),
+    ]);
+    const events = [];
+    for await (const event of f.client.stream(request)) events.push(event);
+    expect(events.map(event => event.type)).toEqual(['tool-call-start', 'text-delta', 'tool-call', 'finish']);
+  });
   it('按单字节解码中文、CRLF、注释、多行 data 和 DONE，保留最后用量', async () => {
     const fetcher: typeof fetch = async () => {
       const text = 'data: {"choices":\r\ndata: [{"delta":{"content":"猫","reasoning_content":"想"},"finish_reason":"stop"}]}\r\n\r\n'

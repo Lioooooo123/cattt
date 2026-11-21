@@ -22,6 +22,53 @@ async function run(client: ModelClient, tools: Record<string, RuntimeTool> = { l
 }
 
 describe('自研前台循环', () => {
+  it('首步长回答越过缓冲后在最后增量之前发布，短回答等结束', async () => {
+    for (const long of [true, false]) {
+      const order: string[] = [], published: string[] = [];
+      const client: ModelClient = { provider: 'fixture', modelId: 'fixture', async *stream() {
+        yield { type: 'text-delta', delta: long ? '猫'.repeat(40) : '嗯' };
+        order.push('last-delta');
+        yield { type: 'text-delta', delta: '。' };
+        order.push('finish');
+        yield { type: 'finish', finishReason: 'stop', usage };
+      } };
+      await run(client, undefined, { onText: async text => { published.push(text); order.push('publish'); } });
+      expect(order).toEqual(long ? ['publish', 'last-delta', 'publish', 'finish'] : ['last-delta', 'finish', 'publish']);
+      expect(published).toEqual(long ? ['猫'.repeat(40), '。'] : ['嗯。']);
+    }
+  });
+  it('工具开始后即使文字超过阈值也不发布，终答实时发布', async () => {
+    const client = scriptedClient([[
+      { type: 'text-delta', delta: '我到了' }, { type: 'tool-call-start' },
+      { type: 'text-delta', delta: '猫'.repeat(50) }, ...step('', [{ name: 'lookup', id: 'a' }]),
+    ], [{ type: 'text-delta', delta: '好' }, ...step('。')]]);
+    let executed = 0;
+    const published: string[] = [];
+    await run(client, { lookup: { ...fake, execute: async () => { executed++; return observation; } } }, {
+      maxSteps: 2, onText: async text => { published.push(text); },
+    });
+    expect(executed).toBe(1); expect(published).toEqual(['好', '。']);
+  });
+  it('已发布回答后的整批工具均失败且本轮立即结束', async () => {
+    const client = scriptedClient([step('猫'.repeat(40), [{ name: 'lookup', id: 'a' }, { name: 'finish_tools', id: 'b' }])]);
+    let executed = 0;
+    const result = await run(client, { lookup: { ...fake, execute: async () => { executed++; return observation; } } });
+    expect(result.text).toBe('猫'.repeat(40)); expect(executed).toBe(0); expect(client.requests).toHaveLength(1);
+    expect(result.traces.filter(trace => trace.output).map(trace => trace.output?.error)).toEqual([
+      { code: 'answer_already_streamed', retryable: false }, { code: 'answer_already_streamed', retryable: false },
+    ]);
+  });
+  it.each([false, true])('首步中止后不再发布，已越过阈值=%s', async live => {
+    const controller = new AbortController(), published: string[] = [];
+    const client: ModelClient = { provider: 'fixture', modelId: 'fixture', async *stream() {
+      yield { type: 'text-delta', delta: live ? '猫'.repeat(40) : '嗯' };
+      controller.abort();
+      yield { type: 'text-delta', delta: '不可发布' };
+      yield { type: 'finish', finishReason: 'stop', usage };
+    } };
+    await expect(run(client, undefined, { signal: controller.signal, onText: async text => { published.push(text); } })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(published).toEqual(live ? ['猫'.repeat(40)] : []);
+  });
   it('普通聊天只请求一次，不强制 finish_tools', async () => {
     const client = scriptedClient([step('嗯，我在。')]);
     const result = await run(client);

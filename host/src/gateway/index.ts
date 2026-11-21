@@ -8,6 +8,7 @@ import { hostAdminRoutes, phonePairingRoutes } from "../identity/pairing.ts";
 import { initializeLan } from "../identity/tls.ts";
 import type { LanTlsOptions } from "../identity/tls.ts";
 import { DEFAULT_LAN_HTTPS_PORT } from "../runtime/config.ts";
+import { memberInviteRoutes } from "../identity/invites.ts";
 
 interface GatewayOptions {
   heartbeatIntervalMs?: number;
@@ -64,8 +65,10 @@ export class Gateway implements Component {
     const identity = await initializeLan(ctx.config.dataDir, ctx.clock, this.options.tls);
     const events = new ChatEvents(ctx);
     const app = new Hono<IdentityEnv>();
+    const lanStatus = () => ({ enabled: this.lanPort !== undefined, port: this.lanPort ?? 0 });
     const auth = requireActor(ctx);
     app.route("/v2", phonePairingRoutes(ctx));
+    app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
     app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");
@@ -92,9 +95,7 @@ export class Gateway implements Component {
     app.notFound((c) => c.json({ error: "未找到接口" }, 404));
     const loopback = new Hono<IdentityEnv>();
     loopback.route("/", app);
-    loopback.route("/host", hostAdminRoutes(ctx, identity, () => ({
-      enabled: this.lanPort !== undefined, port: this.lanPort ?? 0,
-    })));
+    loopback.route("/host", hostAdminRoutes(ctx, identity, lanStatus));
     loopback.notFound((c) => c.json({ error: "未找到接口" }, 404));
     const lanEnabled = this.options.lanPort !== undefined || lanPort !== 0;
     const bindLan = (port: number) => Bun.serve({

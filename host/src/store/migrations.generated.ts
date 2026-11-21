@@ -56,5 +56,13 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795282060204,
     "hash": "0acf0dd6e49c61890ffdb7a2c1414c61f31b4bfe5d74ee8311850038006d7f8c"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `member_invites` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`household_id` text NOT NULL,\n\t`display_name` text,\n\t`code_hash` text NOT NULL,\n\t`invited_by_member_id` text,\n\t`expires_at` integer NOT NULL,\n\t`used_at` integer,\n\t`revoked_at` integer,\n\t`failures` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`household_id`) REFERENCES `households`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`invited_by_member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE no action\n);\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795282767505,
+    "hash": "a436664f7e8a6491391a18a5c6d68786d3e90a90642a9bfb76c431e2cae1a5bb"
   }
 ];

@@ -1,6 +1,8 @@
 # 重构地基：Bun 与 SQLite
 
-R1 完成：`host/` 已具备 store、clock、ids、bus、runtime、gateway、jobs、leases、chat-events；旧服务与客户端尚未切换，业务表和鉴权等后续能力仍按重构阶段推进。
+R1 完成：`host/` 已具备 store、clock、ids、bus、runtime、gateway、jobs、leases、chat-events；旧服务与客户端尚未切换，后续业务和复制能力仍按重构阶段推进。
+
+R2 身份完成：`host/` 已具备家庭/宿主/成员/设备身份、Actor 与访问规则、本机凭证哈希、本机 CA 与 LAN HTTPS、设备配对及解除配对、首成员引导、成员邀请与移除、回环管理 API，以及双成员真实监听端到端测试；客户端切换、会话归属授权和跨 Mac 复制仍留在后续阶段。
 
 1. 新后端放在顶层独立包 `host/`，与旧 `server/` 并行建设；旧服务保持不变，待后续导入工具完成核对后再切换。本批只建立 R1 存储地基，不接入现有客户端或宿主打包。
 2. 新后端运行时使用 Bun 1.x，版本固定在 `host/.bun-version`，依赖以 `bun.lock` 锁定。SQLite 使用内置 `bun:sqlite` 和 `drizzle-orm/bun-sqlite`，替代方案中的 better-sqlite3。

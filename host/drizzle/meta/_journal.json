@@ -43,6 +43,13 @@
       "when": 1795282060204,
       "tag": "0005_whole_shotgun",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795282767505,
+      "tag": "0006_wet_lila_cheney",
+      "breakpoints": true
     }
   ]
 }

@@ -53,3 +53,16 @@ export const pairingCodes = sqliteTable("pairing_codes", {
   failures: integer("failures").notNull(),
   createdAt: integer("created_at").notNull(),
 });
+
+export const memberInvites = sqliteTable("member_invites", {
+  id: text("id").primaryKey(),
+  householdId: text("household_id").notNull().references(() => households.id),
+  displayName: text("display_name"),
+  codeHash: text("code_hash").notNull(),
+  invitedByMemberId: text("invited_by_member_id").references(() => members.id),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  revokedAt: integer("revoked_at"),
+  failures: integer("failures").notNull(),
+  createdAt: integer("created_at").notNull(),
+});

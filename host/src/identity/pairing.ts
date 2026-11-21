@@ -7,6 +7,7 @@ import { issuePairingCode, listPairedDevices, normalizePairingCode, redeemPairin
 import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
+import { memberInviteRoutes } from "./invites.ts";
 
 const badRequest = { error: { code: "bad_request" } };
 
@@ -50,6 +51,7 @@ export function hostAdminRoutes(
     await next();
   });
   const lan = () => ({ ...lanStatus(), hosts: identity.hosts() });
+  app.route("/", memberInviteRoutes(ctx, identity, lanStatus, true));
   app.post("/pairing-codes", async (c) => {
     const parsed = z.object({ member_id: z.uuid() }).strict().safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {

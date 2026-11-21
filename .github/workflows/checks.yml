@@ -30,6 +30,40 @@ jobs:
           pnpm --dir server install --frozen-lockfile
           pnpm --dir server typecheck
 
+  backend-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: maomao
+          POSTGRES_PASSWORD: maomao
+          POSTGRES_DB: maomao_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U maomao -d maomao_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://maomao:maomao@localhost:5432/maomao_test
+      MODEL_PROVIDER: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 后端：安装依赖并迁移隔离 PG 测试库
+        run: |
+          pnpm --dir server install --frozen-lockfile
+          pnpm --dir server db:migrate
+      - name: 后端：mock 模型集成测试（共享数据库串行执行）
+        run: pnpm --dir server test --no-file-parallelism
+
   swift-and-shared-rules:
     runs-on: macos-15
     steps:
@@ -41,3 +75,5 @@ jobs:
         run: python3 tools/check_shared_rules.py
       - name: iOS 世界层逻辑测试
         run: sh tools/check_world_logic.sh
+      - name: macOS 宿主 SwiftPM 测试
+        run: swift test --package-path desktop/macos

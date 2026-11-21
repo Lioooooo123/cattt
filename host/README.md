@@ -122,6 +122,14 @@ Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、
 
 手机无需设备认证调用 POST /v2/pair `{ code, device_name }`，成功返回 `{ device_id, device_token, member, household }`，身份取自该码绑定的成员，而非共享“主人”。错误、过期或烧毁的码统一返回 401 `{ error: { code: "pairing_code_invalid" } }`。原始设备令牌只返回这一次，手机应放入 Keychain 的 ThisDeviceOnly 项，不写日志。POST /v2/device/unpair 需要 Actor，撤销当前设备，之后的认证请求返回 401。已有 SSE 连接的业务归属和后续授权仍按 R3 实现。
 
+## R3-1 对话与消息
+
+完整客户端参考见 [API v2 聊天契约](../docs/参考/API-v2-聊天契约.md)，包含尚待 R3-2 实现的 Turn、SSE、取消与重答，不能把文档中的目标接口视为全部已交付。
+
+conversations、participants、messages 均带可复制业务列和墓碑。家庭创建群聊，成员创建时同事务建立其单聊并加入群聊，移除时更新参与者墓碑；启动幂等补齐 R2 已有成员。通用同家庭访问规则不代替 canSeeConversation：群聊要求参与者，单聊设备 API 只对拥有者可见（伴侣请求为 404），但不承诺存储保密。
+
+两个监听均提供 GET /v2/conversations、GET /v2/conversations/:id、GET/POST /v2/conversations/:id/messages。列表先群聊后本人单聊；历史按 HLC、ID 稳定分页，不使用全局 seq。发送以会话/作者/client_message_id 去重，同键不同文本 409；作者来自 Actor，非发布宿主写入 409 not_publisher。R3-1 不调用模型，发送响应 turn 始终 null。旧 R1 SSE 占位路由因既有 SSE/TLS 测试仍保留，不承载对话数据，R3-2 接入正式授权轮次流时替换。
+
 ## 成员引导、邀请与移除
 
 首次设置由宿主携带管理口令 POST /host/members `{ display_name }`，返回 member；仅家庭没有活跃成员时可用，否则 409 members_already_initialized。它同样尊重邀请预留名额；成员删除后的墓碑不占活跃名额。

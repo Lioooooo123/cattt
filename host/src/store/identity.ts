@@ -1,36 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
-import { encodeHlc } from "../clock/index.ts";
 import type { Clock } from "../clock/index.ts";
-import { validateWallMs } from "../clock/hlc.ts";
-import { uuidv7 } from "../ids/index.ts";
 import type { Actor } from "../identity/index.ts";
 import { DEFAULT_MAX_MEMBERS } from "../runtime/config.ts";
 import { getHostMeta } from "./host-meta.ts";
 import type { StoreDb } from "./index.ts";
 import { deviceCredentials, devices, households, hosts, members } from "./schema/identity.ts";
+import { businessRow, revision } from "./business.ts";
+import { ensureGroup, reconcileConversations } from "./conversation-lifecycle.ts";
 
 export class MemberLimitError extends Error {
   constructor(public readonly maxMembers: number) {
     super(`家庭成员数已达上限：${maxMembers}`);
     this.name = "MemberLimitError";
   }
-}
-
-function wallMs(clock: Clock): number {
-  const now = clock.wallMs();
-  validateWallMs(now);
-  return now;
-}
-
-function revision(clock: Clock) {
-  return { hlc: encodeHlc(clock.hlc()), updatedAt: wallMs(clock) };
-}
-
-function businessRow(clock: Clock, originHostId: string) {
-  const id = uuidv7(clock);
-  const update = revision(clock);
-  return { id, originHostId, ...update, rev: 1, createdAt: update.updatedAt, deletedAt: null };
 }
 
 function localHostId(db: Pick<StoreDb, "select">): string {
@@ -86,6 +69,7 @@ export function ensureHousehold(
       householdId: household.id,
       displayName: input.hostName,
     }).run();
+    ensureGroup(tx, clock, hostId, household.id);
     return household.id;
   }, { behavior: "immediate" });
 }
@@ -126,6 +110,7 @@ export function createMember(
       homeHostId: input.homeHostId,
     };
     tx.insert(members).values(row).run();
+    reconcileConversations(tx, clock, localHostId(tx), input.householdId);
     return row.id;
   }, { behavior: "immediate" });
 }
@@ -182,6 +167,7 @@ export function removeMember(db: StoreDb, clock: Clock, householdId: string, mem
       .where(eq(members.id, memberId)).run();
     tx.update(devices).set({ ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1` })
       .where(and(eq(devices.memberId, memberId), isNull(devices.revokedAt), isNull(devices.deletedAt))).run();
+    reconcileConversations(tx, clock, localHostId(tx), householdId);
     return true;
   }, { behavior: "immediate" });
 }

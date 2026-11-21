@@ -8,6 +8,7 @@ import { getHostMeta, setHostMeta } from "../store/host-meta.ts";
 import { openStore, writeTransaction } from "../store/index.ts";
 import type { Store } from "../store/index.ts";
 import { ensureHousehold } from "../store/identity.ts";
+import { reconcileConversations } from "../store/conversation-lifecycle.ts";
 import { DEFAULT_HOST_NAME, DEFAULT_HOUSEHOLD_NAME, DEFAULT_MAX_MEMBERS } from "./config.ts";
 
 export interface HostEvents {
@@ -97,6 +98,7 @@ export async function startHost(config: HostConfig, components: readonly Compone
     const householdName = config.householdName ?? DEFAULT_HOUSEHOLD_NAME;
     const hostName = config.hostName ?? DEFAULT_HOST_NAME;
     const householdId = ensureHousehold(store.db, clock, hostId, { householdName, hostName });
+    reconcileConversations(store.db, clock, hostId, householdId);
     const ctx: HostContext = {
       store,
       bus: new EventBus((error, topic) => report(error, `bus:${topic}`)),

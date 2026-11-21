@@ -10,6 +10,12 @@ export interface Clock {
   observe(remote: Hlc): Hlc;
 }
 
+export function clockDate(clock: Clock, offsetMs = 0): Date {
+  const now = clock.wallMs();
+  validateWallMs(now);
+  return new Date(now + offsetMs);
+}
+
 export interface ClockOptions {
   maxDriftMs?: number;
 }

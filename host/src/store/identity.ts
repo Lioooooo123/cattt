@@ -135,7 +135,7 @@ function tokenHash(token: string): string {
 }
 
 export function createDevice(
-  db: StoreDb,
+  db: Pick<StoreDb, "transaction">,
   clock: Clock,
   input: { memberId: string; hostId: string; name: string },
 ): { deviceId: string; token: string } {
@@ -161,7 +161,7 @@ export function createDevice(
   }, { behavior: "immediate" });
 }
 
-export function revokeDevice(db: StoreDb, clock: Clock, deviceId: string): boolean {
+export function revokeDevice(db: Pick<StoreDb, "transaction">, clock: Clock, deviceId: string): boolean {
   return db.transaction((tx) => {
     const update = revision(clock);
     return tx.update(devices).set({

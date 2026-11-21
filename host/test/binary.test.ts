@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,9 @@ test("编译产物脱离 drizzle 目录运行并响应 SIGTERM", async () => {
     });
     const port = reservation.port;
     await reservation.stop(true);
+    const lanReservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+    const lanPort = lanReservation.port;
+    await lanReservation.stop(true);
     expect(existsSync(join(directory, "drizzle"))).toBe(false);
     const running = Bun.spawn([binary], {
       cwd: directory,
@@ -35,6 +38,7 @@ test("编译产物脱离 drizzle 目录运行并响应 SIGTERM", async () => {
         ...process.env,
         CATTT_DATA_DIR: join(directory, "data"),
         CATTT_PORT: String(port),
+        CATTT_LAN_HTTPS_PORT: String(lanPort),
       },
       stdout: "ignore",
       stderr: "pipe",
@@ -60,6 +64,9 @@ test("编译产物脱离 drizzle 目录运行并响应 SIGTERM", async () => {
     expect((health as { hostId: string }).hostId)
       .toMatch(/^[0-9a-f-]{14}7[0-9a-f-]{21}$/);
     expect(existsSync(join(directory, "data", "cattt.db"))).toBe(true);
+    const ca = readFileSync(join(directory, "data/tls/ca.crt"), "utf8");
+    const secure = await fetch(`https://127.0.0.1:${lanPort}/v2/healthz`, { tls: { ca } });
+    expect(await secure.json()).toEqual(health);
     child.kill("SIGTERM");
     const exitCode = await Promise.race([
       child.exited,

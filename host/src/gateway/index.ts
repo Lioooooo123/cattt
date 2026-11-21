@@ -4,6 +4,17 @@ import { ChatEvents } from "../chat-events/index.ts";
 import { requireActor } from "../identity/middleware.ts";
 import type { IdentityEnv } from "../identity/middleware.ts";
 import { getHousehold, getMember, listMembers } from "../store/identity.ts";
+import { hostAdminRoutes, phonePairingRoutes } from "../identity/pairing.ts";
+import { initializeLan } from "../identity/tls.ts";
+import type { LanTlsOptions } from "../identity/tls.ts";
+import { DEFAULT_LAN_HTTPS_PORT } from "../runtime/config.ts";
+
+interface GatewayOptions {
+  heartbeatIntervalMs?: number;
+  lanPort?: number;
+  tlsRefreshIntervalMs?: number;
+  tls?: LanTlsOptions;
+}
 
 function memberProfile(member: NonNullable<ReturnType<typeof getMember>>) {
   const { id, householdId, displayName, homeHostId } = member;
@@ -15,11 +26,20 @@ export class Gateway implements Component {
   private server: ReturnType<typeof Bun.serve> | undefined;
   private readonly streams = new Set<AbortController>();
   private readonly heartbeatIntervalMs: number;
+  private lanServer: ReturnType<typeof Bun.serve> | undefined;
+  private readonly draining = new Set<ReturnType<typeof Bun.serve>>();
+  private stopping = false;
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  private refreshing: Promise<void> | undefined;
 
-  constructor(options: { heartbeatIntervalMs?: number } = {}) {
+  constructor(private readonly options: GatewayOptions = {}) {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
     if (!Number.isSafeInteger(this.heartbeatIntervalMs) || this.heartbeatIntervalMs < 1) {
       throw new RangeError("心跳间隔必须是正整数毫秒");
+    }
+    if (options.tlsRefreshIntervalMs !== undefined
+      && (!Number.isSafeInteger(options.tlsRefreshIntervalMs) || options.tlsRefreshIntervalMs < 1)) {
+      throw new RangeError("证书检查间隔必须是正整数毫秒");
     }
   }
 
@@ -27,10 +47,25 @@ export class Gateway implements Component {
     return this.server?.port;
   }
 
-  start(ctx: HostContext): void {
+  get lanPort(): number | undefined {
+    return this.lanServer?.port;
+  }
+
+  async start(ctx: HostContext): Promise<void> {
+    this.stopping = false;
+    const hostname = ctx.config.hostname ?? "127.0.0.1";
+    if (!["127.0.0.1", "::1", "localhost"].includes(hostname)) {
+      throw new Error("HTTP 管理监听必须使用回环地址");
+    }
+    const lanPort = this.options.lanPort ?? ctx.config.lanHttpsPort ?? DEFAULT_LAN_HTTPS_PORT;
+    if (!Number.isInteger(lanPort) || lanPort < 0 || lanPort > 65535) {
+      throw new RangeError("局域网 HTTPS 端口必须是 0 至 65535 的整数");
+    }
+    const identity = await initializeLan(ctx.config.dataDir, ctx.clock, this.options.tls);
     const events = new ChatEvents(ctx);
     const app = new Hono<IdentityEnv>();
     const auth = requireActor(ctx);
+    app.route("/v2", phonePairingRoutes(ctx));
     app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");
@@ -55,21 +90,79 @@ export class Gateway implements Component {
         c.req.header("last-event-id") ?? c.req.query("cursor") ?? null);
     });
     app.notFound((c) => c.json({ error: "未找到接口" }, 404));
-    this.server = Bun.serve({
-      hostname: ctx.config.hostname ?? "127.0.0.1",
-      port: ctx.config.port ?? 8788,
-      idleTimeout: 0,
-      fetch: app.fetch,
+    const loopback = new Hono<IdentityEnv>();
+    loopback.route("/", app);
+    loopback.route("/host", hostAdminRoutes(ctx, identity, () => ({
+      enabled: this.lanPort !== undefined, port: this.lanPort ?? 0,
+    })));
+    loopback.notFound((c) => c.json({ error: "未找到接口" }, 404));
+    const lanEnabled = this.options.lanPort !== undefined || lanPort !== 0;
+    const bindLan = (port: number) => Bun.serve({
+      hostname: "0.0.0.0", port, idleTimeout: 0, tls: identity.serverOptions(), fetch: app.fetch,
     });
+    const report = (error: unknown) => {
+      try {
+        const result = ctx.config.onError
+          ? ctx.config.onError(error, "gateway:tls") : console.error("更新局域网证书失败", error);
+        Promise.resolve(result).catch(() => {});
+      } catch {}
+    };
+    try {
+      this.server = Bun.serve({ hostname, port: ctx.config.port ?? 8788, idleTimeout: 0, fetch: loopback.fetch });
+      if (lanEnabled) {
+        this.lanServer = bindLan(lanPort);
+      }
+      const boundPort = this.lanPort ?? lanPort;
+      let needsReload = false;
+      this.refreshTimer = setInterval(() => {
+        if (this.refreshing) {
+          return;
+        }
+        this.refreshing = (async () => {
+          needsReload = await identity.refresh() || needsReload;
+          if (!needsReload || !lanEnabled || this.stopping) {
+            return;
+          }
+          const old = this.lanServer;
+          this.lanServer = undefined;
+          if (old) {
+            this.draining.add(old);
+            void old.stop(false).catch(report).finally(() => this.draining.delete(old));
+          }
+          for (let attempt = 0; attempt < 4 && !this.stopping; attempt += 1) {
+            try {
+              this.lanServer = bindLan(boundPort);
+              needsReload = false;
+              break;
+            } catch (error) {
+              report(error);
+              if (attempt < 3) {
+                await Bun.sleep(25);
+              }
+            }
+          }
+        })().catch(report).finally(() => { this.refreshing = undefined; });
+      }, this.options.tlsRefreshIntervalMs ?? 60_000);
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+    await this.refreshing;
     const server = this.server;
+    const lanServer = this.lanServer;
     this.server = undefined;
+    this.lanServer = undefined;
     for (const stream of this.streams) {
       stream.abort();
     }
-    await server?.stop(true);
+    await Promise.all([server, lanServer, ...this.draining].map((listener) => listener?.stop(true)));
+    this.draining.clear();
   }
 
   private stream(request: Request, events: ChatEvents, streamId: string, cursor: string | null): Response {

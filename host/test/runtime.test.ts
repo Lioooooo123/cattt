@@ -153,6 +153,8 @@ test("空组件列表可运行，hostId 与家庭跨重启持久化，名称来�
 test("环境配置提供本机默认值并拒绝非法端口", () => {
   expect(configFromEnv({}).port).toBe(8788);
   expect(configFromEnv({}).hostname).toBe("127.0.0.1");
+  expect(configFromEnv({}).lanHttpsPort).toBe(8789);
+  expect(configFromEnv({ CATTT_LAN_HTTPS_PORT: "0" }).lanHttpsPort).toBe(0);
   expect(configFromEnv({}).maxMembers).toBe(DEFAULT_MAX_MEMBERS);
   expect(configFromEnv({})).toMatchObject({ householdName: "我们的家", hostName: "我的 Mac" });
   expect(configFromEnv({ CATTT_HOUSEHOLD_NAME: "家", CATTT_HOST_NAME: "Mac" }))
@@ -162,5 +164,6 @@ test("环境配置提供本机默认值并拒绝非法端口", () => {
     .toMatchObject({ port: 0, dataDir: "/custom" });
   for (const port of ["", "-1", "65536", "1.5", "abc"]) {
     expect(() => configFromEnv({ CATTT_PORT: port })).toThrow();
+    expect(() => configFromEnv({ CATTT_LAN_HTTPS_PORT: port })).toThrow();
   }
 });

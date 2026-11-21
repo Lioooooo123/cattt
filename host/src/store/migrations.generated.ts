@@ -48,5 +48,13 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795281472217,
     "hash": "2539ed6e998c7816e94d47bbc7eeda4e78c9823b922d6de6d12e31ba3d22772a"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `pairing_codes` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`member_id` text NOT NULL,\n\t`code_hash` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`used_at` integer,\n\t`failures` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE no action\n);\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795282060204,
+    "hash": "0acf0dd6e49c61890ffdb7a2c1414c61f31b4bfe5d74ee8311850038006d7f8c"
   }
 ];

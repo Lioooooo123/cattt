@@ -98,6 +98,26 @@ devices 是可复制的设备生命周期记录（含 last_seen_at、revoked_at�
 
 resolveDeviceToken 仅接受归属本地 host_meta.host_id 的有效设备，拒绝未知/撤销/墓碑设备、墓碑成员及失效家庭/宿主；成功时通过 Clock 更新 last_seen_at、HLC 与 rev。Actor 为 `{ memberId, deviceId, hostId, householdId }`，由身份中间件建立，不从客户端自报字段推导。
 
-Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。当前没有创建成员/发放设备令牌的公开接口，邀请与配对属于后续 R2 PR。
+Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。成员邀请属于后续 R2 PR；设备凭证通过下述配对接口发放，不提供无配对码的设备注册。
 
 `identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。会话级权限和 SSE 流归属检查留给 R3；当前 SSE 仅验证设备身份，不应视为已完成业务授权。
+
+## 局域网 HTTPS 与成员设备配对
+
+回环 HTTP 保持 `127.0.0.1:8788`（CATTT_PORT），同时服务 `/v2/*` 和 `/host/*`；管理监听拒绝非回环地址。局域网 HTTPS 默认绑定 `0.0.0.0:8789`，由 CATTT_LAN_HTTPS_PORT 配置，设为 0 关闭；它只挂载 `/v2/*`，携带正确管理口令访问 `/host/*` 也只会得到 404。测试使用 Gateway 构造参数 lanPort: 0 请求系统分配临时 HTTPS 端口，与环境端口 0 关闭监听的语义区分。
+
+`identity/tls.ts` 用固定版本 @peculiar/x509 1.12.3 建立 ECDSA P-256 本机 CA（10 年，只建一次），签发 365 天服务端证书。SAN 包含 localhost、127.0.0.1、主机名.local 和局域网 IPv4；每 60 秒检查 IP 变化或剩余不足 30 天并重签。主入口的第一个 import 必须是 reflect-metadata。
+
+两个监听均使用 Bun.serve 与 Hono app.fetch，不依赖 Node 服务适配器。Bun 1.4.5 不支持原地替换 TLS 上下文，因此证书刷新时调用旧监听 stop(false)，立即以新证书重绑定同一端口。旧连接（包括 SSE）继续排空，不重启进程；IP 变化或临近到期的罕见更新期间，新连接可能有几毫秒遭拒，客户端应重试。绑定失败会上报 onError（gateway:tls），以 25ms 间隔再试三次；仍失败则暂停接受新 LAN 连接，保留回环管理和已有连接，下次 60 秒检查继续恢复，不让宿主崩溃。
+
+数据目录下 tls/ 为 0700，ca.key、ca.crt、server.key、server.crt 和 host-admin.token 均为 0600，数据目录收紧为 0700。管理口令为首次生成的 32 随机字节 base64url，重启复用。CA 残缺或损坏时失败，不悄悄替换；备份和升级必须保留整套 tls/ 与管理口令。CA 指纹为 DER 的 SHA-256 小写十六进制，短指纹取前 16 位分四组。手机应核对指纹，仅以匹配 CA 为信任锚并校验主机名，不信任任意自签证书或系统根证书替代物。
+
+`pairing_codes` 是本机秘密表，永不进入 change_log、复制或共享快照；只存码的 SHA-256，绑定 member_id。8 位 Crockford Base32 显示为 XXXX-XXXX，忽略大小写和连字符；10 分钟、单次使用。每次格式合法但验证失败，对所有仍有效、未使用且未烧毁的码累计一次 failures，达到 5 次即烧毁；格式错误返回 400 不计数，新码不作废旧码。码的核验、使用标记、设备创建与凭证哈希在同一立即事务提交，失败不留半成品。
+
+宿主先读取 host-admin.token，通过 `Authorization: Bearer <口令>` 调用回环接口，口令错误统一 401：
+
+- POST /host/pairing-codes `{ member_id }`：为现有有效成员签发码，返回 code、expires_at、hosts、port、ca_fingerprint、ca_fingerprint_short、pair_url。链接为 `maomao://pair?v=2&h=...&p=...&c=...&fp=...`，版本变为 2，地址包含 IPv4 和主机名.local；不做 mDNS 发现或远程通道。
+- GET /host/devices：返回本宿主未撤销的设备公开列表，包含 member_id，不包含凭证。
+- DELETE /host/devices/:id：撤销本宿主设备；GET /host/status 返回 LAN 状态、CA 指纹和设备列表。
+
+手机无需设备认证调用 POST /v2/pair `{ code, device_name }`，成功返回 `{ device_id, device_token, member, household }`，身份取自该码绑定的成员，而非共享“主人”。错误、过期或烧毁的码统一返回 401 `{ error: { code: "pairing_code_invalid" } }`。原始设备令牌只返回这一次，手机应放入 Keychain 的 ThisDeviceOnly 项，不写日志。POST /v2/device/unpair 需要 Actor，撤销当前设备，之后的认证请求返回 401。已有 SSE 连接的业务归属和后续授权仍按 R3 实现。

@@ -10,8 +10,10 @@
     "build": "bun build --compile src/main.ts --outfile dist/cattt-host"
   },
   "dependencies": {
+    "@peculiar/x509": "1.12.3",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
+    "reflect-metadata": "^0.2.2",
     "zod": "^4.6.1"
   },
   "devDependencies": {

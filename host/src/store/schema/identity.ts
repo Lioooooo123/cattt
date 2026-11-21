@@ -43,3 +43,13 @@ export const deviceCredentials = sqliteTable("device_credentials", {
   deviceId: text("device_id").primaryKey().references(() => devices.id),
   tokenHash: text("token_hash").notNull().unique(),
 });
+
+export const pairingCodes = sqliteTable("pairing_codes", {
+  id: text("id").primaryKey(),
+  memberId: text("member_id").notNull().references(() => members.id),
+  codeHash: text("code_hash").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  usedAt: integer("used_at"),
+  failures: integer("failures").notNull(),
+  createdAt: integer("created_at").notNull(),
+});

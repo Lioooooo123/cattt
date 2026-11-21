@@ -18,6 +18,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: host/.bun-version
       - name: 仓库内容（大文件、日志、文档登记）
         run: python3 tools/repo_check.py --all
       - name: 网页：安装、类型检查、测试
@@ -29,6 +32,12 @@ jobs:
         run: |
           pnpm --dir server install --frozen-lockfile
           pnpm --dir server typecheck
+      - name: 新宿主：安装、类型检查与存储测试
+        working-directory: host
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun test
 
   backend-integration:
     runs-on: ubuntu-latest

@@ -158,6 +158,204 @@ describe('单步与检查点', () => {
       report: { description: '', inputSchema: z.object({ status: z.string() }), execute: async () => { calls++; return {}; } },
     } })).rejects.toBeInstanceOf(ModelOutputError); expect(calls).toBe(0);
   });
+
+  it('严格模式先预检整批，前项有效后项无效也不执行任何工具', async () => {
+    const client = scriptedClient([step('', [
+      { name: 'first', id: 'valid', input: { count: 1 } },
+      { name: 'last', id: 'invalid', input: { count: 'secret-value' } },
+    ])]);
+    let executions = 0;
+    await expect(runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, tools: {
+      first: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executions++; return {}; } },
+      last: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executions++; return {}; } },
+    } })).rejects.toBeInstanceOf(ModelOutputError);
+    expect(executions).toBe(0);
+  });
+
+  it.each(['constructor', 'toString'])('原型工具名 %s 视为未知，不暴露工具清单', async name => {
+    const client = scriptedClient([step('', [{ name, id: 'unknown', input: {} }])]);
+    const result = await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {},
+      recoverToolValidation: true, tools: { lookup: fake } });
+    expect(result.toolValidationFailed).toBe(true);
+    expect(result.responseMessages[1]).toMatchObject({ role: 'tool', content: [{ toolCallId: 'unknown', output: { value: { error: { code: 'unknown_tool' } } } }] });
+    expect(JSON.stringify(result.responseMessages[1])).not.toContain('lookup');
+  });
+
+  it('拒绝整批、逐调用回传失败，诊断不包含原始参数或Zod消息', async () => {
+    const client = scriptedClient([step('', [
+      { name: 'first', id: 'good', input: { value: 1 } },
+      { name: 'second', id: 'bad', input: { value: 'private-value' } },
+    ])]);
+    let executions = 0;
+    const hooks: string[] = [];
+    const result = await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {},
+      recoverToolValidation: true, onToolValidationFailure: async (call, observation) => { hooks.push(`${call.toolCallId}:${observation.error?.code}`); }, tools: {
+        first: { description: '', inputSchema: z.object({ value: z.number() }), execute: async () => { executions++; return {}; } },
+        second: { description: '', inputSchema: z.object({ value: z.number() }), execute: async () => { executions++; return {}; } },
+      } });
+    expect(result.toolValidationFailed).toBe(true); expect(executions).toBe(0);
+    expect(hooks).toEqual(['good:tool_batch_rejected', 'bad:invalid_tool_input']);
+    const rejected = result.responseMessages[1]!;
+    expect(rejected).toMatchObject({ role: 'tool', content: [
+      { toolCallId: 'good', output: { value: { error: { code: 'tool_batch_rejected' } } } },
+      { toolCallId: 'bad', output: { value: { error: { code: 'invalid_tool_input' }, data: { issues: [{ code: 'invalid_type', path: 'value' }] } } } },
+    ] });
+    expect(JSON.stringify(rejected)).not.toContain('private-value'); expect(JSON.stringify(rejected)).not.toContain('Expected number');
+  });
+
+  it('结构诊断最多五项且每项有界，不泄漏自定义错误或输入值', async () => {
+    const root = 'root'.repeat(20), branch = 'branch'.repeat(15);
+    const leaves = Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`leaf${index}`.repeat(20),
+      z.string().refine(() => false, 'private custom Zod message')]));
+    const schema = z.object({ [root]: z.object({ [branch]: z.object(leaves) }) });
+    const input = { [root]: { [branch]: Object.fromEntries(Object.keys(leaves).map((key, index) => [key, `private input ${index}`])) } };
+    const client = scriptedClient([step('', [{ name: 'lookup', id: 'bounded', input }])]);
+    const result = await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, recoverToolValidation: true,
+      tools: { lookup: { description: '', inputSchema: schema, execute: async () => ({}) } } });
+    const message = result.responseMessages[1];
+    if (!message || message.role !== 'tool') throw new Error('missing correction result');
+    const outputPart = message.content[0]!.output;
+    if (outputPart.type !== 'json') throw new Error('unexpected correction result type');
+    const output = outputPart.value as { data: { issues: { code: string; path: string }[] } };
+    expect(output.data.issues).toHaveLength(5);
+    for (const issue of output.data.issues) {
+      expect(issue.path.length).toBeLessThanOrEqual(120);
+      expect(JSON.stringify(issue).length).toBeLessThanOrEqual(200);
+    }
+    const serialized = JSON.stringify(message);
+    expect(serialized).not.toContain('private custom Zod message');
+    expect(serialized).not.toContain('private input');
+  });
+
+  it('重复或空调用 ID、截断结束原因和未结束流都绝不执行', async () => {
+    const duplicate = scriptedClient([step('', [{ name: 'report', id: 'same' }, { name: 'report', id: 'same' }])]);
+    const emptyId = scriptedClient([step('', [{ name: 'report', id: '' }])]);
+    const incomplete = scriptedClient([[{ type: 'tool-call', toolCallId: 'cut', toolName: 'report', input: {}, rawInput: '{}' }]]);
+    const truncated = ['length', 'content-filter', 'error', 'other'].map(reason => scriptedClient([[
+      { type: 'tool-call' as const, toolCallId: `cut-${reason}`, toolName: 'report', input: {}, rawInput: '{}' },
+      { type: 'finish' as const, finishReason: reason as 'length' | 'content-filter' | 'error' | 'other', usage },
+    ]]));
+    for (const client of [duplicate, emptyId, incomplete, ...truncated]) {
+      let executions = 0;
+      await expect(runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, recoverToolValidation: true,
+        tools: { report: { description: '', inputSchema: z.object({}), execute: async () => { executions++; return {}; } } },
+      })).rejects.toBeInstanceOf(ModelOutputError);
+      expect(executions).toBe(0);
+    }
+  });
+
+  it('使用 Zod 转换后的输入执行', async () => {
+    const client = scriptedClient([step('', [{ name: 'report', id: 'converted', input: { name: 'cat' } }])]);
+    let received = '';
+    await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, tools: {
+      report: { description: '', inputSchema: z.object({ name: z.string() }).transform(value => ({ name: value.name.toUpperCase() })),
+        execute: async input => { received = input.name; return {}; } },
+    } });
+    expect(received).toBe('CAT');
+  });
+
+  it('中止信号与验证失败持久化异常都不会进入自动修正', async () => {
+    const aborted = scriptedClient([step('', [{ name: 'report', id: 'a', input: { value: 'bad' } }])]);
+    const controller = new AbortController(); let abortHooks = 0;
+    await expect(runModelStep({ client: aborted, instructions: '', messages: [], signal: controller.signal, guard: async () => {}, recoverToolValidation: true,
+      onToolValidationFailure: async () => { abortHooks++; controller.abort(); }, tools: {
+        report: { description: '', inputSchema: z.object({ value: z.number() }), execute: async () => ({}) },
+      } })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(aborted.requests).toHaveLength(1); expect(abortHooks).toBe(1);
+
+    const persistence = scriptedClient([step('', [{ name: 'report', id: 'p', input: { value: 'bad' } }])]);
+    await expect(runModelStep({ client: persistence, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, recoverToolValidation: true,
+      onToolValidationFailure: async () => { throw new Error('trace persistence failed'); }, tools: {
+        report: { description: '', inputSchema: z.object({ value: z.number() }), execute: async () => ({}) },
+      } })).rejects.toThrow('trace persistence failed');
+    expect(persistence.requests).toHaveLength(1);
+  });
+});
+
+describe('前台有界工具修正', () => {
+  it('失败轨迹后用下一普通请求修正，且只在修正请求执行工具', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'lookup', id: 'bad', input: { count: 'no' } }]),
+      step('', [{ name: 'lookup', id: 'good', input: { count: 2 } }]),
+      step('完成'),
+    ]);
+    let executed = 0;
+    const result = await run(client, { lookup: { description: '查找', inputSchema: z.object({ count: z.number() }),
+      execute: async ({ count }) => { executed++; return { ...observation, data: { count } }; } } }, { maxSteps: 3 });
+    expect(client.requests).toHaveLength(3); expect(client.requests[1]!.system).toContain('上一批工具调用已整体拒绝');
+    expect(client.requests[2]!.system).not.toContain('上一批工具调用已整体拒绝');
+    expect(executed).toBe(1);
+    expect(result.traces.map(trace => [trace.callId, trace.output?.error?.code, trace.output?.status])).toEqual([
+      ['bad', undefined, undefined], ['bad', 'invalid_tool_input', 'failed'], ['good', undefined, undefined], ['good', undefined, 'succeeded'],
+    ]);
+  });
+
+  it('第二个无效批次严格失败，不增加隐藏请求或工具执行', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'lookup', id: 'one', input: { count: 'bad' } }]),
+      step('', [{ name: 'lookup', id: 'two', input: { count: 'bad' } }]),
+    ]);
+    let executed = 0;
+    await expect(run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } })).rejects.toBeInstanceOf(ModelOutputError);
+    expect(client.requests).toHaveLength(2); expect(executed).toBe(0);
+  });
+
+  it('成功修正后额度仍耗尽，后续无效批次严格失败', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'lookup', id: 'first-invalid', input: { count: 'bad' } }]),
+      step('', [{ name: 'lookup', id: 'corrected', input: { count: 1 } }]),
+      step('', [{ name: 'lookup', id: 'later-invalid', input: { count: 'bad' } }]),
+    ]);
+    let executed = 0;
+    await expect(run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } }, { maxSteps: 4 })).rejects.toBeInstanceOf(ModelOutputError);
+    expect(client.requests).toHaveLength(3);
+    expect(client.requests[1]!.system).toContain('上一批工具调用已整体拒绝');
+    expect(client.requests[2]!.system).not.toContain('上一批工具调用已整体拒绝');
+    expect(executed).toBe(1);
+  });
+
+  it('拒绝批次计入工具预算并消耗一个普通步骤', async () => {
+    const client = scriptedClient([step('', [{ name: 'lookup', id: 'rejected', input: { count: 'bad' } }]), step('回答')]);
+    let executed = 0;
+    await run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } }, { maxTools: 1, maxSteps: 2 });
+    expect(client.requests).toHaveLength(2); expect(client.requests[1]!.toolChoice).toBe('none');
+    expect(client.requests[1]!.system).not.toContain('上一批工具调用已整体拒绝'); expect(executed).toBe(0);
+  });
+
+  it('整批拒绝时不执行 finish_tools，修正请求仍处于工具阶段', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'finish_tools', id: 'rejected-finish' }, { name: 'lookup', id: 'bad', input: { count: 'bad' } }]),
+      step('', [{ name: 'lookup', id: 'good', input: { count: 1 } }]), step('回答'),
+    ]);
+    let executed = 0;
+    await run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } }, { maxSteps: 3 });
+    expect(client.requests[1]!.toolChoice).toBe('auto'); expect(executed).toBe(1);
+  });
+
+  it('拒绝的世界动作不占世界动作名额，修正后也仍最多执行一次', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'move', id: 'rejected-move', input: { place: 1 } }]),
+      step('', [{ name: 'move', id: 'corrected-move', input: { place: 'yard' } }]),
+      step('', [{ name: 'move', id: 'second-move', input: { place: 'room' } }]),
+      step('回答'),
+    ]);
+    let executed = 0;
+    const result = await run(client, { move: { ...fake, changesWorld: true, inputSchema: z.object({ place: z.string() }),
+      execute: async () => { executed++; return observation; } } }, { maxSteps: 4 });
+    expect(executed).toBe(1);
+    expect(result.traces.find(trace => trace.callId === 'rejected-move' && trace.output)?.output?.error?.code).toBe('invalid_tool_input');
+    expect(result.traces.find(trace => trace.callId === 'second-move' && trace.output)?.output?.error?.code).toBe('tool_budget');
+  });
+
+  it('awaiting 工具开始记录时权限撤回会阻止副作用', async () => {
+    const client = scriptedClient([step('', [{ name: 'lookup', id: 'guarded' }])]);
+    let allowed = true, executed = 0;
+    await expect(run(client, { lookup: { ...fake, execute: async () => { executed++; return observation; } } }, {
+      guard: async () => { if (!allowed) throw new Error('permission revoked'); },
+      onTool: async trace => { if (!trace.output) { await Promise.resolve(); allowed = false; } },
+    })).rejects.toThrow('permission revoked');
+    expect(client.requests).toHaveLength(1); expect(executed).toBe(0);
+  });
 });
 
 describe('56KiB 上下文预算', () => {

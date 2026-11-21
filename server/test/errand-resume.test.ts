@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { afterAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { scriptedClient } from '../src/llm/testing.ts';
-import { emptyUsage, type ModelClient } from '../src/llm/index.ts';
+import { emptyUsage, type ModelClient, type ModelEvent } from '../src/llm/index.ts';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
 import { users, cats, conversations, messages, tickets, ticketInputs, runs, runSteps, workerReports, asyncJobs, mailboxLetters, boundaries, pushNotifications } from '../src/db/schema.ts';
@@ -18,6 +18,8 @@ import { hashToken } from '../src/auth-token.ts';
 import { registerDevice, processPush } from '../src/push/service.ts';
 import { closeQueues } from '../src/queue.ts';
 import { config } from '../src/config.ts';
+import * as timeTools from '../src/runtime/time.ts';
+import * as weatherTools from '../src/runtime/weather.ts';
 
 const day = new Date().toISOString().slice(0, 10);
 const now = new Date(day + 'T12:00:00Z');
@@ -58,6 +60,75 @@ async function failed(goal = '周末建议', at = now) {
   expect((await ticket(t.ticket_id)).stage).toBe('failed');
   return { id: t.ticket_id, run: (await runList(t.ticket_id))[0]! };
 }
+const reportStep = (input: Record<string, unknown>, id: string): ModelEvent[] => [
+  { type: 'tool-call', toolCallId: id, toolName: 'report', input, rawInput: JSON.stringify(input) },
+  { type: 'finish', finishReason: 'tool-calls', usage: { ...emptyUsage(), inputTokens: 12, outputTokens: 8 } },
+];
+
+it('worker 将无效 report 整批拒绝、持久化修正检查点，并在下一普通步骤汇报 ready', async () => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  const model = scriptedClient([
+    reportStep({ status: 'ready', result: '' }, 'invalid-report'),
+    reportStep({ status: 'ready', result: '周末可以在家休息。' }, 'ready-report'),
+  ]);
+  await processErrand(r!.id, { now: () => now, model }); await deliverReports(r!.id, now);
+  const steps = await db.select().from(runSteps).where(eq(runSteps.runId, r!.id)).orderBy(asc(runSteps.step));
+  expect(model.requests).toHaveLength(2); expect(model.requests[1]!.system).toContain('上一批工具调用已整体拒绝');
+  expect(steps).toHaveLength(2); expect(steps[0]!.usage).toEqual({ outputTokens: 8, toolValidationFailed: true });
+  expect(steps[0]!.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ toolCallId: 'invalid-report', output: { value: { error: { code: 'invalid_tool_input' } } } }] });
+  expect(steps[1]!.usage).toEqual({ outputTokens: 8 });
+  expect((await ticket(t.ticket_id)).stage).toBe('ready'); expect((await letters())[0]!.text).toContain('周末可以在家休息');
+});
+
+it('工具执行中的网络类错误不会重试已成功的前序工具', async () => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  let timeExecutions = 0, weatherExecutions = 0;
+  const createTimeTool = timeTools.timeTool;
+  const timeSpy = vi.spyOn(timeTools, 'timeTool').mockImplementation((clock, zone) => {
+    const tool = createTimeTool(clock, zone);
+    return { ...tool, execute: async (input, signal) => { timeExecutions++; return tool.execute(input, signal); } };
+  });
+  const networkError = Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' });
+  const weatherSpy = vi.spyOn(weatherTools.OpenMeteoWeatherProvider.prototype, 'query').mockImplementation(async () => {
+    weatherExecutions++; throw networkError;
+  });
+  const model = scriptedClient([[
+    { type: 'tool-call', toolCallId: 'time-call', toolName: 'get_time', input: {}, rawInput: '{}' },
+    { type: 'tool-call', toolCallId: 'weather-call', toolName: 'get_weather', input: { city: '上海', kind: 'current' }, rawInput: '{"city":"上海","kind":"current"}' },
+    { type: 'finish', finishReason: 'tool-calls', usage: { ...emptyUsage(), inputTokens: 10, outputTokens: 6 } },
+  ]]);
+  try {
+    await processErrand(r!.id, { now: () => now, model });
+    expect(model.requests).toHaveLength(1);
+    expect(timeExecutions).toBe(1); expect(weatherExecutions).toBe(1);
+  } finally {
+    timeSpy.mockRestore(); weatherSpy.mockRestore();
+  }
+});
+
+it('重启从检查点恢复修正额度，不允许第二个无效批次再获得修正', async () => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  const first = scriptedClient([reportStep({ status: 'ready', result: '' }, 'first-invalid')]);
+  await processErrand(r!.id, { now: () => now, model: first, afterStep: async () => {
+    await db.update(runs).set({ status: 'pending', leaseUntil: null, stepStartedAt: null }).where(eq(runs.id, r!.id));
+  } });
+  expect((await runList(t.ticket_id))[0]!.status).toBe('pending');
+  const restarted = scriptedClient([reportStep({ status: 'ready', result: '' }, 'second-invalid')]);
+  await processErrand(r!.id, { now: () => now, model: restarted }); await deliverReports(r!.id, now);
+  expect(restarted.requests).toHaveLength(1);
+  expect(await db.select().from(runSteps).where(eq(runSteps.runId, r!.id))).toHaveLength(1);
+  expect((await ticket(t.ticket_id)).stage).toBe('failed');
+});
+
+it('来源在无效批次检查点后撤回时，不请求修正模型或继续工具动作', async () => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  const model = scriptedClient([reportStep({ status: 'ready', result: '' }, 'invalid-before-withdrawal'), reportStep({ status: 'ready', result: '不应到达' }, 'must-not-run')]);
+  await processErrand(r!.id, { now: () => now, model, afterStep: async () => {
+    await db.update(messages).set({ contextAllowed: false }).where(eq(messages.id, sourceId));
+  } }); await deliverReports(r!.id, now);
+  expect(model.requests).toHaveLength(1); expect(await db.select().from(runSteps).where(eq(runSteps.runId, r!.id))).toHaveLength(1);
+  expect((await ticket(t.ticket_id)).stage).toBe('dropped'); expect(await letters()).toHaveLength(0);
+});
 
 it('HTTP补充恢复原托付，重放只创建一次执行；旧汇报不能干扰新执行', async () => {
   const t = await failed(), before = await ticket(t.id), key = randomUUID();

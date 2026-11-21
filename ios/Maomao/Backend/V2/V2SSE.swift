@@ -53,10 +53,19 @@ struct V2TurnStream {
     private(set) var byTurnID: String?
     mutating func apply(_ event: V2SSE.Event) throws {
         guard terminal == nil else { return }
-        struct Accepted: Decodable { let turnId: String; let triggerMessageId: String }
+        struct Accepted: Decodable {
+            let turnId: String; let triggerMessageId: String
+            enum CodingKeys: String, CodingKey { case turnId = "turn_id", triggerMessageId = "trigger_message_id" }
+        }
         struct TextPayload: Decodable { let text: String }
-        struct Superseded: Decodable { let turnId: String; let byTurnId: String }
-        struct Done: Decodable { let messageId: String?; let status: V2.Turn.Status }
+        struct Superseded: Decodable {
+            let turnId: String; let byTurnId: String
+            enum CodingKeys: String, CodingKey { case turnId = "turn_id", byTurnId = "by_turn_id" }
+        }
+        struct Done: Decodable {
+            let messageId: String?; let status: V2.Turn.Status
+            enum CodingKeys: String, CodingKey { case messageId = "message_id", status }
+        }
         struct Failure: Decodable { let code: String; let retryable: Bool }
         let data = Data(event.data.utf8)
         switch event.name {

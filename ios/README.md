@@ -19,7 +19,7 @@ v2 配对后，「聊会儿」进入两行聊天列表：「我们仨」是家�
 
 协议层在 `Maomao/Backend/V2/`，含请求、分页、错误码、轮次 SSE 解析与快照替换。host R3-2 返回轮次时，按 `stream_url` 实时显示团子回复，断线携带 Last-Event-ID 重连；仍兼容 `turn:null`。回复中可「停止」，保留已显示的 UTF-16 长度，落库后标注「已停止」。最新猫回复下可「重答」，也可长按任意可见成员消息请团子重答（包含伴侣的消息）；重答请求键按设备和消息持久保存，网络失败重试不换键。伴侣发起的群聊轮次通过轮询收最终回复，不主动开启流。
 
-身份接口当前返回 camelCase 公开成员字段，与聊天契约的 snake_case 通则不一致；解码同时兼容这两种字段拼法，不改变宿主。默认 DevelopmentEchoReplier 一次返回开发回声，并非真实模型；查看明显的逐字流可在仓库外脚本调用 startHost，注入遵守 signal 的慢速 Replier，不修改宿主源码。
+网络 DTO 使用显式 snake_case 字段，与统一后的宿主 JSON 一致，不再兼容 camelCase 响应；Keychain 的本机存储结构独立于网络 DTO，已有配对不受影响。默认 DevelopmentEchoReplier 一次返回开发回声，并非真实模型；查看明显的逐字流可在仓库外脚本调用 startHost，注入遵守 signal 的慢速 Replier，不修改宿主源码。
 
 运行协议测试：
 

@@ -92,13 +92,25 @@ final class V2Tests: XCTestCase {
         XCTAssertTrue(store.hasPersistedReply(active, conversation: "c"))
         XCTAssertFalse(store.hasPersistedReply(active, conversation: "other"))
     }
-    func testPublicIdentityAcceptsBothFieldSpellings() throws {
-        for member in [#"{"id":"a","householdId":"h","displayName":"Han","homeHostId":"host"}"#, #"{"id":"a","household_id":"h","display_name":"Han","home_host_id":"host"}"#] {
-            let result = try V2.decoder.decode(V2.Member.self, from: Data(member.utf8))
-            XCTAssertEqual(result.displayName, "Han")
-            XCTAssertEqual(result.householdId, "h")
-            XCTAssertEqual(result.homeHostId, "host")
-        }
+    func testPublicIdentityUsesSnakeCaseOnly() throws {
+        let member = #"{"id":"a","household_id":"h","display_name":"Han","home_host_id":"host"}"#
+        let pair = #"{"device_id":"d","device_token":"test","member":\#(member),"household":{"id":"h","name":"家"}}"#
+        let result = try V2.decoder.decode(V2.PairResult.self, from: Data(pair.utf8))
+        XCTAssertEqual(result.member.displayName, "Han")
+        XCTAssertEqual(result.member.householdId, "h")
+        XCTAssertEqual(result.member.homeHostId, "host")
+        XCTAssertEqual(result.deviceId, "d")
+        XCTAssertThrowsError(try V2.decoder.decode(V2.Member.self, from: Data(#"{"id":"a","householdId":"h","displayName":"Han","homeHostId":"host"}"#.utf8)))
+        XCTAssertThrowsError(try V2.decoder.decode(V2.PairResult.self, from: Data(pair.replacingOccurrences(of: "device_id", with: "deviceId").utf8)))
+    }
+    func testKeychainStorageSchemaStaysIndependentOfWireDTOs() throws {
+        let stored = #"{"hosts":["localhost"],"port":8789,"fingerprint":"pin","identity":{"deviceId":"d","deviceToken":"test","member":{"id":"a","householdId":"h","displayName":"Han","homeHostId":"host"},"household":{"id":"h","name":"家"}}}"#
+        let connection = try JSONDecoder().decode(V2Connection.self, from: Data(stored.utf8))
+        XCTAssertEqual(connection.identity.member.displayName, "Han")
+        XCTAssertEqual(connection.identity.deviceId, "d")
+        let encoded = try JSONEncoder().encode(connection)
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary, try JSONSerialization.jsonObject(with: Data(stored.utf8)) as? NSDictionary)
+        XCTAssertEqual(try JSONDecoder().decode(V2Connection.self, from: encoded).identity.member, connection.identity.member)
     }
     func testReducerSnapshotReplacesAndTerminals() throws {
         for terminal in ["superseded", "done", "error"] {

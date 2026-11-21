@@ -8,9 +8,10 @@ import { AccessDeniedError } from "./access.ts";
 import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
+import { memberRecord } from "./dto.ts";
 
 const name = z.string().trim().min(1).max(100);
-const badRequest = { error: { code: "bad_request" } };
+const badRequest = { error: { code: "invalid_request" } };
 
 export function memberInviteRoutes(
   ctx: HostContext,
@@ -48,7 +49,7 @@ export function memberInviteRoutes(
         deviceName: parsed.data.device_name, maxMembers: ctx.config.maxMembers,
       });
       return result ? c.json({
-        member: result.member, device_id: result.deviceId, device_token: result.token, household: result.household,
+        member: memberRecord(result.member), device_id: result.deviceId, device_token: result.token, household: result.household,
       }) : c.json({ error: { code: "invite_code_invalid" } }, 401);
     });
     app.use("/invites", requireActor(ctx));
@@ -59,9 +60,9 @@ export function memberInviteRoutes(
       if (!parsed.success) {
         return c.json(badRequest, 400);
       }
-      return c.json({ member: bootstrapMember(ctx.store.db, ctx.clock, {
+      return c.json({ member: memberRecord(bootstrapMember(ctx.store.db, ctx.clock, {
         householdId: ctx.householdId, displayName: parsed.data.display_name, maxMembers: ctx.config.maxMembers,
-      }) });
+      })) });
     });
     app.delete("/members/:id", (c) => {
       const parsed = z.uuid().safeParse(c.req.param("id"));

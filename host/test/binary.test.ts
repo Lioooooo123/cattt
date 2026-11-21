@@ -60,8 +60,8 @@ test("编译产物脱离 drizzle 目录运行并响应 SIGTERM", async () => {
         await Bun.sleep(50);
       }
     }
-    expect(health).toMatchObject({ ok: true, protocolVersion: 1 });
-    expect((health as { hostId: string }).hostId)
+    expect(health).toMatchObject({ ok: true, protocol_version: 1 });
+    expect((health as { host_id: string }).host_id)
       .toMatch(/^[0-9a-f-]{14}7[0-9a-f-]{21}$/);
     expect(existsSync(join(directory, "data", "cattt.db"))).toBe(true);
     const ca = readFileSync(join(directory, "data/tls/ca.crt"), "utf8");

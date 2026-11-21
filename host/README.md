@@ -36,7 +36,7 @@ bun src/main.ts
 
 默认数据目录为用户主目录下的 `~/.cattt/host`，可用 `CATTT_DATA_DIR` 覆盖；运行时自动创建目录，数据库为其中的 `cattt.db`。`host_meta` 的 `host_id` 键首次启动用 Clock 生成 UUIDv7，之后重用。
 
-Gateway 默认只监听 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口（0 表示系统分配端口）。`GET /v2/healthz` 返回 `{ ok: true, hostId, protocolVersion: 1 }`；其它请求返回 JSON 404。目前不提供业务接口。
+Gateway 回环监听默认为 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口（0 表示系统分配端口）。`GET /v2/healthz` 返回 `{ ok: true, host_id, protocol_version: 1 }`；未匹配的请求返回 `{ error: { code: "not_found", message: "未找到接口" } }`，HTTP 404。业务接口见下文。
 
 `startHost(config, components)` 按顺序启动组件，共享 store、bus、clock、hostId 和 config。启动失败时逆序停止已启动组件；组件自身须清理尚未完成的启动。`stop()` 可重复调用，逆序停止组件并隔离、报告各停止错误，最后关闭数据库。SIGINT/SIGTERM 触发停止后以 0 退出。
 
@@ -99,6 +99,8 @@ devices 是可复制的设备生命周期记录（含 last_seen_at、revoked_at�
 resolveDeviceToken 仅接受归属本地 host_meta.host_id 的有效设备，拒绝未知/撤销/墓碑设备、墓碑成员及失效家庭/宿主；成功时通过 Clock 更新 last_seen_at、HLC 与 rev。Actor 为 `{ memberId, deviceId, hostId, householdId }`，由身份中间件建立，不从客户端自报字段推导。
 
 Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。设备凭证通过下述配对或成员邀请接口发放，不提供无短码的设备注册。
+
+`/v2` 与 `/host` 的 JSON 请求/响应均为 snake_case，不直接序列化内部 camelCase Actor 或数据库行。me.actor 为 `{ member_id, device_id, host_id, household_id }`；me.member、members 列表及 pair.member 为 `{ id, household_id, display_name, home_host_id }`。成员引导与邀请接受原有的完整成员记录另外含 origin_host_id、hlc、rev、created_at、updated_at、deleted_at。devices/status、短码/邀请与聊天响应保持原有 snake_case。所有错误统一 `{ error: { code, message? } }`：格式错误为 400 invalid_request，未知路由为 404 not_found；未处理故障返回 500 internal_error，不把内部异常细节发给客户端，并通过 onError 上报。
 
 `identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。对话、轮次及 SSE 使用 R3 的 canSeeConversation；同家庭不代表能通过设备 API 读取伴侣单聊。
 

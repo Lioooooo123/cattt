@@ -7,6 +7,7 @@
 - 回环 HTTP 与 LAN HTTPS 的 `/v2` 契约相同。除身份模块的配对/邀请接受接口外，以下全部接口需要 `Authorization: Bearer <device_token>`；身份来自 Actor，不能由请求体自报作者。
 - JSON 字段一律 snake_case，时间为毫秒 epoch 整数。服务端业务 ID 为 UUIDv7；client_message_id 为客户端不透明字符串，request_id 为客户端生成的合法 UUID，不要求其等于 turn.id。
 - 错误形状：`{"error":{"code":"invalid_request","message":"可选说明"}}`。客户端按 code 分支，不解析 message。
+- 同一命名规则也适用于身份与 `/host` 管理接口：healthz 返回 `{ok, host_id, protocol_version}`；me.actor 为 `{member_id, device_id, host_id, household_id}`；me.member、members 列表与 pair.member 为 `{id, household_id, display_name, home_host_id}`。成员引导及邀请接受保留完整成员元数据，字段为 origin_host_id、hlc、rev、created_at、updated_at、deleted_at。内部 Actor/仓储可以用 camelCase，不作为线上的 JSON 格式。
 
 | HTTP | code | 含义 |
 |---|---|---|
@@ -15,6 +16,7 @@
 | 404 | not_found | 资源不存在，或当前 Actor 不可见；不暴露伴侣单聊是否存在 |
 | 409 | idempotency_conflict | 相同幂等键被用于不同内容或不同目标 |
 | 409 | not_publisher | 写请求未到达此对话的发布宿主，不在本副本代为写入或生成 |
+| 500 | internal_error | 未处理的内部故障；不返回异常堆栈或内部细节 |
 
 认证优先于资源操作；合法 ID 对应的不可见对话先按 404 处理，不泄露其发布宿主。只读历史可来自副本，所有发送、取消、重答都须在发布宿主复核权限与幂等性。R3-1 不提供自动跨宿主转发。
 

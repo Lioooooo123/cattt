@@ -61,3 +61,17 @@ Gateway 默认只监听 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口�
 租期与处理超时默认 300 秒，`errand` 默认 660 秒。超时不再等待处理器，保留运行行供租约恢复，并通知 `signal`；不会强制终止 JavaScript 或撤销处理器已产生的外部副作用，业务处理器仍须幂等。默认每 250 毫秒轮询，`runner.enqueue(queue, payload, options?)` 在提交后通过 `jobs:wake` 立即唤醒。直接通过仓储入队由下一次轮询发现。并发上限按队列计算，已超时但未自行结束的旧处理器不占新的领取名额。
 
 `stop()` 先停止领取，默认等待在途处理最多 5 秒；可用构造参数 `pollIntervalMs`、`graceMs` 调整。宽限到期后通知取消，迟到处理结果不再写库，未完成行由下一次启动按过期租约恢复。处理器应响应取消，不应在宿主停止后继续使用上下文中的数据库。当前入口尚未注册业务队列。
+
+## 本地租约与 fencing
+
+`leases` 为对话锁、群聊租约、单一写者和未来模型准入提供统一的本地基础。本批不迁移旧 advisory lock，也不实现跨 Mac 的 `/peer/lease` 协议；后者留给 R6。
+
+`store/leases.ts` 的获取、续租和释放使用立即事务。首次获取 epoch 为 1；其它持有者只有在墙钟严格超过 `expires_at + skewMs` 后才能接管，默认时钟宽限 5 秒，可设为 0。接管递增 epoch 并从 Clock 签发新的 `acquired_hlc`。同一持有者通过 `acquireLease` 可重获或续租未释放的租约，epoch 与取得 HLC 不变；`renewLease` 则严格要求持有者、epoch 匹配且租约尚未到期。宽限只延迟接管，不延长旧持有者的写权限。
+
+释放不删除历史行，而将 `expires_at` 置为 0。此标记允许立即重新获取，无需再等宽限；包括同一持有者在内的下一次获取都会递增 epoch，避免旧 token 在释放后复活。
+
+业务写入须在自己的 `writeTransaction` 内调用 `assertLeaseHeld(db, clock, name, holder, epoch)`，与受保护的写入共用事务；不匹配或到期抛出 `LeaseLostError`，事务回滚。事务外的检查不能替代这道 fencing。
+
+`LeaseKeeper` 可作为运行时组件使用。启动后调用 `hold(name, { ttlMs, renewEveryMs })`，续租间隔须小于租期。默认持有者为 hostId，构造参数 `worker` 可追加为 `<hostId>:<worker>`，`skewMs` 可覆盖接管宽限。重复持有同名有效租约复用原维护配置；`epoch(name)` 校验并返回当前 token，失效返回 undefined。维护器发布带名称、持有者和 epoch 的 `lease:acquired` / `lease:lost`；续租失败后不自动抢回，停止时释放持有租约并发布 lost。
+
+`withLease(name, fn)` 要求事先持有租约，在调用前及完成后检查持有权，并向回调传入 epoch。它不自动获取或释放，不会取消回调或撤销外部副作用；数据库写入仍须使用上述事务内断言。当前入口尚未启用具体租约角色。

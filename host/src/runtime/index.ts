@@ -11,6 +11,8 @@ import type { Store } from "../store/index.ts";
 export interface HostEvents {
   "host:ready": { hostId: string };
   "jobs:wake": { queue: string };
+  "lease:acquired": { name: string; holder: string; epoch: number };
+  "lease:lost": { name: string; holder: string; epoch: number };
 }
 
 export interface HostConfig {

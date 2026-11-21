@@ -20,7 +20,7 @@
 | 部分 | 技术 |
 | --- | --- |
 | iOS 客户端 | Swift、SwiftUI、WKWebView，最低 iOS 17 |
-| macOS 电脑端宿主 | SwiftPM、SwiftUI MenuBarExtra，最低 macOS 14，Apple Silicon |
+| macOS 电脑端 | SwiftPM、SwiftUI 菜单栏宿主与小院/聊天窗口、WKWebView，最低 macOS 14，Apple Silicon |
 | 3D 世界与展示页 | TypeScript、Three.js、Vite |
 | 服务端 | Node.js、TypeScript、Hono、自研模型客户端与 Agent 循环 |
 | 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
@@ -63,7 +63,7 @@ App 默认使用本地模拟，可先体验小院和界面。需要真实后端�
 
 ### 运行本机后端
 
-电脑端应用的构建、菜单、备份恢复与烟测见 [macOS 宿主说明](desktop/macos/README.md)。应用随附 Node 22 与 PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
+电脑端应用打开可停靠的小院与聊天窗口，聊天通过本机宿主的既有配对接口连接；构建、菜单、备份恢复与烟测见 [macOS 宿主说明](desktop/macos/README.md)。应用随附 Node 22 与 PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
 
 以下为不使用宿主的源码开发流程，保留的 `server/docker-compose.yml` 只用于开发数据库：
 

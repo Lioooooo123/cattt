@@ -15,6 +15,9 @@ fetch https://get.enterprisedb.com/postgresql/postgresql-17.7-1-osx-binaries.zip
 if [ ! -d "$CACHE/pg-17.7" ]; then mkdir -p "$CACHE/pg-17.7"; ditto -xk "$CACHE/postgresql-17.7-1.zip" "$CACHE/pg-17.7"; fi
 APP="$PKG/build/Cattt.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/node" "$APP/Contents/Resources/postgres"
+pnpm --dir "$ROOT/web" build:ios
+rm -rf "$APP/Contents/Resources/YardWeb"
+ditto "$ROOT/ios/Maomao/Resources/YardWeb" "$APP/Contents/Resources/YardWeb"
 tar -xzf "$CACHE/node-22.16.0.tar.gz" -C "$APP/Contents/Resources/node" --strip-components=1 node-v22.16.0-darwin-arm64/bin/node
 for dir in bin lib share; do ditto "$CACHE/pg-17.7/pgsql/$dir" "$APP/Contents/Resources/postgres/$dir"; done
 rm -rf "$APP/Contents/Resources/postgres/share/doc" "$APP/Contents/Resources/postgres/share/man"
@@ -33,7 +36,7 @@ cp "$PKG/.build/release/CatttHost" "$APP/Contents/MacOS/CatttHost"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 14.0' "$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :LSUIElement bool true' "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :LSUIElement bool false' "$APP/Contents/Info.plist"
 find "$APP/Contents/Resources" -type f -perm +111 -print0 | while IFS= read -r -d '' file; do
   if file "$file" | rg -q Mach-O; then codesign --force -s - "$file"; fi
 done

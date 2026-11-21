@@ -1,14 +1,19 @@
-# macOS 团子宿主
+# macOS 团子客户端与宿主
 
-F 批已实施：SwiftPM 宿主、无界面运行、应用打包、状态菜单、手机配对窗口和模型设置；云部署交付物已移除，保留 `server/docker-compose.yml` 供源码开发使用。
+F 批宿主能力继续保留：SwiftPM 宿主、无界面运行、应用打包、状态菜单、手机配对窗口和模型设置；本版在同一个 `Cattt.app` 增加 Dock 可见的小院与聊天主窗口。主窗口直接加载已打包的 3D 小院，聊天使用宿主 loopback API 和一次性配对码；设备凭证按数据目录归属保存在 macOS 钥匙串中。没有新增服务端接口，也不把管理令牌或设备凭证交给网页。云部署交付物已移除，保留 `server/docker-compose.yml` 供源码开发使用。
 
 宿主初始化、健康轮询、备份恢复及退出都在后台串行队列运行；菜单通过可观察状态更新，不等待数据库或网络请求。菜单提供各组件状态、启动错误、配对、DeepSeek 密钥设置、备份恢复、目录入口和登录自启动。普通备份的每日到期时间以现有最新完整普通备份的修改时间为准，不因重新启动宿主而延期。
 
-配对窗口按服务端接口请求配对码和设备列表；旧版服务端返回 404 时显示“这个版本的服务端还不支持配对”。二维码、有效期、证书短指纹与移除设备接口已接入，当前 main 的真实配对流程需等服务端对应批次合入后再联调。
+配对窗口按服务端接口请求配对码和设备列表；二维码、有效期、证书短指纹与移除设备接口已接入。小院聊天使用 `host-admin.token` 生成配对码，再通过 `/pair` 换取同一宿主账号的设备凭证；后续聊天只向 `127.0.0.1:8787` 发送设备凭证，身份失效时只自动重新配对一次。
 
 登录自启动使用 `SMAppService.mainApp`，首次打开尝试注册。已在本机将临时签名应用安装到 `/Applications/Cattt.app`，验证注册和菜单开关的取消注册／重新注册；系统记录分别为 enabled、disabled、enabled。未通过退出登录再登录验证真正的登录启动。自定义 `--data-dir` 参数不由系统登录项保留，登录项会使用默认数据目录。
 
-需要 Apple Silicon、macOS 14+、Xcode 命令行工具、pnpm；先在 `server` 运行 `pnpm install --frozen-lockfile`。
+需要 Apple Silicon、macOS 14+、Xcode 命令行工具、pnpm；先安装网页与服务端依赖：
+
+```sh
+pnpm --dir web install --frozen-lockfile
+pnpm --dir server install --frozen-lockfile
+```
 
 ```sh
 swift test --package-path desktop/macos
@@ -17,6 +22,7 @@ bash desktop/macos/scripts/smoke-host.sh
 ```
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
+构建脚本执行 `pnpm --dir web build:ios`，并将输出复制到 `Cattt.app/Contents/Resources/YardWeb`；运行时不需要网页开发服务器。正常启动会显示小院主窗口；关闭窗口不会退出菜单栏宿主，Dock 重开和菜单中的「打开小院」均可重新打开。宿主就绪后自动加载聊天历史；网络中断后按事件游标续接，未确认接收时用稳定 `client_message_id` 重试，已接收的消息改走既有回复接口。停止回复时，按屏幕已显示的 UTF-16 长度保存。
 当前构建为 ad-hoc 签名，下载副本会被 Gatekeeper 拦截。确认来源可信后可右键打开，或对应用执行 `xattr -dr com.apple.quarantine /path/to/Cattt.app`。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。
 烟测不启动或依赖 Redis；运行前要求没有 `redis-server` 进程，并验证健康 JSON 中 `ok=true`、`db=true` 且无 `redis` 字段。它使用自己的新数据目录，但仍需空闲的 8787、8788 和 54329 端口；不要与运行中的宿主同时执行。
 

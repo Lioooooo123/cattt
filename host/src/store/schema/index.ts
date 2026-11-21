@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+export { deviceCredentials, devices, households, hosts, members } from "./identity.ts";
+
 export const chatEvents = sqliteTable("chat_events", {
   streamId: text("stream_id").notNull(),
   seq: integer("seq").notNull(),

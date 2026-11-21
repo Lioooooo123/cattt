@@ -7,6 +7,7 @@ import { ManualClock } from "../src/clock/index.ts";
 import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
 import { TERMINAL_RETENTION_MS } from "../src/store/chat-events.ts";
+import { issueTestDevice } from "./identity-fixture.ts";
 
 function frames(response: Response) {
   const reader = response.body!.getReader();
@@ -37,6 +38,8 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
   const gateway = new Gateway();
   const clock = new ManualClock("test", 100);
   const host = await startHost({ dataDir: directory, port: 0, clock }, [gateway]);
+  const { token } = issueTestDevice(host);
+  const authorization = { Authorization: `Bearer ${token}` };
   const events = new ChatEvents(host);
   const url = `http://127.0.0.1:${gateway.port}/v2/streams/turn/events`;
   const clients: ReturnType<typeof frames>[] = [];
@@ -55,7 +58,9 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
     };
   };
   const open = async (suffix = "", headers?: Record<string, string>) => {
-    const response = await fetch(url + suffix, { headers, signal: AbortSignal.timeout(4000) });
+    const response = await fetch(url + suffix, {
+      headers: { ...authorization, ...headers }, signal: AbortSignal.timeout(4000),
+    });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     const client = frames(response);
@@ -89,15 +94,15 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
     const ended = await open("", { "Last-Event-ID": events.cursor(5) });
     expect(await ended.next()).toBeUndefined();
     for (const cursor of ["foreign.1", "garbage", events.cursor(6), `${host.hostId}.01`]) {
-      const response = await fetch(url, { headers: { "Last-Event-ID": cursor } });
+      const response = await fetch(url, { headers: { ...authorization, "Last-Event-ID": cursor } });
       expect(response.status).toBe(410);
       expect(await response.json()).toMatchObject({ reason: "cursor_unknown" });
     }
     clock.advance(TERMINAL_RETENTION_MS);
-    const expired = await fetch(url + `?cursor=${events.cursor(4)}`);
+    const expired = await fetch(url + `?cursor=${events.cursor(4)}`, { headers: authorization });
     expect(expired.status).toBe(410);
     expect(await expired.json()).toMatchObject({ reason: "cursor_unknown" });
-    const missing = await fetch(url.replace("/turn/", "/missing/"));
+    const missing = await fetch(url.replace("/turn/", "/missing/"), { headers: authorization });
     expect(missing.status).toBe(410);
     await missing.body?.cancel();
   } finally {
@@ -114,10 +119,11 @@ test("空闲 SSE 按配置发送心跳，宿主停止中断等待后再关闭数
   const gateway = new Gateway({ heartbeatIntervalMs: 10 });
   const host = await startHost({ dataDir: directory, port: 0 }, [gateway]);
   try {
+    const { token } = issueTestDevice(host);
     const events = new ChatEvents(host);
     events.append({ streamId: "turn", kind: "delta", data: 1 });
     const response = await fetch(`http://127.0.0.1:${gateway.port}/v2/streams/turn/events`, {
-      headers: { "Last-Event-ID": events.cursor(1) },
+      headers: { Authorization: `Bearer ${token}`, "Last-Event-ID": events.cursor(1) },
     });
     const client = frames(response);
     expect(await client.next()).toBe(": connected");

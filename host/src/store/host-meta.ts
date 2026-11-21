@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { StoreDb } from "./index.ts";
 import { hostMeta } from "./schema/index.ts";
 
-export function getHostMeta(db: StoreDb, key: string): string | undefined {
+export function getHostMeta(db: Pick<StoreDb, "select">, key: string): string | undefined {
   return db.select().from(hostMeta).where(eq(hostMeta.key, key)).get()?.value;
 }
 

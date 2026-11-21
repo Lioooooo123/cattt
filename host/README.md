@@ -86,4 +86,18 @@ Gateway 默认只监听 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口�
 
 `events.subscribe(streamId, cursor?, signal?)` 返回 `status: "ok"` 和异步迭代器，或 `status: "unknown"`。迭代器先回放后等待总线唤醒，并以 1 秒轮询兜底；跨批次排空尾部事件，到 terminal 后结束。通过 AbortSignal 中止等待并清理订阅。游标为不透明的 `<hostId>.<seq>`；不带游标从头读取。异宿主、格式错误、超出流尾、未知或过期的流返回 unknown，调用方应恢复快照；已读到终态的有效游标直接结束。订阅过程中流过期则结束，不伪造终态。
 
-`GET /v2/streams/:streamId/events` 提供 SSE：`Last-Event-ID` 优先于 `?cursor=`，每条消息包含 id、event 和 JSON data。连接开始发送注释，每 15 秒发送心跳注释；客户端断开或宿主停止会清理订阅。未知游标在发送 SSE 之前返回 HTTP 410 JSON `{ error, reason: "cursor_unknown" }`。成员鉴权、业务表快照回退、取消、可见长度与取代控制属于 R3，当前不实现；默认只监听回环地址，不应将此接口暴露给不可信网络。
+`GET /v2/streams/:streamId/events` 提供 SSE，须携带设备 Bearer 令牌：`Last-Event-ID` 优先于 `?cursor=`，每条消息包含 id、event 和 JSON data。连接开始发送注释，每 15 秒发送心跳注释；客户端断开或宿主停止会清理订阅。未知游标在发送 SSE 之前返回 HTTP 410 JSON `{ error, reason: "cursor_unknown" }`。流的家庭/会话归属检查、业务表快照回退、取消、可见长度与取代控制属于 R3，当前不实现；默认只监听回环地址，不应将此接口暴露给不可信网络。
+
+## 身份、家庭和设备凭证
+
+R2-1 增加 households、hosts、members、devices。业务行均有 UUIDv7 id、origin_host_id、编码 HLC、rev、创建/更新时间和 deleted_at 墓碑；hosts.id 与 host_meta 的运行时 hostId 一致。启动时幂等建立本宿主的家庭与 host 行，householdId 进入组件上下文；重启不改名、不重建身份，也不自动创建成员或设备。家庭/宿主名称可由配置 householdName、hostName 或环境 CATTT_HOUSEHOLD_NAME、CATTT_HOST_NAME 指定，默认“我们的家”“我的 Mac”。
+
+成员模型按 N 设计，默认上限只在 runtime/config.ts 的 DEFAULT_MAX_MEMBERS 中定义；调用方可通过 maxMembers 配置和 createMember 参数扩容。成员的 home_host_id 与设备宿主必须属于对应家庭。仓储使用立即事务计数和创建，活跃成员才计入上限，listMembers 不返回墓碑。
+
+devices 是可复制的设备生命周期记录（含 last_seen_at、revoked_at），不含任何令牌。device_credentials 是**本机秘密表**，仅包含 device_id 与唯一 SHA-256 token_hash，永不进入 change_log、复制或共享快照。createDevice 只在创建时返回一次 `mm_dvc_` 加 32 随机字节 base64url 的原始令牌；不要写入日志。推送 token 列和其本机存储归属留给后续阶段，此处不提前加入业务设备表。
+
+resolveDeviceToken 仅接受归属本地 host_meta.host_id 的有效设备，拒绝未知/撤销/墓碑设备、墓碑成员及失效家庭/宿主；成功时通过 Clock 更新 last_seen_at、HLC 与 rev。Actor 为 `{ memberId, deviceId, hostId, householdId }`，由身份中间件建立，不从客户端自报字段推导。
+
+Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。当前没有创建成员/发放设备令牌的公开接口，邀请与配对属于后续 R2 PR。
+
+`identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。会话级权限和 SSE 流归属检查留给 R3；当前 SSE 仅验证设备身份，不应视为已完成业务授权。

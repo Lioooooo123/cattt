@@ -175,6 +175,7 @@ final class DesktopChatTests: XCTestCase {
             switch request.url!.path {
             case "/v1/messages":
                 XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.timeoutInterval, 12)
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer mm_dvc_stream")
                 let value = try XCTUnwrap(JSONSerialization.jsonObject(with: try Self.requestBody(request)) as? [String: String])
                 XCTAssertEqual(value["client_message_id"], "client-1")
@@ -283,6 +284,22 @@ final class DesktopChatTests: XCTestCase {
         XCTAssertEqual(unsent.retryRequest(), .send(clientMessageID: "same-client-id", text: "尚未送达"))
         unsent.complete(messageID: nil)
         XCTAssertNil(unsent.retryRequest())
+    }
+
+    func testStopWaitingKeepsStableIDAndLocalizesNetworkErrors() {
+        var transcript = DesktopChatTranscript()
+        transcript.beginSend(clientMessageID: "stable-id", text: "试发")
+        transcript.stopWaiting()
+        XCTAssertEqual(transcript.messages.first?.state, .failed)
+        XCTAssertEqual(transcript.messages.first?.error, "已停止等待，消息是否送达尚未确认")
+        XCTAssertTrue(transcript.messages.first?.retryable == true)
+        XCTAssertEqual(transcript.retryRequest(), .send(clientMessageID: "stable-id", text: "试发"))
+        transcript.markRetrying()
+        XCTAssertEqual(transcript.messages.first?.state, .sending)
+        XCTAssertNil(transcript.messages.first?.error)
+        XCTAssertEqual(transcript.messages.count, 1)
+        XCTAssertEqual(DesktopChatError.userMessage(for: URLError(.timedOut)), "本机服务响应超时，请再试一次")
+        XCTAssertEqual(DesktopChatError.userMessage(for: URLError(.cannotConnectToHost)), "无法连接本机服务，请检查团子菜单里的宿主状态")
     }
 
     private struct HistoryEnvelope: Decodable { let messages: [DesktopServerMessage] }

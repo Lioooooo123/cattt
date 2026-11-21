@@ -16,14 +16,16 @@ final class DesktopChatViewModel: ObservableObject {
     private let client: DesktopChatClient
     private var task: Task<Void, Never>?
 
-    var canCancel: Bool { sending && !cancelling && transcript.cancellationDetails() != nil }
+    var canCancel: Bool { sending && !cancelling }
+    var stopLabel: String { transcript.turnID == nil ? "停止等待" : "停止回复" }
 
     init(dataDirectory: URL = host.data) {
         client = DesktopChatClient(dataDirectory: dataDirectory)
     }
 
-    func reload() async {
+    func reload(automatically: Bool = false) async {
         guard !loading, !sending else { return }
+        if automatically && connected && transcript.clientMessageID != nil { return }
         loading = true
         connected = false
         connectionMessage = "正在连接本机服务…"
@@ -40,7 +42,7 @@ final class DesktopChatViewModel: ObservableObject {
             return
         } catch {
             connectionMessage = "暂时无法连接团子"
-            connectionError = error.localizedDescription
+            connectionError = DesktopChatError.userMessage(for: error)
         }
     }
 
@@ -56,19 +58,26 @@ final class DesktopChatViewModel: ObservableObject {
 
     func retry() {
         guard !sending, let request = transcript.retryRequest() else { return }
+        transcript.markRetrying()
         connectionError = ""
         sending = true
         task = Task { await run(request) }
     }
 
     func cancel() {
-        guard canCancel, let details = transcript.cancellationDetails() else { return }
+        guard canCancel else { return }
+        guard let details = transcript.cancellationDetails() else {
+            task?.cancel()
+            transcript.stopWaiting()
+            return
+        }
         cancelling = true
         Task {
             do {
                 try await client.cancel(turnID: details.turnID, visibleLength: details.visibleLength)
             } catch {
-                connectionError = "停止回复失败：\(error.localizedDescription)"
+                guard sending, transcript.turnID == details.turnID else { return }
+                connectionError = "停止回复失败：\(DesktopChatError.userMessage(for: error))"
                 cancelling = false
             }
         }
@@ -93,6 +102,7 @@ final class DesktopChatViewModel: ObservableObject {
                 }
 
                 var completed = false
+                var stoppedWithoutReply = false
                 var terminalError: (String, Bool)?
                 for try await frame in stream {
                     guard !Task.isCancelled else { return }
@@ -108,6 +118,7 @@ final class DesktopChatViewModel: ObservableObject {
                     case "done":
                         let event = try Self.decoder.decode(DoneEvent.self, from: data)
                         transcript.complete(messageID: event.messageId, stopped: event.status == "stopped")
+                        stoppedWithoutReply = event.status == "stopped" && event.messageId == nil
                         completed = true
                     case "error":
                         let event = try Self.decoder.decode(ErrorEvent.self, from: data)
@@ -121,13 +132,16 @@ final class DesktopChatViewModel: ObservableObject {
                     if completed || terminalError != nil { break }
                 }
 
+                guard !Task.isCancelled else { return }
                 if completed {
                     if let error = terminalError {
                         transcript.fail(message: error.0, retryable: error.1)
                     } else {
                         connectionError = ""
-                        do { transcript.loadHistory(try await client.history()) }
-                        catch { connectionError = error.localizedDescription }
+                        if !stoppedWithoutReply {
+                            do { transcript.loadHistory(try await client.history()) }
+                            catch { connectionError = DesktopChatError.userMessage(for: error) }
+                        }
                     }
                     return
                 }
@@ -154,17 +168,18 @@ final class DesktopChatViewModel: ObservableObject {
                         }
                         continue
                     } catch {
-                        connectionError = error.localizedDescription
+                        connectionError = DesktopChatError.userMessage(for: error)
                     }
                 }
-                let message = error.localizedDescription
-                connectionError = message
-                if transcript.resumeRequest() != nil, resumeCount < 3 {
+                let message = DesktopChatError.userMessage(for: error)
+                let resumeLimit = (error as? URLError)?.code == .timedOut ? 1 : 3
+                if let resume = transcript.resumeRequest(), resumeCount < resumeLimit {
                     resumeCount += 1
-                    if let resume = transcript.resumeRequest() { request = resume }
+                    request = resume
                     try? await Task.sleep(for: .milliseconds(400 * resumeCount))
                     continue
                 }
+                connectionError = message
                 transcript.fail(message: message, retryable: true)
                 return
             }
@@ -287,7 +302,7 @@ struct DesktopChatPanel: View {
                 Button {
                     if model.sending { model.cancel() } else { model.send() }
                 } label: {
-                    Label(model.sending ? "停止回复" : "发送给团子",
+                    Label(model.sending ? model.stopLabel : "发送给团子",
                           systemImage: model.sending ? "stop.fill" : "arrow.up")
                         .labelStyle(.iconOnly)
                         .font(.system(size: 14, weight: .semibold))
@@ -296,9 +311,9 @@ struct DesktopChatPanel: View {
                         .background(CompanionPalette.accent, in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(model.sending ? "停止回复" : "发送给团子")
-                .help(model.sending ? "停止回复" : "发送给团子")
-                .disabled(model.sending ? !hostReady || !model.canCancel :
+                .accessibilityLabel(model.sending ? model.stopLabel : "发送给团子")
+                .help(model.sending ? model.stopLabel : "发送给团子")
+                .disabled(model.sending ? !model.canCancel :
                     !canType || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(16)
@@ -322,7 +337,7 @@ private struct DesktopChatBubble: View {
                     }
                     .font(.callout)
                     .foregroundStyle(CompanionPalette.secondary)
-                } else {
+                } else if !entry.text.isEmpty {
                     Text(entry.text)
                         .font(.body)
                         .foregroundStyle(CompanionPalette.ink)

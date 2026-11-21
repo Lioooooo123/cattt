@@ -23,6 +23,7 @@ bash desktop/macos/scripts/smoke-host.sh
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
 构建脚本执行 `pnpm --dir web build:ios`，并将输出复制到 `Cattt.app/Contents/Resources/YardWeb`；运行时不需要网页开发服务器。正常启动会显示小院主窗口；关闭窗口不会退出菜单栏宿主，Dock 重开和菜单中的「打开小院」均可重新打开。宿主就绪后自动加载聊天历史；网络中断后按事件游标续接，未确认接收时用稳定 `client_message_id` 重试，已接收的消息改走既有回复接口。停止回复时，按屏幕已显示的 UTF-16 长度保存。
+发送时可停止等待，尚未确认送达的消息可安全重试。本机聊天连接空闲 12 秒超时，健康连接上的 SSE 心跳不会打断模型生成。客户端收到文本增量即显示；后端允许调用工具的阶段会先缓冲文本，可能整段送达。
 开发 DMG 未公证，从浏览器下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。开发试用无需更改 Gatekeeper：从源码构建后直接打开本机生成的应用。
 
 ### 不配置模型也能试用聊天

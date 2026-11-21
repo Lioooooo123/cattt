@@ -144,6 +144,17 @@ public enum DesktopChatError: Error, LocalizedError, Equatable {
     case missingAdminCredential
     case invalidPairingResponse
 
+    public static func userMessage(for error: Error) -> String {
+        if let error = error as? DesktopChatError { return error.localizedDescription }
+        if let error = error as? DeviceCredentialError { return error.localizedDescription }
+        switch (error as? URLError)?.code {
+        case .timedOut: return "本机服务响应超时，请再试一次"
+        case .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet:
+            return "无法连接本机服务，请检查团子菜单里的宿主状态"
+        default: return "暂时无法与团子聊天，请再试一次"
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case let .http(status, code):
@@ -163,17 +174,24 @@ public enum DesktopChatError: Error, LocalizedError, Equatable {
 
 public actor DesktopChatClient {
     public static let loopbackURL = URL(string: "http://127.0.0.1:8787")!
+    private static let requestTimeout: TimeInterval = 12
     private let dataDirectory: URL
     private let account: String
     private let session: URLSession
     private let credentialStore: any DeviceCredentialStore
     private var activeCredential: String?
 
-    public init(dataDirectory: URL, session: URLSession = .shared,
+    public init(dataDirectory: URL, session: URLSession? = nil,
                 credentialStore: any DeviceCredentialStore = KeychainDeviceCredentialStore()) {
         self.dataDirectory = dataDirectory
         self.account = KeychainDeviceCredentialStore.account(for: dataDirectory)
-        self.session = session
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = Self.requestTimeout
+            self.session = URLSession(configuration: configuration)
+        }
         self.credentialStore = credentialStore
     }
 
@@ -246,7 +264,8 @@ public actor DesktopChatClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("1", forHTTPHeaderField: "X-Maomao-Snapshot")
-        request.timeoutInterval = 60
+        // SSE 心跳会重置空闲超时，不限制模型的思考时长。
+        request.timeoutInterval = Self.requestTimeout
         return Self.eventStream(request, session: session)
     }
 
@@ -353,7 +372,7 @@ public actor DesktopChatClient {
         var request = URLRequest(url: Self.endpoint(path))
         request.httpMethod = method
         request.httpBody = body
-        request.timeoutInterval = 20
+        request.timeoutInterval = Self.requestTimeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         return try await rawData(for: request)
@@ -429,16 +448,17 @@ public struct DesktopChatTranscript: Equatable, Sendable {
 
     public mutating func loadHistory(_ history: [DesktopServerMessage]) {
         messages = history.map { message in
-            DesktopChatEntry(id: message.id,
-                             role: message.role == "user" ? .user : .cat,
-                             text: message.text,
-                             state: message.role == "user" ? .sent : .done,
-                             serverID: message.id,
-                             clientMessageID: message.clientMessageId)
+            let role: DesktopChatEntry.Role = message.role == "user" ? .user : .cat
+            let state: DesktopChatEntry.State = role == .user ? .sent : message.status == "stopped" ? .stopped : .done
+            return DesktopChatEntry(id: message.id, role: role, text: message.text, state: state,
+                                    serverID: message.id, clientMessageID: message.clientMessageId)
         }
     }
 
     public mutating func beginSend(clientMessageID: String, text: String) {
+        for index in messages.indices where messages[index].retryable {
+            messages[index].retryable = false
+        }
         self.clientMessageID = clientMessageID
         self.pendingText = text
         userMessageID = nil
@@ -456,6 +476,8 @@ public struct DesktopChatTranscript: Equatable, Sendable {
         if let index = messages.firstIndex(where: { $0.clientMessageID == clientMessageID }) {
             messages[index].state = .sent
             messages[index].serverID = userMessageID
+            messages[index].error = nil
+            messages[index].retryable = false
         }
     }
 
@@ -502,6 +524,23 @@ public struct DesktopChatTranscript: Equatable, Sendable {
             messages[index].error = message
             messages[index].retryable = retryable
         }
+    }
+
+    public mutating func stopWaiting() {
+        guard turnID == nil else { return }
+        fail(message: "已停止等待，消息是否送达尚未确认", retryable: true)
+    }
+
+    public mutating func markRetrying() {
+        guard let clientMessageID else { return }
+        messages.removeAll { $0.id == "stream-\(clientMessageID)" }
+        if let index = messages.firstIndex(where: { $0.clientMessageID == clientMessageID }) {
+            messages[index].state = .sending
+            messages[index].error = nil
+            messages[index].retryable = false
+        }
+        turnID = nil
+        lastEventID = nil
     }
 
     public mutating func retryRequest() -> DesktopChatRequest? {

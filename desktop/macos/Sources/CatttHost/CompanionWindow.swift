@@ -48,7 +48,7 @@ struct CompanionWindow: View {
             }
         }
         .task(id: hostReady) {
-            if hostReady { await chat.reload() }
+            if hostReady { await chat.reload(automatically: true) }
         }
         .onDisappear { yard.setActive(false) }
     }

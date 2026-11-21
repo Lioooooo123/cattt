@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,9 @@ import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
 import { TERMINAL_RETENTION_MS } from "../src/store/chat-events.ts";
 import { issueTestDevice } from "./identity-fixture.ts";
+import { testTurn } from "./turn-fixture.ts";
+import { sweepChatEvents } from "../src/store/chat-events.ts";
+import { turns } from "../src/store/schema/turns.ts";
 
 function frames(response: Response) {
   const reader = response.body!.getReader();
@@ -33,7 +37,7 @@ function frames(response: Response) {
   };
 }
 
-test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 410", async () => {
+test("轮次 SSE 实时送达、断线补齐、终态排空与过期快照", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cattt-sse-"));
   const gateway = new Gateway();
   const clock = new ManualClock("test", 100);
@@ -41,7 +45,8 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
   const { token } = issueTestDevice(host);
   const authorization = { Authorization: `Bearer ${token}` };
   const events = new ChatEvents(host);
-  const url = `http://127.0.0.1:${gateway.port}/v2/streams/turn/events`;
+  const turn = testTurn(host, token);
+  const url = `http://127.0.0.1:${gateway.port}${turn.turn.stream_url}`;
   const clients: ReturnType<typeof frames>[] = [];
   let subscriptions = 0;
   const original = host.bus.subscribe.bind(host.bus);
@@ -69,41 +74,46 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
     return client;
   };
   try {
-    events.append({ streamId: "turn", kind: "accepted", data: { turnId: "turn" } });
     const first = await open();
-    expect(await first.next()).toBe(`id: ${events.cursor(1)}\nevent: accepted\ndata: {"turnId":"turn"}`);
-    events.append({ streamId: "turn", kind: "delta", data: { text: "头" } });
+    expect(await first.next()).toBe(`id: ${events.cursor(1)}\nevent: accepted\ndata: ${JSON.stringify({ turn_id: turn.turn.id, trigger_message_id: turn.turn.trigger_message_id })}`);
+    turn.delta("头");
     expect(await first.next()).toBe(`id: ${events.cursor(2)}\nevent: delta\ndata: {"text":"头"}`);
     await first.cancel();
     for (let i = 0; i < 100 && subscriptions !== 0; i += 1) {
       await Bun.sleep(5);
     }
     expect(subscriptions).toBe(0);
-    events.append({ streamId: "turn", kind: "delta", data: { text: "中" } });
-    events.append({ streamId: "turn", kind: "delta", data: { text: "尾\n字" } });
-    const resumed = await open("?cursor=garbage", { "Last-Event-ID": events.cursor(2) });
+    turn.delta("中");
+    turn.delta("尾\n字");
+    const resumed = await open("?last_event_id=garbage", { "Last-Event-ID": events.cursor(2) });
     expect(await resumed.next()).toBe(`id: ${events.cursor(3)}\nevent: delta\ndata: {"text":"中"}`);
     expect(await resumed.next()).toBe(`id: ${events.cursor(4)}\nevent: delta\ndata: {"text":"尾\\n字"}`);
-    events.append({ streamId: "turn", kind: "done", data: { ok: true }, terminal: true });
-    expect(await resumed.next()).toBe(`id: ${events.cursor(5)}\nevent: done\ndata: {"ok":true}`);
+    const final = turn.done();
+    expect(await resumed.next()).toBe(`id: ${events.cursor(5)}\nevent: done\ndata: ${JSON.stringify({ message_id: final.reply_message_id, status: "completed" })}`);
     expect(await resumed.next()).toBeUndefined();
     expect(subscriptions).toBe(0);
-    const queryResume = await open(`?cursor=${events.cursor(4)}`);
+    const queryResume = await open(`?last_event_id=${events.cursor(4)}`);
     expect(await queryResume.next()).toContain(`id: ${events.cursor(5)}\nevent: done`);
     expect(await queryResume.next()).toBeUndefined();
     const ended = await open("", { "Last-Event-ID": events.cursor(5) });
+    expect(await ended.next()).toContain('event: snapshot\ndata: {"text":"头中尾\\n字"}');
+    expect(await ended.next()).toContain("event: done");
     expect(await ended.next()).toBeUndefined();
     for (const cursor of ["foreign.1", "garbage", events.cursor(6), `${host.hostId}.01`]) {
-      const response = await fetch(url, { headers: { ...authorization, "Last-Event-ID": cursor } });
-      expect(response.status).toBe(410);
-      expect(await response.json()).toMatchObject({ reason: "cursor_unknown" });
+      const recovered = await open("", { "Last-Event-ID": cursor });
+      expect(await recovered.next()).toContain("event: snapshot");
+      expect(await recovered.next()).toContain("event: done");
+      expect(await recovered.next()).toBeUndefined();
     }
     clock.advance(TERMINAL_RETENTION_MS);
-    const expired = await fetch(url + `?cursor=${events.cursor(4)}`, { headers: authorization });
-    expect(expired.status).toBe(410);
-    expect(await expired.json()).toMatchObject({ reason: "cursor_unknown" });
-    const missing = await fetch(url.replace("/turn/", "/missing/"), { headers: authorization });
-    expect(missing.status).toBe(410);
+    sweepChatEvents(host.store.db, clock);
+    host.store.db.update(turns).set({ draftText: "" }).where(eq(turns.id, turn.turn.id)).run();
+    const expired = await open(`?last_event_id=${events.cursor(4)}`);
+    expect(await expired.next()).toContain('event: snapshot\ndata: {"text":"头中尾\\n字"}');
+    expect(await expired.next()).toContain("event: done");
+    expect(await expired.next()).toBeUndefined();
+    const missing = await fetch(url.replace(turn.turn.id, turn.turn.conversation_id), { headers: authorization });
+    expect(missing.status).toBe(404);
     await missing.body?.cancel();
   } finally {
     for (const client of clients) {
@@ -121,8 +131,8 @@ test("空闲 SSE 按配置发送心跳，宿主停止中断等待后再关闭数
   try {
     const { token } = issueTestDevice(host);
     const events = new ChatEvents(host);
-    events.append({ streamId: "turn", kind: "delta", data: 1 });
-    const response = await fetch(`http://127.0.0.1:${gateway.port}/v2/streams/turn/events`, {
+    const turn = testTurn(host, token);
+    const response = await fetch(`http://127.0.0.1:${gateway.port}${turn.turn.stream_url}`, {
       headers: { Authorization: `Bearer ${token}`, "Last-Event-ID": events.cursor(1) },
     });
     const client = frames(response);

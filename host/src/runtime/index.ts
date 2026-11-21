@@ -10,11 +10,13 @@ import type { Store } from "../store/index.ts";
 import { ensureHousehold } from "../store/identity.ts";
 import { reconcileConversations } from "../store/conversation-lifecycle.ts";
 import { DEFAULT_HOST_NAME, DEFAULT_HOUSEHOLD_NAME, DEFAULT_MAX_MEMBERS } from "./config.ts";
+import type { Replier } from "../turns/types.ts";
 
 export interface HostEvents {
   "host:ready": { hostId: string };
   "jobs:wake": { queue: string };
   "chat:event": { streamId: string; seq: number };
+  "turn:wake": { turnId: string };
   "lease:acquired": { name: string; holder: string; epoch: number };
   "lease:lost": { name: string; holder: string; epoch: number };
 }
@@ -28,6 +30,7 @@ export interface HostConfig {
   householdName?: string;
   hostName?: string;
   maxMembers?: number;
+  replier?: Replier;
   onError?: (error: unknown, source: string) => void | Promise<void>;
 }
 

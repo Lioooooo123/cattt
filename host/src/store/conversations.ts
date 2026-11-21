@@ -9,6 +9,9 @@ import { getHostMeta } from "./host-meta.ts";
 import type { StoreDb } from "./index.ts";
 import { conversations, messages, participants } from "./schema/conversations.ts";
 import { members } from "./schema/identity.ts";
+import { turns } from "./schema/turns.ts";
+import { createTurn, initialTurn } from "./turn-writes.ts";
+import type { Append } from "./turn-writes.ts";
 
 export class ConversationNotFoundError extends Error {}
 export class NotPublisherError extends Error {}
@@ -64,6 +67,8 @@ function dto(row: MessageRow): Message {
     reply_to_message_id: row.replyToMessageId, turn_id: row.turnId, created_at: row.createdAt,
   };
 }
+
+export { dto as messageDto };
 
 function visible(db: Reader, actor: Actor, id: string) {
   const conversation = db.select().from(conversations).where(and(eq(conversations.id, id), isNull(conversations.deletedAt))).get();
@@ -154,6 +159,7 @@ export function readMessages(
 export function sendMessage(
   db: Pick<StoreDb, "transaction">, clock: Clock, actor: Actor, conversationId: string,
   input: { clientMessageId: string; text: string },
+  append?: Append,
 ) {
   const text = input.text.trim();
   if (input.clientMessageId.length < 1 || input.clientMessageId.length > 100 || text.length < 1 || text.length > 4000) {
@@ -173,14 +179,17 @@ export function sendMessage(
       if (existing.text !== text) {
         throw new IdempotencyConflictError();
       }
-      return { created: false, body: { message: dto(existing), turn: null } };
+      const original = existing.turnId ? tx.select().from(turns).where(eq(turns.id, existing.turnId)).get() : undefined;
+      return { created: false, body: { message: dto(existing), turn: original ? initialTurn(original) : null } };
     }
     const row = tx.insert(messages).values({
       ...businessRow(clock, hostId), conversationId, authorMemberId: actor.memberId, text, modality: "text",
       status: "complete", clientMessageId: input.clientMessageId, replyToMessageId: null, turnId: null,
     }).returning().get()!;
+    const turn = createTurn(tx, clock, conversationId, row.id, null, append);
+    tx.update(messages).set({ turnId: turn.id }).where(eq(messages.id, row.id)).run();
     tx.update(conversations).set({ ...revision(clock), rev: sql`${conversations.rev} + 1` })
       .where(eq(conversations.id, conversationId)).run();
-    return { created: true, body: { message: dto(row), turn: null } };
+    return { created: true, body: { message: dto({ ...row, turnId: turn.id }), turn: initialTurn(turn) } };
   }, { behavior: "immediate" });
 }

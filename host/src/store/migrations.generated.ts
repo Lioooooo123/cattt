@@ -79,5 +79,16 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795283431688,
     "hash": "00a203512319feb776a127ec7c8a1ee203e7c79230ae81c359d05f2974d80f03"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `turns` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`conversation_id` text NOT NULL,\n\t`trigger_message_id` text NOT NULL,\n\t`request_id` text,\n\t`status` text NOT NULL,\n\t`reply_message_id` text,\n\t`error_code` text,\n\t`cancel_reason` text,\n\t`visible_length` integer,\n\t`first_token_at` integer,\n\t`heartbeat_at` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`finished_at` integer,\n\t`draft_text` text NOT NULL,\n\t`event_seq` integer NOT NULL,\n\t`superseded_by_turn_id` text,\n\tFOREIGN KEY (`conversation_id`) REFERENCES `conversations`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`trigger_message_id`) REFERENCES `messages`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`reply_message_id`) REFERENCES `messages`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"turns_status\" CHECK(\"turns\".\"status\" IN ('queued','generating','completed','stopped','superseded','failed'))\n);\n",
+      "\nCREATE UNIQUE INDEX `turns_request_id_unique` ON `turns` (`request_id`);",
+      "\nCREATE INDEX `turns_pending` ON `turns` (`status`,`created_at`);",
+      "\nCREATE INDEX `turns_conversation` ON `turns` (`conversation_id`,`created_at`);"
+    ],
+    "bps": true,
+    "folderMillis": 1795284051025,
+    "hash": "23e9e3ed9483f19b556e50b6d809d26edaf963ddd170684b8659ee4768a9bf30"
   }
 ];

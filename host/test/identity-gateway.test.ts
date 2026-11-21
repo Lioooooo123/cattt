@@ -53,7 +53,7 @@ test("缺少或无效令牌、撤销设备、成员墓碑和远端宿主设备�
   const host = await startHost({ dataDir: directory, port: 0, lanHttpsPort: 0, clock }, [gateway]);
   const base = `http://127.0.0.1:${gateway.port}`;
   const unauthorized = async (authorization?: string) => {
-    for (const path of ["/v2/me", "/v2/members", "/v2/streams/unknown/events"]) {
+    for (const path of ["/v2/me", "/v2/members", "/v2/conversations/unknown/turns/unknown/stream"]) {
       const response = await fetch(base + path, {
         headers: authorization ? { Authorization: authorization } : undefined,
       });

@@ -3,6 +3,7 @@ import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } fro
 
 export { deviceCredentials, devices, households, hosts, memberInvites, members, pairingCodes } from "./identity.ts";
 export { conversations, messages, participants } from "./conversations.ts";
+export { turns } from "./turns.ts";
 
 export const chatEvents = sqliteTable("chat_events", {
   streamId: text("stream_id").notNull(),

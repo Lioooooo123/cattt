@@ -15,14 +15,14 @@ test("Gateway 健康检查与 JSON 404", async () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ok: true,
-      hostId: host.hostId,
-      protocolVersion: 1,
+      host_id: host.hostId,
+      protocol_version: 1,
     });
     for (const [path, method] of [["/missing", "GET"], ["/v2/healthz", "POST"]]) {
       const missing = await fetch(`${base}${path}`, { method });
       expect(missing.status).toBe(404);
       expect(missing.headers.get("content-type")).toContain("application/json");
-      expect(await missing.json()).toEqual({ error: "未找到接口" });
+      expect(await missing.json()).toEqual({ error: { code: "not_found", message: "未找到接口" } });
     }
   } finally {
     await host.stop();

@@ -22,7 +22,7 @@ test("Hono 实服区分两成员 Actor，成员名单共享且不泄露设备秘
   try {
     const issued = [issueTestDevice(host, "甲"), issueTestDevice(host, "乙")];
     const profiles = issued.map(({ memberId }, index) => ({
-      id: memberId, householdId: host.householdId, displayName: index === 0 ? "甲" : "乙", homeHostId: host.hostId,
+      id: memberId, household_id: host.householdId, display_name: index === 0 ? "甲" : "乙", home_host_id: host.hostId,
     }));
     for (const [index, device] of issued.entries()) {
       const headers = { Authorization: `Bearer ${device.token}` };
@@ -30,7 +30,7 @@ test("Hono 实服区分两成员 Actor，成员名单共享且不泄露设备秘
       expect(me.status).toBe(200);
       expect(await me.json()).toEqual({
         actor: {
-          memberId: device.memberId, deviceId: device.deviceId, hostId: host.hostId, householdId: host.householdId,
+          member_id: device.memberId, device_id: device.deviceId, host_id: host.hostId, household_id: host.householdId,
         },
         member: profiles[index],
         household: { id: host.householdId, name: "我们的家" },

@@ -98,7 +98,7 @@ devices 是可复制的设备生命周期记录（含 last_seen_at、revoked_at�
 
 resolveDeviceToken 仅接受归属本地 host_meta.host_id 的有效设备，拒绝未知/撤销/墓碑设备、墓碑成员及失效家庭/宿主；成功时通过 Clock 更新 last_seen_at、HLC 与 rev。Actor 为 `{ memberId, deviceId, hostId, householdId }`，由身份中间件建立，不从客户端自报字段推导。
 
-Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。成员邀请属于后续 R2 PR；设备凭证通过下述配对接口发放，不提供无配对码的设备注册。
+Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。设备凭证通过下述配对或成员邀请接口发放，不提供无短码的设备注册。
 
 `identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。会话级权限和 SSE 流归属检查留给 R3；当前 SSE 仅验证设备身份，不应视为已完成业务授权。
 
@@ -121,3 +121,15 @@ Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、
 - DELETE /host/devices/:id：撤销本宿主设备；GET /host/status 返回 LAN 状态、CA 指纹和设备列表。
 
 手机无需设备认证调用 POST /v2/pair `{ code, device_name }`，成功返回 `{ device_id, device_token, member, household }`，身份取自该码绑定的成员，而非共享“主人”。错误、过期或烧毁的码统一返回 401 `{ error: { code: "pairing_code_invalid" } }`。原始设备令牌只返回这一次，手机应放入 Keychain 的 ThisDeviceOnly 项，不写日志。POST /v2/device/unpair 需要 Actor，撤销当前设备，之后的认证请求返回 401。已有 SSE 连接的业务归属和后续授权仍按 R3 实现。
+
+## 成员引导、邀请与移除
+
+首次设置由宿主携带管理口令 POST /host/members `{ display_name }`，返回 member；仅家庭没有活跃成员时可用，否则 409 members_already_initialized。它同样尊重邀请预留名额；成员删除后的墓碑不占活跃名额。
+
+- 已配对成员 POST /v2/invites `{ display_name? }`，或管理员 POST /host/invites（可空体或同样的建议名称），返回 `{ invite_id, code, expires_at, invite_url }`。链接为 `maomao://invite?v=2&h=...&p=...&c=...&fp=...`，沿用本机地址、HTTPS 端口与 CA 指纹。
+- 活跃成员数加仍有效、未用、未撤销、未烧毁的邀请数不能超过 maxMembers（默认值仍由配置定义）；新签发无空位时返回 409 member_limit。撤销、过期和烧毁均释放预留名额。
+- 手机无需认证 POST /v2/invites/accept `{ code, display_name, device_name }`，返回 `{ member, device_id, device_token, household }`。名称由接受者最终填写，邀请中的 display_name 仅为建议。一个立即事务内复查成员上限、创建成员及设备并标记邀请已用；失败回滚全部写入。当前 home_host 为接受邀请的本宿主，跨 Mac 归属留给 R6。
+- DELETE /v2/invites/:id 仅允许邀请者撤销；成员不能撤销管理员或伴侣签发的邀请（403）。DELETE /host/invites/:id 允许管理员撤销本家庭邀请。
+- DELETE /host/members/:id 在一个立即事务中将成员设墓碑并撤销其全部设备，其令牌立即返回 401，为该成员签发的配对码也无法再兑换。未提供 /v2 成员互删接口。
+
+`member_invites` 是本机秘密表，不进入 change_log、复制或共享快照；只存短码哈希。邀请码与配对码共用 Crockford 格式、规范化及失败计数实现，邀请码有效期为 24 小时。格式错误返回 400、不计次数；每次合法失败累计到所有活跃未使用的邀请码，五次烧毁，单次使用。无效、过期、已用、已撤销或烧毁的邀请统一返回 401 invite_code_invalid；有效邀请在接受时若成员上限已满则返回 409 member_limit，不消耗邀请。邀请失败计数与设备配对失败计数分属各自本机表。

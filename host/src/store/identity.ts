@@ -97,7 +97,7 @@ export function listMembers(db: Pick<StoreDb, "select">, householdId: string) {
 }
 
 export function createMember(
-  db: StoreDb,
+  db: Pick<StoreDb, "transaction">,
   clock: Clock,
   input: { householdId: string; displayName: string; homeHostId: string; maxMembers?: number },
 ): string {
@@ -168,6 +168,21 @@ export function revokeDevice(db: Pick<StoreDb, "transaction">, clock: Clock, dev
       ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1`,
     }).where(and(eq(devices.id, deviceId), isNull(devices.revokedAt), isNull(devices.deletedAt)))
       .returning({ id: devices.id }).get() !== undefined;
+  }, { behavior: "immediate" });
+}
+
+export function removeMember(db: StoreDb, clock: Clock, householdId: string, memberId: string): boolean {
+  return db.transaction((tx) => {
+    const member = getMember(tx, memberId);
+    if (!member || member.householdId !== householdId) {
+      return false;
+    }
+    const update = revision(clock);
+    tx.update(members).set({ ...update, deletedAt: update.updatedAt, rev: sql`${members.rev} + 1` })
+      .where(eq(members.id, memberId)).run();
+    tx.update(devices).set({ ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1` })
+      .where(and(eq(devices.memberId, memberId), isNull(devices.revokedAt), isNull(devices.deletedAt))).run();
+    return true;
   }, { behavior: "immediate" });
 }
 

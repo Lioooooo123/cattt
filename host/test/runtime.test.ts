@@ -7,6 +7,9 @@ import { startHost } from "../src/runtime/index.ts";
 import type { Component, HostContext } from "../src/runtime/index.ts";
 import { getHostMeta } from "../src/store/host-meta.ts";
 import { configFromEnv } from "../src/runtime/config.ts";
+import { DEFAULT_MAX_MEMBERS } from "../src/runtime/config.ts";
+import { getHousehold } from "../src/store/identity.ts";
+import { hosts as hostRows } from "../src/store/schema/identity.ts";
 
 const directories: string[] = [];
 const hosts: Awaited<ReturnType<typeof startHost>>[] = [];
@@ -130,21 +133,30 @@ test("正常停止隔离同步错误和报告回调错误", async () => {
   expect(() => getHostMeta(host.store.db, "host_id")).toThrow();
 });
 
-test("空组件列表可运行，hostId 跨重启持久化", async () => {
-  const config = { dataDir: dataDir() };
+test("空组件列表可运行，hostId 与家庭跨重启持久化，名称来自配置", async () => {
+  const config = { dataDir: dataDir(), householdName: "共享的家", hostName: "卧室 Mac", maxMembers: 3 };
   const first = await startHost(config, []);
   hosts.push(first);
   const hostId = first.hostId;
+  const householdId = first.householdId;
+  expect(getHousehold(first.store.db, householdId)!.name).toBe(config.householdName);
+  expect(first.store.db.select().from(hostRows).get()!.displayName).toBe(config.hostName);
+  expect(first.config.maxMembers).toBe(3);
   expect(first.clock.hlc().nodeId).toBe(hostId);
   await first.stop();
   const second = await startHost(config, []);
   hosts.push(second);
   expect(second.hostId).toBe(hostId);
+  expect(second.householdId).toBe(householdId);
 });
 
 test("环境配置提供本机默认值并拒绝非法端口", () => {
   expect(configFromEnv({}).port).toBe(8788);
   expect(configFromEnv({}).hostname).toBe("127.0.0.1");
+  expect(configFromEnv({}).maxMembers).toBe(DEFAULT_MAX_MEMBERS);
+  expect(configFromEnv({})).toMatchObject({ householdName: "我们的家", hostName: "我的 Mac" });
+  expect(configFromEnv({ CATTT_HOUSEHOLD_NAME: "家", CATTT_HOST_NAME: "Mac" }))
+    .toMatchObject({ householdName: "家", hostName: "Mac" });
   expect(configFromEnv({}).dataDir).toEndWith("/.cattt/host");
   expect(configFromEnv({ CATTT_PORT: "0", CATTT_DATA_DIR: "/custom" }))
     .toMatchObject({ port: 0, dataDir: "/custom" });

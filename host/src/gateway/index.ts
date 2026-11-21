@@ -1,5 +1,14 @@
+import { Hono } from "hono";
 import type { Component, HostContext } from "../runtime/index.ts";
 import { ChatEvents } from "../chat-events/index.ts";
+import { requireActor } from "../identity/middleware.ts";
+import type { IdentityEnv } from "../identity/middleware.ts";
+import { getHousehold, getMember, listMembers } from "../store/identity.ts";
+
+function memberProfile(member: NonNullable<ReturnType<typeof getMember>>) {
+  const { id, householdId, displayName, homeHostId } = member;
+  return { id, householdId, displayName, homeHostId };
+}
 
 export class Gateway implements Component {
   readonly name = "gateway";
@@ -20,28 +29,37 @@ export class Gateway implements Component {
 
   start(ctx: HostContext): void {
     const events = new ChatEvents(ctx);
+    const app = new Hono<IdentityEnv>();
+    const auth = requireActor(ctx);
+    app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
+    app.get("/v2/me", auth, (c) => {
+      const actor = c.get("actor");
+      const member = getMember(ctx.store.db, actor.memberId);
+      const household = getHousehold(ctx.store.db, actor.householdId);
+      if (!member || !household) {
+        return c.json({ error: { code: "unauthorized" } }, 401);
+      }
+      return c.json({ actor, member: memberProfile(member), household: { id: household.id, name: household.name } });
+    });
+    app.get("/v2/members", auth, (c) => {
+      return c.json({ members: listMembers(ctx.store.db, c.get("actor").householdId).map(memberProfile) });
+    });
+    app.get("/v2/streams/:streamId/events", auth, (c) => {
+      let streamId: string;
+      try {
+        streamId = decodeURIComponent(new URL(c.req.url).pathname.split("/")[3]!);
+      } catch {
+        return c.json({ error: "事件流标识无效" }, 400);
+      }
+      return this.stream(c.req.raw, events, streamId,
+        c.req.header("last-event-id") ?? c.req.query("cursor") ?? null);
+    });
+    app.notFound((c) => c.json({ error: "未找到接口" }, 404));
     this.server = Bun.serve({
       hostname: ctx.config.hostname ?? "127.0.0.1",
       port: ctx.config.port ?? 8788,
       idleTimeout: 0,
-      fetch: (request) => {
-        const url = new URL(request.url);
-        if (request.method === "GET" && url.pathname === "/v2/healthz") {
-          return Response.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 });
-        }
-        const match = /^\/v2\/streams\/([^/]+)\/events$/.exec(url.pathname);
-        if (request.method === "GET" && match) {
-          let streamId: string;
-          try {
-            streamId = decodeURIComponent(match[1]!);
-          } catch {
-            return Response.json({ error: "事件流标识无效" }, { status: 400 });
-          }
-          return this.stream(request, events, streamId,
-            request.headers.get("last-event-id") ?? url.searchParams.get("cursor"));
-        }
-        return Response.json({ error: "未找到接口" }, { status: 404 });
-      },
+      fetch: app.fetch,
     });
   }
 

@@ -7,6 +7,8 @@ import { uuidv7 } from "../ids/index.ts";
 import { getHostMeta, setHostMeta } from "../store/host-meta.ts";
 import { openStore, writeTransaction } from "../store/index.ts";
 import type { Store } from "../store/index.ts";
+import { ensureHousehold } from "../store/identity.ts";
+import { DEFAULT_HOST_NAME, DEFAULT_HOUSEHOLD_NAME, DEFAULT_MAX_MEMBERS } from "./config.ts";
 
 export interface HostEvents {
   "host:ready": { hostId: string };
@@ -21,6 +23,9 @@ export interface HostConfig {
   port?: number;
   hostname?: string;
   clock?: Clock;
+  householdName?: string;
+  hostName?: string;
+  maxMembers?: number;
   onError?: (error: unknown, source: string) => void | Promise<void>;
 }
 
@@ -29,6 +34,7 @@ export interface HostContext {
   bus: EventBus<HostEvents>;
   clock: Clock;
   hostId: string;
+  householdId: string;
   config: HostConfig;
 }
 
@@ -82,12 +88,21 @@ export async function startHost(config: HostConfig, components: readonly Compone
       setHostMeta(db, "host_id", id);
       return id;
     });
+    const clock = config.clock ?? new SystemClock(hostId);
+    const maxMembers = config.maxMembers ?? DEFAULT_MAX_MEMBERS;
+    if (!Number.isSafeInteger(maxMembers) || maxMembers < 1) {
+      throw new RangeError("成员上限必须是正整数");
+    }
+    const householdName = config.householdName ?? DEFAULT_HOUSEHOLD_NAME;
+    const hostName = config.hostName ?? DEFAULT_HOST_NAME;
+    const householdId = ensureHousehold(store.db, clock, hostId, { householdName, hostName });
     const ctx: HostContext = {
       store,
       bus: new EventBus((error, topic) => report(error, `bus:${topic}`)),
-      clock: config.clock ?? new SystemClock(hostId),
+      clock,
       hostId,
-      config,
+      householdId,
+      config: { ...config, householdName, hostName, maxMembers },
     };
     for (const component of components) {
       await component.start(ctx);

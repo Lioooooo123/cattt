@@ -6,7 +6,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate && bun run scripts/embed-migrations.ts",
+    "build": "bun build --compile src/main.ts --outfile dist/cattt-host"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

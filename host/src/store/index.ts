@@ -1,10 +1,7 @@
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { fileURLToPath } from "node:url";
+import { migrateStore } from "./migrate.ts";
 import * as schema from "./schema/index.ts";
-
-const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
 export function openStore(path: string) {
   const raw = new Database(path, { create: true, strict: true });
@@ -18,7 +15,7 @@ export function openStore(path: string) {
     raw.exec("PRAGMA foreign_keys = ON");
 
     const db = drizzle(raw, { schema });
-    migrate(db, { migrationsFolder });
+    migrateStore(raw);
 
     return {
       db,

@@ -71,9 +71,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - name: 跨端规则（行为表、氛围关键帧、地点、场景版本、生成物）
         run: python3 tools/check_shared_rules.py
       - name: iOS 世界层逻辑测试
         run: sh tools/check_world_logic.sh
+      - name: 宿主：安装后端打包依赖
+        run: pnpm --dir server install --frozen-lockfile
+      - name: 宿主：构建捆绑资源与混合配置探针
+        run: |
+          bash desktop/macos/scripts/build-app.sh
+          node --input-type=module <<'NODE'
+          import { createRequire } from 'node:module';
+          import { resolve } from 'node:path';
+
+          const require = createRequire(resolve('server/scripts/bundle-host.mjs'));
+          const { build } = require(require.resolve('esbuild', { paths: [require.resolve('tsx')] }));
+          await build({
+            entryPoints: [resolve('desktop/macos/scripts/model-config-probe.ts')],
+            bundle: true,
+            platform: 'node',
+            target: 'node22',
+            format: 'esm',
+            outfile: resolve(process.env.RUNNER_TEMP, 'model-config-probe.mjs'),
+          });
+          NODE
       - name: macOS 宿主 SwiftPM 测试
+        env:
+          CATTT_HYBRID_CHECK_RESOURCES: ${{ github.workspace }}/desktop/macos/build/Cattt.app/Contents/Resources
+          CATTT_HYBRID_MODEL_PROBE: ${{ runner.temp }}/model-config-probe.mjs
+          CATTT_HYBRID_CHECK_DATA_ROOT: ${{ runner.temp }}
+          CATTT_MODEL_SETUP_RESOURCES: ${{ github.workspace }}/desktop/macos/build/Cattt.app/Contents/Resources
         run: swift test --package-path desktop/macos

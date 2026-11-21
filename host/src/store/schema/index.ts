@@ -1,6 +1,27 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const hostMeta = sqliteTable("host_meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+export const jobs = sqliteTable("jobs", {
+  id: text("id").primaryKey(),
+  queue: text("queue").notNull(),
+  payload: text("payload").notNull(),
+  status: text("status", { enum: ["queued", "running", "done", "dead"] }).notNull(),
+  attempts: integer("attempts").notNull(),
+  maxAttempts: integer("max_attempts").notNull(),
+  runAt: integer("run_at").notNull(),
+  lockedUntil: integer("locked_until"),
+  dedupeKey: text("dedupe_key"),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("jobs_active_dedupe").on(table.queue, table.dedupeKey)
+    .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('queued', 'running')`),
+  index("jobs_claim").on(table.queue, table.status, table.runAt),
+  check("jobs_status", sql`${table.status} IN ('queued', 'running', 'done', 'dead')`),
+]);

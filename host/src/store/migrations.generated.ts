@@ -26,5 +26,14 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795280227065,
     "hash": "b715921bd1e35e5cd032074c92e8671802529e16ddbaa5983fb9d1f349e343d3"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `chat_events` (\n\t`stream_id` text NOT NULL,\n\t`seq` integer NOT NULL,\n\t`kind` text NOT NULL,\n\t`data` text NOT NULL,\n\t`terminal` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\tPRIMARY KEY(`stream_id`, `seq`)\n);\n",
+      "\nCREATE INDEX `chat_events_created_at` ON `chat_events` (`created_at`);"
+    ],
+    "bps": true,
+    "folderMillis": 1795280738334,
+    "hash": "b0801c30c2e00705ef652d0cfb4054d8d927800dc548932ec585329531c430a1"
   }
 ];

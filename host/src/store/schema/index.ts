@@ -1,5 +1,17 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const chatEvents = sqliteTable("chat_events", {
+  streamId: text("stream_id").notNull(),
+  seq: integer("seq").notNull(),
+  kind: text("kind").notNull(),
+  data: text("data").notNull(),
+  terminal: integer("terminal", { mode: "boolean" }).notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.streamId, table.seq] }),
+  index("chat_events_created_at").on(table.createdAt),
+]);
 
 export const hostMeta = sqliteTable("host_meta", {
   key: text("key").primaryKey(),

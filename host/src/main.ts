@@ -1,9 +1,10 @@
+import { ChatEventSweeper } from "./chat-events/index.ts";
 import { Gateway } from "./gateway/index.ts";
 import { startHost } from "./runtime/index.ts";
 import { configFromEnv } from "./runtime/config.ts";
 
 async function main(): Promise<void> {
-  const host = await startHost(configFromEnv(process.env), [new Gateway()]);
+  const host = await startHost(configFromEnv(process.env), [new ChatEventSweeper(), new Gateway()]);
   const shutdown = () => {
     void host.stop().then(() => process.exit(0));
   };

@@ -385,7 +385,7 @@ public actor DesktopChatClient {
     }
 
     private static func endpoint(_ path: String) -> URL {
-        URL(string: path, relativeTo: loopbackURL.appending(path: "/"))!.absoluteURL
+        URL(string: "/" + path, relativeTo: loopbackURL)!.absoluteURL
     }
 
     private static func check(_ response: URLResponse, body: Data) throws {

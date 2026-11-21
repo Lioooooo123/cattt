@@ -13,6 +13,7 @@ export interface AppendChatEvent {
   kind: string;
   data: unknown;
   terminal?: boolean;
+  seqFloor?: number;
 }
 
 export class ChatStreamClosedError extends Error {
@@ -45,7 +46,7 @@ export function getChatStream(db: Pick<StoreDb, "select">, clock: Clock, streamI
   return { seq: row.seq, terminal, createdAt: row.createdAt };
 }
 
-export function appendChatEvent(db: StoreDb, clock: Clock, input: AppendChatEvent): number {
+export function appendChatEvent(db: Pick<StoreDb, "transaction">, clock: Clock, input: AppendChatEvent): number {
   if (!input.streamId || !input.kind || /[\r\n\0]/.test(input.kind)) {
     throw new TypeError("事件流和事件类型不能为空，事件类型不能包含换行或空字符");
   }
@@ -60,7 +61,10 @@ export function appendChatEvent(db: StoreDb, clock: Clock, input: AppendChatEven
     if (last?.terminal) {
       throw new ChatStreamClosedError(input.streamId);
     }
-    const seq = (last?.seq ?? 0) + 1;
+    if (input.seqFloor !== undefined && (!Number.isSafeInteger(input.seqFloor) || input.seqFloor < 0)) {
+      throw new RangeError("事件序号水位须为非负安全整数");
+    }
+    const seq = Math.max(last?.seq ?? 0, input.seqFloor ?? 0) + 1;
     if (!Number.isSafeInteger(seq)) {
       throw new RangeError("事件序号超出范围");
     }
@@ -77,7 +81,7 @@ export function appendChatEvent(db: StoreDb, clock: Clock, input: AppendChatEven
 }
 
 export function readChatEvents(
-  db: StoreDb,
+  db: Pick<StoreDb, "select">,
   clock: Clock,
   streamId: string,
   afterSeq = 0,

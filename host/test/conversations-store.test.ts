@@ -84,7 +84,7 @@ test("署名由 Actor 决定，幂等键按作者与会话隔离，冲突与外�
   const input = { clientMessageId: "one", text: "  你好  " };
   const first = sendMessage(db, clock, a.actor, group.id, input);
   expect(first.created).toBe(true);
-  expect(first.body.turn).toBeNull();
+  expect(first.body.turn).toMatchObject({ status: "queued", trigger_message_id: first.body.message.id });
   expect(first.body.message.author).toEqual({ kind: "member", member_id: a.actor.memberId });
   expect(first.body.message.text).toBe("你好");
   expect(sendMessage(db, clock, a.actor, group.id, { ...input, text: "你好" })).toEqual({ ...first, created: false });

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Conversation, Message, MessagePage } from "../src/conversations/types.ts";
+import type { Conversation, Message, MessagePage, Turn } from "../src/conversations/types.ts";
 import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
 import { businessRow } from "../src/store/business.ts";
@@ -63,8 +63,8 @@ test("两监听提供同一对话契约：两单聊一群聊、作者幂等、40
         const send = () => request(`/v2/conversations/${groupId}/messages`, tokens[i]!, "POST", { client_message_id: key, text: `  ${i}  ` });
         const posted = await send();
         expect(posted.status).toBe(201);
-        const result = await posted.json() as { message: Message; turn: null };
-        expect(result.turn).toBeNull();
+        const result = await posted.json() as { message: Message; turn: Turn };
+        expect(result.turn).toMatchObject({ status: "queued", trigger_message_id: result.message.id });
         expect(result.message.author).toEqual({ kind: "member", member_id: memberIds[i]! });
         expect(result.message.text).toBe(String(i));
         expect(Object.keys(result.message).sort()).toEqual([

@@ -27,3 +27,13 @@ export interface MessagePage {
   has_more_before: boolean;
   has_more_after: boolean;
 }
+
+export interface Turn {
+  id: string;
+  conversation_id: string;
+  status: "queued" | "generating" | "completed" | "stopped" | "superseded" | "failed";
+  trigger_message_id: string;
+  reply_message_id: string | null;
+  error_code: string | null;
+  stream_url: string;
+}

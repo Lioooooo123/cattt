@@ -86,7 +86,7 @@ Gateway 默认只监听 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置端口�
 
 `events.subscribe(streamId, cursor?, signal?)` 返回 `status: "ok"` 和异步迭代器，或 `status: "unknown"`。迭代器先回放后等待总线唤醒，并以 1 秒轮询兜底；跨批次排空尾部事件，到 terminal 后结束。通过 AbortSignal 中止等待并清理订阅。游标为不透明的 `<hostId>.<seq>`；不带游标从头读取。异宿主、格式错误、超出流尾、未知或过期的流返回 unknown，调用方应恢复快照；已读到终态的有效游标直接结束。订阅过程中流过期则结束，不伪造终态。
 
-`GET /v2/streams/:streamId/events` 提供 SSE，须携带设备 Bearer 令牌：`Last-Event-ID` 优先于 `?cursor=`，每条消息包含 id、event 和 JSON data。连接开始发送注释，每 15 秒发送心跳注释；客户端断开或宿主停止会清理订阅。未知游标在发送 SSE 之前返回 HTTP 410 JSON `{ error, reason: "cursor_unknown" }`。流的家庭/会话归属检查、业务表快照回退、取消、可见长度与取代控制属于 R3，当前不实现；默认只监听回环地址，不应将此接口暴露给不可信网络。
+R1 的 `/v2/streams/:streamId/events` 占位接口已移除。R3-2 改为下述具有会话授权、快照恢复的正式轮次流，未知游标不再返回 410；R1 的底层 ChatEvents 仍以 unknown 通知调用方恢复。
 
 ## 身份、家庭和设备凭证
 
@@ -100,7 +100,7 @@ resolveDeviceToken 仅接受归属本地 host_meta.host_id 的有效设备，拒
 
 Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、成员公开资料和家庭；`GET /v2/members` 返回该家庭的成员公开资料。这些接口及 SSE 通过 `Authorization: Bearer mm_dvc_...` 认证，失败统一返回 401 `{ error: { code: "unauthorized" } }`。设备凭证通过下述配对或成员邀请接口发放，不提供无短码的设备注册。
 
-`identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。会话级权限和 SSE 流归属检查留给 R3；当前 SSE 仅验证设备身份，不应视为已完成业务授权。
+`identity/access.ts` 的 can/ assertCan 要求同家庭；成员归属字段不是伴侣之间的隐私边界，两人均可读取家庭成员资源。canWriteAs 只允许以自己的 memberId 写入，跨家庭断言抛出 AccessDeniedError。对话、轮次及 SSE 使用 R3 的 canSeeConversation；同家庭不代表能通过设备 API 读取伴侣单聊。
 
 ## 局域网 HTTPS 与成员设备配对
 
@@ -124,11 +124,23 @@ Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、
 
 ## R3-1 对话与消息
 
-完整客户端参考见 [API v2 聊天契约](../docs/参考/API-v2-聊天契约.md)，包含尚待 R3-2 实现的 Turn、SSE、取消与重答，不能把文档中的目标接口视为全部已交付。
+完整客户端参考见 [API v2 聊天契约](../docs/参考/API-v2-聊天契约.md)，R3-2 已实现其中的 Turn、SSE、取消与重答；真实模型尚未接入。
 
 conversations、participants、messages 均带可复制业务列和墓碑。家庭创建群聊，成员创建时同事务建立其单聊并加入群聊，移除时更新参与者墓碑；启动幂等补齐 R2 已有成员。通用同家庭访问规则不代替 canSeeConversation：群聊要求参与者，单聊设备 API 只对拥有者可见（伴侣请求为 404），但不承诺存储保密。
 
-两个监听均提供 GET /v2/conversations、GET /v2/conversations/:id、GET/POST /v2/conversations/:id/messages。列表先群聊后本人单聊；历史按 HLC、ID 稳定分页，不使用全局 seq。发送以会话/作者/client_message_id 去重，同键不同文本 409；作者来自 Actor，非发布宿主写入 409 not_publisher。R3-1 不调用模型，发送响应 turn 始终 null。旧 R1 SSE 占位路由因既有 SSE/TLS 测试仍保留，不承载对话数据，R3-2 接入正式授权轮次流时替换。
+两个监听均提供 GET /v2/conversations、GET /v2/conversations/:id、GET/POST /v2/conversations/:id/messages。列表先群聊后本人单聊；历史按 HLC、ID 稳定分页，不使用全局 seq。发送以会话/作者/client_message_id 去重，同键不同文本 409；作者来自 Actor，非发布宿主写入 409 not_publisher。R3-1 的 turn=null 阶段已由 R3-2 下述轮次响应接续；协议仍允许未来静默策略返回 null。
+
+## R3-2 轮次与可注入生成器
+
+`turns` 是**发布宿主本机执行资源，永不复制、不进 change_log**，复制 messages 不触发再生成。除轮次/控制字段外，本机持久化 draft_text、event_seq 和 superseded_by_turn_id，分别用于增量丢失后的全文快照、清扫后不复用序号、以及取代终态恢复。新发送同事务存消息、初始 Turn、accepted，并取代本会话尚未发首 token 的 queued/generating 轮次；幂等重传返回初次 queued 响应，不改绑后续重答，最新状态另查 Turn。
+
+`HostConfig.replier` 注入 `reply({conversation, history, trigger, signal}) → AsyncIterable<string>`。history 默认最近 50 条、最多 100 条，只来自当前会话。**当前没有真实模型调用**；main 仅在没有配置 replier 时选择清楚标记的 DevelopmentEchoReplier，回复带“开发回复，未接入模型”。R3-3 替换这条开发生成路径。
+
+TurnRunner 使用进程内调度加持久恢复扫描，而不叠加 jobs 的重试/租期状态机：turns 已是执行真相，重答须显式 request_id，不能由队列重试悄悄再回复。250ms 轮询和提交后总线唤醒；每会话通过 `conversation:<id>` 租约串行，不同会话可并行。租期 10 秒、每 2 秒续租，单轮预算 45 秒；首 token 与取消/取代原子复核，draft/delta 同事务，最终猫消息与 terminal 同事务且 epoch-fenced。预算、轮询、心跳、历史大小可在构造参数配置以便测试。
+
+取消正在生成的轮次先持久化控制并返回 200 Turn，运行器响应信号后以租约 fencing 提交 stopped；queued 取消可直接终止。visible_length 按 UTF-16 单元取不超过生成长度的前缀，若边界正好劈开代理对则退一单元，避免落库半个字符；0 不创建猫消息。重复/终态取消不重写结果。生成器即便忽略 signal，运行器也停止等待，迟到结果不能发布。启动将心跳旧于 60 秒的 queued/generating 标记 failed/interrupted 并持久化 retryable error；运行期间扫描 stale generating，不重跑崩溃的旧生成。停止中断等待并收尾、释放租约。
+
+两个监听均提供契约中的 GET Turn、GET stream、POST cancel、POST messages/:messageId/reply。每个嵌套资源验证会话可见性及归属，写入复核发布宿主。SSE 优先 Last-Event-ID，否则 last_event_id；15 秒心跳（Gateway 可配置），提交后唤醒、1 秒持久轮询兜底。坏/异宿主/过期游标恢复 snapshot，而非 410；snapshot 以最新持久事件游标作为恢复水位，终态时从最终消息补齐 snapshot 与 terminal，两帧可共享该水位。断开清理订阅；旧 SSE/TLS 回归已迁移到正式轮次流。
 
 ## 成员引导、邀请与移除
 

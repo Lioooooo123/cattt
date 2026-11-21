@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect } from "node:tls";
-import { ChatEvents } from "../src/chat-events/index.ts";
+import { testTurn } from "./turn-fixture.ts";
 import { ManualClock, SystemClock } from "../src/clock/index.ts";
 import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
@@ -94,9 +94,10 @@ test("回环管理签发两成员配对码，HTTPS 仅信任本机 CA，解除�
   }
   const listed = await fetch(http + "/host/devices", { headers: adminHeaders });
   expect(await listed.json()).toMatchObject({ devices: members.map((member_id) => ({ member_id })) });
-  const events = new ChatEvents(host);
-  events.append({ streamId: "turn", kind: "done", data: {}, terminal: true });
-  const stream = await fetch(https + "/v2/streams/turn/events", {
+  const turn = testTurn(host, tokens[0]!.device_token);
+  turn.delta("喵");
+  turn.done();
+  const stream = await fetch(https + turn.turn.stream_url, {
     tls: { ca }, headers: { Authorization: `Bearer ${tokens[0]!.device_token}` },
   });
   expect(await stream.text()).toContain("event: done");
@@ -147,9 +148,9 @@ test("定时检查 IP 变化后重绑定 HTTPS，新 SAN 生效、原 SSE 持续
     householdId: host.householdId, homeHostId: host.hostId, displayName: "甲",
   });
   const { token } = createDevice(host.store.db, clock, { memberId, hostId: host.hostId, name: "手机" });
-  const events = new ChatEvents(host);
-  events.append({ streamId: "live", kind: "delta", data: "before" });
-  const stream = await fetch(https + "/v2/streams/live/events", {
+  const turn = testTurn(host, token);
+  turn.delta("before");
+  const stream = await fetch(https + turn.turn.stream_url, {
     tls: { ca }, headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(4000),
   });
   const reader = stream.body!.getReader();
@@ -174,8 +175,8 @@ test("定时检查 IP 变化后重绑定 HTTPS，新 SAN 生效、原 SSE 持续
   expect(changed).toBe(true);
   expect(gateway.lanPort).toBe(port);
   expect(readFileSync(join(directory, "tls/ca.crt"), "utf8")).toBe(ca);
-  events.append({ streamId: "live", kind: "delta", data: "after" });
-  events.append({ streamId: "live", kind: "done", data: {}, terminal: true });
+  turn.delta("after");
+  turn.done();
   for (;;) {
     const chunk = await reader.read();
     if (chunk.done) {
@@ -183,7 +184,7 @@ test("定时检查 IP 变化后重绑定 HTTPS，新 SAN 生效、原 SSE 持续
     }
     text += decoder.decode(chunk.value);
   }
-  expect(text).toContain('data: "after"');
+  expect(text).toContain('data: {"text":"after"}');
   expect(text).toContain("event: done");
   const health = await fetch(https + "/v2/healthz", { tls: { ca } });
   expect(await health.json()).toMatchObject({ ok: true });

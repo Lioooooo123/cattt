@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Component, HostContext } from "../runtime/index.ts";
-import { ChatEvents } from "../chat-events/index.ts";
+import { streamTurn } from "../turns/stream.ts";
 import { requireActor } from "../identity/middleware.ts";
 import type { IdentityEnv } from "../identity/middleware.ts";
 import { getHousehold, getMember, listMembers } from "../store/identity.ts";
@@ -64,13 +64,12 @@ export class Gateway implements Component {
       throw new RangeError("局域网 HTTPS 端口必须是 0 至 65535 的整数");
     }
     const identity = await initializeLan(ctx.config.dataDir, ctx.clock, this.options.tls);
-    const events = new ChatEvents(ctx);
     const app = new Hono<IdentityEnv>();
     const lanStatus = () => ({ enabled: this.lanPort !== undefined, port: this.lanPort ?? 0 });
     const auth = requireActor(ctx);
     app.route("/v2", phonePairingRoutes(ctx));
     app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
-    app.route("/v2", conversationRoutes(ctx));
+    app.route("/v2", conversationRoutes(ctx, (request, turnId, cursor) => this.stream(request, ctx, turnId, cursor)));
     app.get("/v2/healthz", (c) => c.json({ ok: true, hostId: ctx.hostId, protocolVersion: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");
@@ -83,16 +82,6 @@ export class Gateway implements Component {
     });
     app.get("/v2/members", auth, (c) => {
       return c.json({ members: listMembers(ctx.store.db, c.get("actor").householdId).map(memberProfile) });
-    });
-    app.get("/v2/streams/:streamId/events", auth, (c) => {
-      let streamId: string;
-      try {
-        streamId = decodeURIComponent(new URL(c.req.url).pathname.split("/")[3]!);
-      } catch {
-        return c.json({ error: "事件流标识无效" }, 400);
-      }
-      return this.stream(c.req.raw, events, streamId,
-        c.req.header("last-event-id") ?? c.req.query("cursor") ?? null);
     });
     app.notFound((c) => c.json({ error: "未找到接口" }, 404));
     const loopback = new Hono<IdentityEnv>();
@@ -168,13 +157,9 @@ export class Gateway implements Component {
     this.draining.clear();
   }
 
-  private stream(request: Request, events: ChatEvents, streamId: string, cursor: string | null): Response {
+  private stream(request: Request, ctx: HostContext, streamId: string, cursor: string | null): Response {
     const abort = new AbortController();
-    const subscription = events.subscribe(streamId, cursor, abort.signal);
-    if (subscription.status === "unknown") {
-      return Response.json({ error: "事件游标未知或已过期", reason: "cursor_unknown" }, { status: 410 });
-    }
-    const iterator = subscription.events;
+    const iterator = streamTurn(ctx, streamId, cursor, abort.signal);
     const encoder = new TextEncoder();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let closed = false;

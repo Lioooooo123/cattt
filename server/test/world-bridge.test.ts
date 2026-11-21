@@ -8,6 +8,7 @@ import { worldActions, worldSessions } from '../src/db/schema-world.ts';
 import { acknowledge, cancelRequestedActions, getActionStatus, getWorldState, moveCat, pollCommands, putState, registerSession } from '../src/world/service.ts';
 import { snapshotSchema, type WorldSnapshot } from '../src/world/protocol.ts';
 import { DEFAULT_TRAITS } from '../src/runtime/persona.ts';
+import { catTools } from '../src/runtime/tools.ts';
 const ids: string[] = [];
 async function fixture() {
   const [user] = await db.insert(users).values({ name: 'world-test' }).returning(); ids.push(user!.id);
@@ -25,6 +26,33 @@ async function fixture() {
 }
 afterAll(async () => { for (const id of ids) await db.delete(users).where(eq(users.id, id)); await sql.end(); });
 describe('世界动作真实 PG 状态机', () => {
+  it.each(['sit_together', 'move_cat'])('%s 未获接收确认时明确说明目的地不是当前位置', async name => {
+    const { input, snapshot } = await fixture();
+    await putState(input.catId, input.sessionId, input.generation, { ...snapshot, stateVersion: 2, companionSeat: 'pond' });
+    const tools = await catTools({ catId: input.catId, turnId: input.turnId, userMessageId: input.userMessageId });
+    const result = await tools[name]!.execute(name === 'sit_together' ? {} : { ...input, stateVersion: 2 }, new AbortController().signal);
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'accept_unknown', retryable: false }, data: {
+      status: 'requested', destinationId: 'pond', fact: '院子尚未确认接收这次动作，是否开始移动未知，没有到达或坐稳凭证。目的地只是请求目标，不是当前位置。',
+    } });
+    expect(await getWorldState(input.catId)).toMatchObject({ currentDestinationId: 'tree' });
+  });
+  it('动作被拒绝时明确说明未完成，到达成功不带失败事实', async () => {
+    const { input } = await fixture();
+    const action = await moveCat(input);
+    const tools = await catTools(input);
+    await db.update(worldActions).set({ status: 'rejected' }).where(eq(worldActions.id, action.id));
+    const failed = await tools.move_cat!.execute(input, new AbortController().signal);
+    expect(failed).toMatchObject({ status: 'failed', error: { code: 'action_rejected' }, data: {
+      status: 'rejected', fact: '这次动作未成功完成，没有到达或坐稳凭证。目的地只是请求目标，不是当前位置。',
+    } });
+    const other = await fixture();
+    const arrived = await moveCat(other.input);
+    await acknowledge(other.input.catId, arrived.id, other.input.sessionId, other.input.generation, 'accepted', other.snapshot);
+    await acknowledge(other.input.catId, arrived.id, other.input.sessionId, other.input.generation, 'arrived', { ...other.snapshot, stateVersion: 2, currentDestinationId: 'pond', targetDestinationId: 'pond' });
+    const success = await (await catTools(other.input)).move_cat!.execute(other.input, new AbortController().signal);
+    expect(success).toMatchObject({ status: 'succeeded', data: { status: 'arrived' } });
+    expect(success.data).not.toHaveProperty('fact');
+  });
   it('陪坐只采用设备给出的座位，并要真实坐稳才记到达', async () => {
     const { input, snapshot } = await fixture();
     const command = { ...input, activity: 'sit' as const };

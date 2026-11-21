@@ -18,5 +18,13 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795279724595,
     "hash": "db408155011f1c0b9e8c19300a8ccbb84f9a18c190c618fa18560974b6c084e5"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `leases` (\n\t`name` text PRIMARY KEY NOT NULL,\n\t`holder` text NOT NULL,\n\t`epoch` integer NOT NULL,\n\t`acquired_hlc` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL\n);\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795280227065,
+    "hash": "b715921bd1e35e5cd032074c92e8671802529e16ddbaa5983fb9d1f349e343d3"
   }
 ];

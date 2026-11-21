@@ -6,6 +6,15 @@ export const hostMeta = sqliteTable("host_meta", {
   value: text("value").notNull(),
 });
 
+export const leases = sqliteTable("leases", {
+  name: text("name").primaryKey(),
+  holder: text("holder").notNull(),
+  epoch: integer("epoch").notNull(),
+  acquiredHlc: text("acquired_hlc").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
   queue: text("queue").notNull(),

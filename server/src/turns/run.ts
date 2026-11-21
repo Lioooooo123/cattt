@@ -12,6 +12,7 @@ import { buildTurnContext, type TurnContext } from '../runtime/context.ts';
 import { chatSlot, classifyModelError, recordModelCall } from '../runtime/model.ts';
 import { getSoul } from '../soul/service.ts';
 import { runCatAgent } from '../runtime/agent.ts';
+import { createContextSummarizer } from '../llm/index.ts';
 import { catTools } from '../runtime/tools.ts';
 import { cancelRequestedActions } from '../world/service.ts';
 import { authorizeFirstToken, claimTurn, commitOutcome } from './store.ts';
@@ -156,6 +157,8 @@ async function runTurn(turnId: string) {
     };
     await runCatAgent({
       client: slot.client, extraBody: slot.extraBody, instructions: context.instructions, messages: context.messages,
+      contextSummarizer: createContextSummarizer({ client: slot.client, extraBody: slot.extraBody,
+        onUsage: (usage, latencyMs) => recordModelCall({ purpose: 'context_summary', modelId: slot.modelId, usage, latencyMs, turnId }) }),
       tools: await catTools({ catId: conv.catId, turnId, userMessageId: turn.userMessageId }), signal: abort.signal, guard,
       onText: async (chunk) => {
         const visible = tidy(chunk);

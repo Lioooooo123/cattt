@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { budgetMessages, toolSchemas } from './context.ts';
+import { toolSchemas } from './context.ts';
+import { fitContext, type ContextSummarizer } from './summary.ts';
 import { ModelOutputError } from './errors.ts';
 import { emptyUsage, type ModelClient, type ModelMessage, type ModelRequest, type ModelUsage, type ToolCall, type ToolResultPart } from './types.ts';
 
@@ -25,6 +26,7 @@ export type StepTool = {
   execute: (input: any, signal: AbortSignal, call: ToolCall) => Promise<unknown>;
 };
 export type ModelStepOptions = {
+  contextSummarizer?: ContextSummarizer;
   client: ModelClient;
   instructions: string;
   messages: ModelMessage[];
@@ -63,7 +65,7 @@ async function guarded(options: { signal: AbortSignal; guard: () => Promise<unkn
 /** 一次请求及顺序工具执行；返回增量消息供宿主提交检查点。 */
 export async function runModelStep(options: ModelStepOptions) {
   await guarded(options);
-  const messages = budgetMessages(options.instructions, options.messages, toolSchemas(options.tools), options.preserveUsers);
+  const messages = await fitContext({ ...options, tools: toolSchemas(options.tools) });
   let text = '', reasoning = '', finished = false;
   let finishReason = 'other';
   let usage = emptyUsage();
@@ -144,6 +146,7 @@ export async function runModelStep(options: ModelStepOptions) {
 }
 
 export type AgentOptions = {
+  contextSummarizer?: ContextSummarizer;
   client: ModelClient;
   extraBody?: Record<string, unknown>;
   instructions: string;

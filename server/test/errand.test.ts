@@ -1,6 +1,6 @@
 import { withdrawSources } from '../src/memory/control.ts';
 import { scriptedClient } from '../src/llm/testing.ts';
-import { emptyUsage } from '../src/llm/index.ts';
+import { emptyUsage, SUMMARY_INSTRUCTIONS } from '../src/llm/index.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -141,12 +141,13 @@ it.each([false,true])('worker搜索展开旧原话与撤回=%s，模型请求有
  const old=sourceId;
  await db.insert(messages).values(Array.from({length:32},()=>({conversationId:convId,role:'user' as const,text:'填充'})));
  const [anchor]=await db.insert(messages).values({conversationId:convId,role:'user',text:'请找那杯茶'}).returning();sourceId=anchor!.id;
- const t=await create('找那杯茶');let count=0;
+ const t=await create('找那杯茶');let count=0,summaryCount=0;
  const r=await runFor(t.ticket_id);
  const pair=(id:string,value:string):any[]=>[{role:'assistant',content:[{type:'tool-call',toolCallId:id,toolName:'get_time',input:{}}]},{role:'tool',content:[{type:'tool-result',toolCallId:id,toolName:'get_time',output:{type:'text',value}}]}];
  const checkpoint:any[]=[{role:'user',content:'用户托付：找那杯茶'},...pair('old','历史观察🙂'.repeat(30000)),...pair('new','当前观察')];
  await db.insert(runSteps).values({runId:r.id,step:0,messages:checkpoint,usage:{outputTokens:0}});
  const model=scriptedClient(async request=>{
+ if(request.system===SUMMARY_INSTRUCTIONS){summaryCount++;expect(request.stream).toBe(false);return [{type:'text-delta',delta:'早先工具观察已完成。'},{type:'finish',finishReason:'stop',usage:{...emptyUsage(),inputTokens:10,outputTokens:3}}];}
  count++;expect(Buffer.byteLength(JSON.stringify({prompt:request.messages,tools:request.tools}))).toBeLessThan(56*1024);
  expect(JSON.stringify(request.messages)).toContain('找那杯茶');
  if(count>1){expect((await runFor(t.ticket_id)).report.dependencies.messages).toContain(old);expect(JSON.stringify(request.messages)).toContain('桂花100%_茶');}
@@ -154,6 +155,7 @@ it.each([false,true])('worker搜索展开旧原话与撤回=%s，模型请求有
  return [{type:'tool-call',toolCallId:'history-'+count,toolName:count===1?'search_chat_history':count===2?'read_chat_history':'report',input,rawInput:JSON.stringify(input)},{type:'finish',finishReason:'tool-calls',usage:{...emptyUsage(),inputTokens:10,outputTokens:3}}];
  });
  await execute(t.ticket_id,{model,afterStep:async step=>{if(withdraw&&step===2)await db.transaction(tx=>withdrawSources(tx,catId,[old]));}});
+ expect(summaryCount).toBe(1);
  expect((await db.select().from(runSteps).where(and(eq(runSteps.runId,r.id),eq(runSteps.step,0))))[0]!.messages).toEqual(checkpoint);
  if(withdraw){expect(count).toBe(1);expect(await letters()).toHaveLength(0);return;}
  expect(count).toBe(3);expect((await letters())[0]!.text).toBe('桂花100%_茶');

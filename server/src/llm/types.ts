@@ -13,6 +13,7 @@ export type ModelMessage = { role: 'system'; content: string }
   | { role: 'tool'; content: ToolResultPart[] };
 export type InputSchema = z.ZodType | Record<string, unknown>;
 export type ModelRequest = {
+  stream?: boolean;
   system?: string;
   messages: ModelMessage[];
   tools?: { name: string; description?: string; inputSchema: InputSchema }[];

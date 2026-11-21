@@ -63,9 +63,9 @@ test("逻辑计数溢出推进物理时间，超出范围报错且状态保持�
   expect(end.hlc()).toEqual(stamp(0xffffffffffff, 0, "end"));
 });
 
-test("固定宽编码往返与比较顺序一致，包括节点前缀", () => {
+test("紧凑编码往返与比较顺序一致，包括节点前缀", () => {
   const values: Hlc[] = [];
-  const nodes = ["A", "a", "aa", "a-", "b", "_", "z".repeat(64)];
+  const nodes = ["A", "a", "aa", "ab", "a-", "b", "_", "z".repeat(64)];
   let seed = 42;
   for (let i = 0; i < 300; i += 1) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -73,11 +73,13 @@ test("固定宽编码往返与比较顺序一致，包括节点前缀", () => {
   }
   values.push(stamp(0, 0, "A"), stamp(0xffffffffffff, 0xffffffff, "z"));
   for (const value of values) {
-    expect(encodeHlc(value).length).toBe(150);
+    expect(encodeHlc(value).length).toBe(22 + value.nodeId.length);
     expect(parseHlc(encodeHlc(value))).toEqual(value);
   }
   expect([...values].sort(compareHlc).map(encodeHlc))
     .toEqual(values.map(encodeHlc).sort());
+  expect(encodeHlc(stamp(1, 2, "ab"))).toBe("000000000001-00000002-ab");
+  expect(encodeHlc(stamp(1, 1, "a")) < encodeHlc(stamp(1, 1, "ab"))).toBe(true);
   for (let i = 1; i < nodes.length; i += 1) {
     const left = stamp(1, 1, nodes[i - 1]!);
     const right = stamp(1, 1, nodes[i]!);
@@ -88,7 +90,14 @@ test("固定宽编码往返与比较顺序一致，包括节点前缀", () => {
 });
 
 test("拒绝空编码、非法节点、非法时间和非法配置", () => {
-  for (const encoded of ["", "bad", "0".repeat(150)]) {
+  for (const encoded of [
+    "",
+    "bad",
+    "000000000000-00000000-",
+    "000000000000-00000000-中文",
+    `000000000000-00000000-${"a".repeat(65)}`,
+    "00000000000A-00000000-a",
+  ]) {
     expect(() => parseHlc(encoded)).toThrow();
   }
   for (const node of ["", "中文", "a".repeat(65)]) {

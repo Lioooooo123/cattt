@@ -35,18 +35,17 @@ export function encodeHlc(value: Hlc): string {
   validateHlc(value);
   const physical = value.physicalMs.toString(16).padStart(12, "0");
   const logical = value.logical.toString(16).padStart(8, "0");
-  const node = Buffer.from(value.nodeId, "ascii").toString("hex").padEnd(128, "0");
-  return `${physical}-${logical}-${node}`;
+  return `${physical}-${logical}-${value.nodeId}`;
 }
 
 export function parseHlc(encoded: string): Hlc {
-  if (!/^[0-9a-f]{12}-[0-9a-f]{8}-[0-9a-f]{128}$/.test(encoded)) {
+  if (!/^[0-9a-f]{12}-[0-9a-f]{8}-[A-Za-z0-9_-]{1,64}$/.test(encoded)) {
     throw new TypeError("无效的 HLC 编码");
   }
   const value: Hlc = {
     physicalMs: Number.parseInt(encoded.slice(0, 12), 16),
     logical: Number.parseInt(encoded.slice(13, 21), 16),
-    nodeId: Buffer.from(encoded.slice(22), "hex").toString("ascii").replace(/\0+$/, ""),
+    nodeId: encoded.slice(22),
   };
   validateHlc(value);
   if (encodeHlc(value) !== encoded) {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { afterAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { scriptedClient } from '../src/llm/testing.ts';
 import { emptyUsage, type ModelClient, type ModelEvent } from '../src/llm/index.ts';
 import { and, asc, eq } from 'drizzle-orm';
@@ -18,6 +18,8 @@ import { hashToken } from '../src/auth-token.ts';
 import { registerDevice, processPush } from '../src/push/service.ts';
 import { closeQueues } from '../src/queue.ts';
 import { config } from '../src/config.ts';
+import * as timeTools from '../src/runtime/time.ts';
+import * as weatherTools from '../src/runtime/weather.ts';
 
 const day = new Date().toISOString().slice(0, 10);
 const now = new Date(day + 'T12:00:00Z');
@@ -76,6 +78,32 @@ it('worker 将无效 report 整批拒绝、持久化修正检查点，并在下�
   expect(steps[0]!.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ toolCallId: 'invalid-report', output: { value: { error: { code: 'invalid_tool_input' } } } }] });
   expect(steps[1]!.usage).toEqual({ outputTokens: 8 });
   expect((await ticket(t.ticket_id)).stage).toBe('ready'); expect((await letters())[0]!.text).toContain('周末可以在家休息');
+});
+
+it('工具执行中的网络类错误不会重试已成功的前序工具', async () => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  let timeExecutions = 0, weatherExecutions = 0;
+  const createTimeTool = timeTools.timeTool;
+  const timeSpy = vi.spyOn(timeTools, 'timeTool').mockImplementation((clock, zone) => {
+    const tool = createTimeTool(clock, zone);
+    return { ...tool, execute: async (input, signal) => { timeExecutions++; return tool.execute(input, signal); } };
+  });
+  const networkError = Object.assign(new Error('fetch failed'), { code: 'ECONNRESET' });
+  const weatherSpy = vi.spyOn(weatherTools.OpenMeteoWeatherProvider.prototype, 'query').mockImplementation(async () => {
+    weatherExecutions++; throw networkError;
+  });
+  const model = scriptedClient([[
+    { type: 'tool-call', toolCallId: 'time-call', toolName: 'get_time', input: {}, rawInput: '{}' },
+    { type: 'tool-call', toolCallId: 'weather-call', toolName: 'get_weather', input: { city: '上海', kind: 'current' }, rawInput: '{"city":"上海","kind":"current"}' },
+    { type: 'finish', finishReason: 'tool-calls', usage: { ...emptyUsage(), inputTokens: 10, outputTokens: 6 } },
+  ]]);
+  try {
+    await processErrand(r!.id, { now: () => now, model });
+    expect(model.requests).toHaveLength(1);
+    expect(timeExecutions).toBe(1); expect(weatherExecutions).toBe(1);
+  } finally {
+    timeSpy.mockRestore(); weatherSpy.mockRestore();
+  }
 });
 
 it('重启从检查点恢复修正额度，不允许第二个无效批次再获得修正', async () => {

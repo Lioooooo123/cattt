@@ -203,6 +203,30 @@ describe('单步与检查点', () => {
     expect(JSON.stringify(rejected)).not.toContain('private-value'); expect(JSON.stringify(rejected)).not.toContain('Expected number');
   });
 
+  it('结构诊断最多五项且每项有界，不泄漏自定义错误或输入值', async () => {
+    const root = 'root'.repeat(20), branch = 'branch'.repeat(15);
+    const leaves = Object.fromEntries(Array.from({ length: 7 }, (_, index) => [`leaf${index}`.repeat(20),
+      z.string().refine(() => false, 'private custom Zod message')]));
+    const schema = z.object({ [root]: z.object({ [branch]: z.object(leaves) }) });
+    const input = { [root]: { [branch]: Object.fromEntries(Object.keys(leaves).map((key, index) => [key, `private input ${index}`])) } };
+    const client = scriptedClient([step('', [{ name: 'lookup', id: 'bounded', input }])]);
+    const result = await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, recoverToolValidation: true,
+      tools: { lookup: { description: '', inputSchema: schema, execute: async () => ({}) } } });
+    const message = result.responseMessages[1];
+    if (!message || message.role !== 'tool') throw new Error('missing correction result');
+    const outputPart = message.content[0]!.output;
+    if (outputPart.type !== 'json') throw new Error('unexpected correction result type');
+    const output = outputPart.value as { data: { issues: { code: string; path: string }[] } };
+    expect(output.data.issues).toHaveLength(5);
+    for (const issue of output.data.issues) {
+      expect(issue.path.length).toBeLessThanOrEqual(120);
+      expect(JSON.stringify(issue).length).toBeLessThanOrEqual(200);
+    }
+    const serialized = JSON.stringify(message);
+    expect(serialized).not.toContain('private custom Zod message');
+    expect(serialized).not.toContain('private input');
+  });
+
   it('重复或空调用 ID、截断结束原因和未结束流都绝不执行', async () => {
     const duplicate = scriptedClient([step('', [{ name: 'report', id: 'same' }, { name: 'report', id: 'same' }])]);
     const emptyId = scriptedClient([step('', [{ name: 'report', id: '' }])]);
@@ -221,13 +245,13 @@ describe('单步与检查点', () => {
   });
 
   it('使用 Zod 转换后的输入执行', async () => {
-    const client = scriptedClient([step('', [{ name: 'report', id: 'converted', input: { name: '猫' } }])]);
+    const client = scriptedClient([step('', [{ name: 'report', id: 'converted', input: { name: 'cat' } }])]);
     let received = '';
     await runModelStep({ client, instructions: '', messages: [], signal: new AbortController().signal, guard: async () => {}, tools: {
       report: { description: '', inputSchema: z.object({ name: z.string() }).transform(value => ({ name: value.name.toUpperCase() })),
         execute: async input => { received = input.name; return {}; } },
     } });
-    expect(received).toBe('猫'.toUpperCase());
+    expect(received).toBe('CAT');
   });
 
   it('中止信号与验证失败持久化异常都不会进入自动修正', async () => {
@@ -259,6 +283,7 @@ describe('前台有界工具修正', () => {
     const result = await run(client, { lookup: { description: '查找', inputSchema: z.object({ count: z.number() }),
       execute: async ({ count }) => { executed++; return { ...observation, data: { count } }; } } }, { maxSteps: 3 });
     expect(client.requests).toHaveLength(3); expect(client.requests[1]!.system).toContain('上一批工具调用已整体拒绝');
+    expect(client.requests[2]!.system).not.toContain('上一批工具调用已整体拒绝');
     expect(executed).toBe(1);
     expect(result.traces.map(trace => [trace.callId, trace.output?.error?.code, trace.output?.status])).toEqual([
       ['bad', undefined, undefined], ['bad', 'invalid_tool_input', 'failed'], ['good', undefined, undefined], ['good', undefined, 'succeeded'],
@@ -266,17 +291,35 @@ describe('前台有界工具修正', () => {
   });
 
   it('第二个无效批次严格失败，不增加隐藏请求或工具执行', async () => {
-    const client = scriptedClient([step('', [{ name: 'lookup', id: 'one', input: { count: 'bad' } }), step('', [{ name: 'lookup', id: 'two', input: { count: 'bad' } })]);
+    const client = scriptedClient([
+      step('', [{ name: 'lookup', id: 'one', input: { count: 'bad' } }]),
+      step('', [{ name: 'lookup', id: 'two', input: { count: 'bad' } }]),
+    ]);
     let executed = 0;
-    await expect(run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } })).rejects.toBeInstanceOf(ModelOutputError);
+    await expect(run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } })).rejects.toBeInstanceOf(ModelOutputError);
     expect(client.requests).toHaveLength(2); expect(executed).toBe(0);
+  });
+
+  it('成功修正后额度仍耗尽，后续无效批次严格失败', async () => {
+    const client = scriptedClient([
+      step('', [{ name: 'lookup', id: 'first-invalid', input: { count: 'bad' } }]),
+      step('', [{ name: 'lookup', id: 'corrected', input: { count: 1 } }]),
+      step('', [{ name: 'lookup', id: 'later-invalid', input: { count: 'bad' } }]),
+    ]);
+    let executed = 0;
+    await expect(run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } }, { maxSteps: 4 })).rejects.toBeInstanceOf(ModelOutputError);
+    expect(client.requests).toHaveLength(3);
+    expect(client.requests[1]!.system).toContain('上一批工具调用已整体拒绝');
+    expect(client.requests[2]!.system).not.toContain('上一批工具调用已整体拒绝');
+    expect(executed).toBe(1);
   });
 
   it('拒绝批次计入工具预算并消耗一个普通步骤', async () => {
     const client = scriptedClient([step('', [{ name: 'lookup', id: 'rejected', input: { count: 'bad' } }]), step('回答')]);
     let executed = 0;
     await run(client, { lookup: { description: '', inputSchema: z.object({ count: z.number() }), execute: async () => { executed++; return observation; } } }, { maxTools: 1, maxSteps: 2 });
-    expect(client.requests).toHaveLength(2); expect(client.requests[1]!.toolChoice).toBe('none'); expect(executed).toBe(0);
+    expect(client.requests).toHaveLength(2); expect(client.requests[1]!.toolChoice).toBe('none');
+    expect(client.requests[1]!.system).not.toContain('上一批工具调用已整体拒绝'); expect(executed).toBe(0);
   });
 
   it('整批拒绝时不执行 finish_tools，修正请求仍处于工具阶段', async () => {

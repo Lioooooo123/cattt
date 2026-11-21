@@ -5,7 +5,9 @@ import { z } from 'zod';
 export const INPUT_BUDGET = 56 * 1024;
 export function toolSchemas(tools: Record<string, { description?: string; inputSchema?: unknown }>) {
   return Object.fromEntries(Object.entries(tools).map(([name, t]) => [name, { description: t.description,
-    inputSchema: t.inputSchema instanceof z.ZodType ? z.toJSONSchema(t.inputSchema) : t.inputSchema }]));
+    inputSchema: t.inputSchema instanceof z.ZodType
+      ? z.toJSONSchema(t.inputSchema instanceof z.ZodPipe ? t.inputSchema.in : t.inputSchema)
+      : t.inputSchema }]));
 }
 export function estimateRequest(instructions: string, messages: ModelMessage[], tools: unknown): number {
   return Buffer.byteLength(JSON.stringify({ instructions, messages, tools }), 'utf8') + 1024;

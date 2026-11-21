@@ -11,6 +11,7 @@ import { ensureHousehold } from "../store/identity.ts";
 import { reconcileConversations } from "../store/conversation-lifecycle.ts";
 import { DEFAULT_HOST_NAME, DEFAULT_HOUSEHOLD_NAME, DEFAULT_MAX_MEMBERS } from "./config.ts";
 import type { Replier } from "../turns/types.ts";
+import type { ModelConfig } from "../llm/config.ts";
 
 export interface HostEvents {
   "host:ready": { hostId: string };
@@ -31,6 +32,7 @@ export interface HostConfig {
   hostName?: string;
   maxMembers?: number;
   replier?: Replier;
+  model?: ModelConfig;
   onError?: (error: unknown, source: string) => void | Promise<void>;
 }
 

@@ -13,6 +13,7 @@ import { turns } from "./schema/turns.ts";
 import { chatEvents as chatEventTable } from "./schema/index.ts";
 import { active, createTurn, turnDto, turnEvent } from "./turn-writes.ts";
 import type { Append, TurnDb, TurnRow } from "./turn-writes.ts";
+import { retryableModelCode } from "../llm/errors.ts";
 
 export interface TurnFence { name: string; holder: string; epoch: number }
 
@@ -130,7 +131,7 @@ export function terminalEvent(row: TurnRow) {
     return { kind: "superseded", data: { turn_id: row.id, by_turn_id: row.supersededByTurnId } };
   }
   if (row.status === "failed") {
-    return { kind: "error", data: { code: row.errorCode, retryable: row.errorCode !== "conversation_unavailable" } };
+    return { kind: "error", data: { code: row.errorCode, retryable: row.errorCode !== "conversation_unavailable" && retryableModelCode(row.errorCode ?? "") } };
   }
   return { kind: "done", data: { message_id: row.replyMessageId, status: row.status } };
 }

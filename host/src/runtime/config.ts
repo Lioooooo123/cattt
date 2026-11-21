@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostConfig } from "./index.ts";
+import { modelConfigFromEnv } from "../llm/config.ts";
 
 export const DEFAULT_MAX_MEMBERS = 2;
 export const DEFAULT_HOUSEHOLD_NAME = "我们的家";
@@ -25,5 +26,6 @@ export function configFromEnv(env: Record<string, string | undefined>): HostConf
     householdName: env.CATTT_HOUSEHOLD_NAME ?? DEFAULT_HOUSEHOLD_NAME,
     hostName: env.CATTT_HOST_NAME ?? DEFAULT_HOST_NAME,
     maxMembers: DEFAULT_MAX_MEMBERS,
+    model: modelConfigFromEnv(env),
   };
 }

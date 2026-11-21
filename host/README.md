@@ -1,6 +1,6 @@
 # 新宿主后端
 
-R1 地基：存储、时间、单进程组件运行时与健康检查 Gateway。与 `../server/` 并行建设，尚未接入客户端或 macOS 宿主。使用 `.bun-version` 指定的 Bun 版本。
+R1 地基、R2 身份与 R3 对话已实现；iOS v2 可独立接入。与 `../server/` 并行建设，尚未替换旧服务或接入 macOS 宿主打包。使用 `.bun-version` 指定的 Bun 版本。
 
 在本目录执行：
 
@@ -126,7 +126,7 @@ Gateway 使用 Hono，`GET /v2/healthz` 仍公开。`GET /v2/me` 返回 actor、
 
 ## R3-1 对话与消息
 
-完整客户端参考见 [API v2 聊天契约](../docs/参考/API-v2-聊天契约.md)，R3-2 已实现其中的 Turn、SSE、取消与重答；真实模型尚未接入。
+完整客户端参考见 [API v2 聊天契约](../docs/参考/API-v2-聊天契约.md)，R3 已实现对话、消息、Turn、SSE、取消、重答与下述真实模型接入。
 
 conversations、participants、messages 均带可复制业务列和墓碑。家庭创建群聊，成员创建时同事务建立其单聊并加入群聊，移除时更新参与者墓碑；启动幂等补齐 R2 已有成员。通用同家庭访问规则不代替 canSeeConversation：群聊要求参与者，单聊设备 API 只对拥有者可见（伴侣请求为 404），但不承诺存储保密。
 
@@ -136,13 +136,37 @@ conversations、participants、messages 均带可复制业务列和墓碑。家�
 
 `turns` 是**发布宿主本机执行资源，永不复制、不进 change_log**，复制 messages 不触发再生成。除轮次/控制字段外，本机持久化 draft_text、event_seq 和 superseded_by_turn_id，分别用于增量丢失后的全文快照、清扫后不复用序号、以及取代终态恢复。新发送同事务存消息、初始 Turn、accepted，并取代本会话尚未发首 token 的 queued/generating 轮次；幂等重传返回初次 queued 响应，不改绑后续重答，最新状态另查 Turn。
 
-`HostConfig.replier` 注入 `reply({conversation, history, trigger, signal}) → AsyncIterable<string>`。history 默认最近 50 条、最多 100 条，只来自当前会话。**当前没有真实模型调用**；main 仅在没有配置 replier 时选择清楚标记的 DevelopmentEchoReplier，回复带“开发回复，未接入模型”。R3-3 替换这条开发生成路径。
+`HostConfig.replier` 可注入 `reply({conversation, history, trigger, signal}) → AsyncIterable<string>` 覆盖生成器。history 默认最近 50 条、最多 100 条，只来自当前会话。未显式注入时，main 的 TurnRunner 按下述模型配置选择 ChatReplier 或开发回声，不因模型缺少密钥而退回回声。
 
 TurnRunner 使用进程内调度加持久恢复扫描，而不叠加 jobs 的重试/租期状态机：turns 已是执行真相，重答须显式 request_id，不能由队列重试悄悄再回复。250ms 轮询和提交后总线唤醒；每会话通过 `conversation:<id>` 租约串行，不同会话可并行。租期 10 秒、每 2 秒续租，单轮预算 45 秒；首 token 与取消/取代原子复核，draft/delta 同事务，最终猫消息与 terminal 同事务且 epoch-fenced。预算、轮询、心跳、历史大小可在构造参数配置以便测试。
 
 取消正在生成的轮次先持久化控制并返回 200 Turn，运行器响应信号后以租约 fencing 提交 stopped；queued 取消可直接终止。visible_length 按 UTF-16 单元取不超过生成长度的前缀，若边界正好劈开代理对则退一单元，避免落库半个字符；0 不创建猫消息。重复/终态取消不重写结果。生成器即便忽略 signal，运行器也停止等待，迟到结果不能发布。启动将心跳旧于 60 秒的 queued/generating 标记 failed/interrupted 并持久化 retryable error；运行期间扫描 stale generating，不重跑崩溃的旧生成。停止中断等待并收尾、释放租约。
 
 两个监听均提供契约中的 GET Turn、GET stream、POST cancel、POST messages/:messageId/reply。每个嵌套资源验证会话可见性及归属，写入复核发布宿主。SSE 优先 Last-Event-ID，否则 last_event_id；15 秒心跳（Gateway 可配置），提交后唤醒、1 秒持久轮询兜底。坏/异宿主/过期游标恢复 snapshot，而非 410；snapshot 以最新持久事件游标作为恢复水位，终态时从最终消息补齐 snapshot 与 terminal，两帧可共享该水位。断开清理订阅；旧 SSE/TLS 回归已迁移到正式轮次流。
+
+## R3-3 模型回复
+
+`llm/` 是模型网络请求的唯一归属。最小移植旧 `server/src/llm/openai-compatible.ts` 的自建客户端：OpenAI 兼容 POST /chat/completions、流式 UTF-8/SSE、思考与正文分离、取消、结束原因和中断检测。没有引入模型 SDK；当前聊天不用工具调用、循环、结构化提取或上下文摘要，故不移植旧 loop/summary 等未使用模块。ChatReplier 只发布正文，单次请求最多 1024 输出 token，并沿用轮次的 45 秒预算、租约与取消机制，不在吐字后自动重试模型。
+
+环境名沿用旧服务中适用的聊天设置（配置从进程环境读取，不读取 `server/.env`）：
+
+| 环境变量 | 行为 |
+|---|---|
+| MODEL_PROVIDER | 未设置或 echo：DevelopmentEchoReplier，正文标注“开发回复，未接入模型”；mock：固定流式假模型；openai-compatible / deepseek：ChatReplier 调用对应服务 |
+| OPENAI_COMPAT_BASE_URL | 默认 http://127.0.0.1:11434/v1；仅 HTTP(S)，URL 不承载用户名/密码 |
+| OPENAI_COMPAT_MODEL | 兼容来源默认模型名 |
+| MAOMAO_OPENAI_COMPAT_API_KEY | 可选兼容服务密钥，本机服务一般不需要 |
+| MAOMAO_DEEPSEEK_API_KEY | DeepSeek 密钥；默认模型 deepseek-flash |
+| CHAT_PROVIDER / CHAT_MODEL | 聊天槽位覆盖全局来源/模型；全局 mock 时不启用真实来源 |
+| CHAT_THINKING | enabled / disabled，默认 disabled |
+| OPENAI_COMPAT_THINKING_PARAM | none / reasoning_effort（默认）/ chat_template_kwargs，沿用旧服务的思考开关编码 |
+| MOCK_DELAY_MS | mock 每个文本块间隔，默认 40ms；测试可设 0 |
+
+程序调用可用 `modelConfigFromEnv(...)` 生成 `HostConfig.model`，或直接注入 Replier；未配置模型名/必需密钥仍允许宿主提供身份和 API 服务，轮次以 model_auth 失败。错误分类沿用 `server/src/runtime/model.ts` 的 classifyModelError：401/403/缺配置 → model_auth，402 → model_quota，400/422 → model_bad_request，均不可重试；429、5xx、网络/流格式错误 → model_error，可重试。model_daily_budget / model_input_budget 同样不可重试，保留旧分类语义，但本批未移植账本或准入预算。只持久化错误码，SSE 回放/快照从码恢复同一 retryable；不记录密钥、供应商响应体或内部错误细节。mock 默认不保留请求，测试可显式捕获提示词。
+
+旧聊天提示词入口为 `server/src/turns/run.ts` → `runtime/context.ts` 的 buildTurnContext → `runtime/persona.ts` 的 personaBlock。当前复用团子“外表有些高冷，内心十分细腻”的底色与简短聊天、少卖萌、不说教、不编造、接受更正等原措辞，不伪造工具保存凭证。群聊 system 明确列出本会话成员名称，每条成员消息逐行署名；单聊仅标明该成员，不读取另一单聊。上下文只有本会话的有界近期消息；重答目标不在末尾时另附该条触发原话，避免旧消息重答丢失目标。
+
+**阶段边界：R3 聊天已完成；完整上下文装配、长期记忆、soul 和边界存储/控制属于 R4，本批未移植。** 世界工具、托付、多步骤代理和跨 Mac 复制也不在当前聊天实现中；提示词明确不声称这些操作已完成。真实 LAN HTTPS 的双成员测试验证两单聊与群聊独立、模型提示词无串线、分页、回复落库和错误恢复；编译产物也通过 mock 聊天及 SIGTERM 验证。
 
 ## 成员引导、邀请与移除
 

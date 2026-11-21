@@ -4,6 +4,9 @@ struct HostMenu: App {
     @NSApplicationDelegateAdaptor(HostDelegate.self) var delegate
     @StateObject private var model = HostModel.shared
     var body: some Scene {
+        Window("小院", id: "yard") { CompanionWindow(hostModel: model) }
+            .defaultSize(width: 1200, height: 780)
+            .windowResizability(.contentMinSize)
         MenuBarExtra {
             HostMenuContent(model: model)
         } label: {
@@ -22,10 +25,24 @@ private struct HostMenuLabel: View {
     @ObservedObject var model: HostModel
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Label("团子", systemImage: model.icon).onAppear { model.start() }
-            .onChange(of: model.showLocalModelSetup) { _, show in
-                if show { openWindow(id: "local-model"); NSApp.activate(ignoringOtherApps: true); model.showLocalModelSetup = false }
+        Label {
+            Text("团子状态菜单")
+        } icon: {
+            if let icon = NSImage(systemSymbolName: model.icon, accessibilityDescription: "团子状态菜单") {
+                Image(nsImage: icon)
             }
+        }
+        .accessibilityLabel("团子状态菜单")
+        .onAppear {
+            model.start()
+            CompanionWindowAction.open = {
+                openWindow(id: "yard")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+        .onChange(of: model.showLocalModelSetup) { _, show in
+            if show { openWindow(id: "local-model"); NSApp.activate(ignoringOtherApps: true); model.showLocalModelSetup = false }
+        }
     }
 }
 
@@ -39,6 +56,8 @@ private struct HostMenuContent: View {
         }
         if !model.error.isEmpty { Text(model.error) }
         if !model.notice.isEmpty { Text(model.notice) }
+        Divider()
+        Button("打开小院") { CompanionWindowAction.show() }
         Divider()
         Button("配对手机…") { openWindow(id: "pairing"); NSApp.activate(ignoringOtherApps: true) }
         Button(model.localModelRecommended ? "设置本地模型…（推荐）" : "设置本地模型…") { openWindow(id: "local-model"); NSApp.activate(ignoringOtherApps: true) }
@@ -66,6 +85,7 @@ private struct ModelKeyView: View {
             HStack {
                 Spacer()
                 Button("取消") { key = ""; dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Button("保存并启动") { model.saveKey(key); key = ""; dismiss() }
                     .disabled(key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.busy || model.setupRunning).keyboardShortcut(.defaultAction)
             }

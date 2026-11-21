@@ -1,6 +1,6 @@
 # Cattt · 猫猫
 
-一款以猫为伴的 iOS App。团子住在毛毡小院里，有自己的性格、作息和小情绪。你可以来看看它、聊会儿天，或记下一天里的小事；几天不来，它也不会催你。
+一款以猫为伴的 App，支持 iOS 和 macOS。团子住在毛毡小院里，有自己的性格、作息和小情绪。你可以来看看它、聊会儿天，或记下一天里的小事；几天不来，它也不会催你。
 
 项目包含 SwiftUI 客户端、Three.js 3D 小院和支持长期记忆与异步托付的后端。后端运行在用户自己的 macOS 电脑上，由菜单栏宿主管理；不提供云托管部署包。目前处于开发阶段，设备验收与联调边界见[项目文档](docs/README.md)。
 
@@ -20,7 +20,7 @@
 | 部分 | 技术 |
 | --- | --- |
 | iOS 客户端 | Swift、SwiftUI、WKWebView，最低 iOS 17 |
-| macOS 电脑端宿主 | SwiftPM、SwiftUI MenuBarExtra，最低 macOS 14，Apple Silicon |
+| macOS 电脑端 | SwiftPM、SwiftUI 菜单栏宿主与小院/聊天窗口、WKWebView，最低 macOS 14，Apple Silicon |
 | 3D 世界与展示页 | TypeScript、Three.js、Vite |
 | 服务端 | Node.js、TypeScript、Hono、自研模型客户端与 Agent 循环 |
 | 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
@@ -63,7 +63,7 @@ App 默认使用本地模拟，可先体验小院和界面。需要真实后端�
 
 ### 运行本机后端
 
-电脑端应用的构建、菜单、备份恢复与烟测见 [macOS 宿主说明](desktop/macos/README.md)。应用随附 Node 22 与 PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
+电脑端应用打开小院与聊天窗口，聊天通过本机宿主的既有配对接口连接；试用、构建、备份恢复与烟测见 [macOS 客户端与宿主说明](desktop/macos/README.md)。应用随附 Node 22 与 PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
 
 以下为不使用宿主的源码开发流程，保留的 `server/docker-compose.yml` 只用于开发数据库：
 

@@ -1,14 +1,19 @@
-# macOS 团子宿主
+# macOS 团子客户端与宿主
 
-F 批已实施：SwiftPM 宿主、无界面运行、应用打包、状态菜单、手机配对窗口和模型设置；云部署交付物已移除，保留 `server/docker-compose.yml` 供源码开发使用。
+F 批宿主能力继续保留：SwiftPM 宿主、无界面运行、应用打包、状态菜单、手机配对窗口和模型设置；本版在同一个 `Cattt.app` 增加 Dock 可见的小院与聊天主窗口。主窗口直接加载已打包的 3D 小院，聊天使用宿主 loopback API 和一次性配对码；设备凭证按数据目录归属保存在 macOS 钥匙串中。没有新增服务端接口，也不把管理令牌或设备凭证交给网页。云部署交付物已移除，保留 `server/docker-compose.yml` 供源码开发使用。
 
 宿主初始化、健康轮询、备份恢复及退出都在后台串行队列运行；菜单通过可观察状态更新，不等待数据库或网络请求。菜单提供各组件状态、启动错误、配对、DeepSeek 密钥设置、备份恢复、目录入口和登录自启动。普通备份的每日到期时间以现有最新完整普通备份的修改时间为准，不因重新启动宿主而延期。
 
-配对窗口按服务端接口请求配对码和设备列表；旧版服务端返回 404 时显示“这个版本的服务端还不支持配对”。二维码、有效期、证书短指纹与移除设备接口已接入，当前 main 的真实配对流程需等服务端对应批次合入后再联调。
+配对窗口按服务端接口请求配对码和设备列表；二维码、有效期、证书短指纹与移除设备接口已接入。小院聊天使用 `host-admin.token` 生成配对码，再通过 `/pair` 换取同一宿主账号的设备凭证；后续聊天只向 `127.0.0.1:8787` 发送设备凭证，身份失效时只自动重新配对一次。
 
 登录自启动使用 `SMAppService.mainApp`，首次打开尝试注册。已在本机将临时签名应用安装到 `/Applications/Cattt.app`，验证注册和菜单开关的取消注册／重新注册；系统记录分别为 enabled、disabled、enabled。未通过退出登录再登录验证真正的登录启动。自定义 `--data-dir` 参数不由系统登录项保留，登录项会使用默认数据目录。
 
-需要 Apple Silicon、macOS 14+、Xcode 命令行工具、pnpm；先在 `server` 运行 `pnpm install --frozen-lockfile`。
+需要 Apple Silicon、macOS 14+、Xcode 命令行工具、pnpm；先安装网页与服务端依赖：
+
+```sh
+pnpm --dir web install --frozen-lockfile
+pnpm --dir server install --frozen-lockfile
+```
 
 ```sh
 swift test --package-path desktop/macos
@@ -17,7 +22,24 @@ bash desktop/macos/scripts/smoke-host.sh
 ```
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
-当前构建为 ad-hoc 签名，下载副本会被 Gatekeeper 拦截。确认来源可信后可右键打开，或对应用执行 `xattr -dr com.apple.quarantine /path/to/Cattt.app`。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。
+构建脚本执行 `pnpm --dir web build:ios`，并将输出复制到 `Cattt.app/Contents/Resources/YardWeb`；运行时不需要网页开发服务器。正常启动会显示小院主窗口；关闭窗口不会退出菜单栏宿主，Dock 重开和菜单中的「打开小院」均可重新打开。宿主就绪后自动加载聊天历史；网络中断后按事件游标续接，未确认接收时用稳定 `client_message_id` 重试，已接收的消息改走既有回复接口。停止回复时，按屏幕已显示的 UTF-16 长度保存。
+发送时可停止等待，尚未确认送达的消息可安全重试。本机聊天连接空闲 12 秒超时，健康连接上的 SSE 心跳不会打断模型生成。客户端收到文本增量即显示；后端允许调用工具的阶段会先缓冲文本，可能整段送达。
+开发 DMG 未公证，从浏览器下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。开发试用无需更改 Gatekeeper：从源码构建后直接打开本机生成的应用。
+
+### 不配置模型也能试用聊天
+
+先退出任何已运行的团子宿主（客户端仍使用 8787、8788 和 54329）。在仓库根目录安装上述依赖并运行构建命令，然后运行：
+
+```sh
+TRIAL_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cattt-trial.XXXXXX")
+(umask 077; printf 'MODEL_PROVIDER=mock\n' > "$TRIAL_DIR/env")
+open desktop/macos/build/Cattt.app --args --data-dir "$TRIAL_DIR"
+```
+
+小院加载后，可以点击团子让它动动耳朵；等聊天旁显示已连接即可发消息。模拟模型不会联网，回复是预设的；这次对话只存入试用目录。退出 App 后在同一终端重跑 `open` 命令可查看试用记录。日常使用时正常打开本机应用，从窗口的「设置」选择模型，不传 `--data-dir`。
+
+### 宿主烟测
+
 烟测不启动或依赖 Redis；运行前要求没有 `redis-server` 进程，并验证健康 JSON 中 `ok=true`、`db=true` 且无 `redis` 字段。它使用自己的新数据目录，但仍需空闲的 8787、8788 和 54329 端口；不要与运行中的宿主同时执行。
 
 首次启动无需模型密钥：API 和 worker 照常运行，不内置开发者密钥，也不会自动切换 mock。未设置 `MODEL_PROVIDER` 时与服务端一致使用 `openai-compatible`，默认 `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1`（Ollama，也可指向 LM Studio 等兼容服务）。填 `OPENAI_COMPAT_MODEL` 设置共用模型名，聊天槽位的 `CHAT_MODEL` 优先；`MAOMAO_OPENAI_COMPAT_API_KEY` 可选，本机服务通常不需要。

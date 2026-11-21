@@ -148,7 +148,26 @@ final class HostModel: ObservableObject {
 }
 
 final class HostDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        HostModel.shared.start()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        CompanionWindowAction.show()
+        return true
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         HostModel.shared.prepareTermination(); return .terminateLater
+    }
+}
+
+@MainActor
+enum CompanionWindowAction {
+    static var open: (() -> Void)?
+    static func show() {
+        NSApp.activate(ignoringOtherApps: true)
+        open?()
     }
 }

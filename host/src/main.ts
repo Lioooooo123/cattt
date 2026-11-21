@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import { ChatEventSweeper } from "./chat-events/index.ts";
 import { Gateway } from "./gateway/index.ts";
 import { startHost } from "./runtime/index.ts";

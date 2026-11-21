@@ -16,7 +16,7 @@ test("Hono 实服区分两成员 Actor，成员名单共享且不泄露设备秘
   const gateway = new Gateway();
   const clock = new ManualClock("test", 100);
   const host = await startHost({
-    dataDir: directory, port: 0, clock, householdName: "我们的家", hostName: "家里的 Mac",
+    dataDir: directory, port: 0, lanHttpsPort: 0, clock, householdName: "我们的家", hostName: "家里的 Mac",
   }, [gateway]);
   const base = `http://127.0.0.1:${gateway.port}`;
   try {
@@ -50,7 +50,7 @@ test("缺少或无效令牌、撤销设备、成员墓碑和远端宿主设备�
   const directory = mkdtempSync(join(tmpdir(), "cattt-identity-denied-"));
   const gateway = new Gateway();
   const clock = new ManualClock("test", 100);
-  const host = await startHost({ dataDir: directory, port: 0, clock }, [gateway]);
+  const host = await startHost({ dataDir: directory, port: 0, lanHttpsPort: 0, clock }, [gateway]);
   const base = `http://127.0.0.1:${gateway.port}`;
   const unauthorized = async (authorization?: string) => {
     for (const path of ["/v2/me", "/v2/members", "/v2/streams/unknown/events"]) {

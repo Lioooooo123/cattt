@@ -21,6 +21,7 @@ export interface HostEvents {
 export interface HostConfig {
   dataDir: string;
   port?: number;
+  lanHttpsPort?: number;
   hostname?: string;
   clock?: Clock;
   householdName?: string;

@@ -37,7 +37,7 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
   const directory = mkdtempSync(join(tmpdir(), "cattt-sse-"));
   const gateway = new Gateway();
   const clock = new ManualClock("test", 100);
-  const host = await startHost({ dataDir: directory, port: 0, clock }, [gateway]);
+  const host = await startHost({ dataDir: directory, port: 0, lanHttpsPort: 0, clock }, [gateway]);
   const { token } = issueTestDevice(host);
   const authorization = { Authorization: `Bearer ${token}` };
   const events = new ChatEvents(host);
@@ -117,7 +117,7 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
 test("空闲 SSE 按配置发送心跳，宿主停止中断等待后再关闭数据库", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cattt-sse-stop-"));
   const gateway = new Gateway({ heartbeatIntervalMs: 10 });
-  const host = await startHost({ dataDir: directory, port: 0 }, [gateway]);
+  const host = await startHost({ dataDir: directory, port: 0, lanHttpsPort: 0 }, [gateway]);
   try {
     const { token } = issueTestDevice(host);
     const events = new ChatEvents(host);

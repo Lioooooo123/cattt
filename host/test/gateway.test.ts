@@ -8,7 +8,7 @@ import { startHost } from "../src/runtime/index.ts";
 test("Gateway 健康检查与 JSON 404", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cattt-gateway-"));
   const gateway = new Gateway();
-  const host = await startHost({ dataDir: directory, port: 0 }, [gateway]);
+  const host = await startHost({ dataDir: directory, port: 0, lanHttpsPort: 0 }, [gateway]);
   const base = `http://127.0.0.1:${gateway.port}`;
   try {
     const response = await fetch(`${base}/v2/healthz`);

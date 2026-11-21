@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+F9ED12D6A310816950B29790 = {isa = PBXBuildFile; fileRef = 07049CDF8D65F36BBC6E84AB; };
 		F09D42F9E7E77D33AA855ABB /* MaomaoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB8551F861F4AF3CC085244 /* MaomaoApp.swift */; };
 		E778BEAA207CC8A8B11361D2 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9740FBDFEAB1CBBE29CF2E18 /* RootView.swift */; };
 		8C110EF04255CC160596AE74 /* AgreementAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */; };
@@ -18,6 +19,12 @@
 		24F98A26D234133338FB2621 /* PairTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D6CC7622B0784243D14A0B /* PairTransport.swift */; };
 		011F5D1B3472272F19F2995A /* PairVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04235A5C379808FFF72EF0E /* PairVault.swift */; };
 		460562B96EDC02245D9880A7 /* ProactiveAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EE763B01980A3EFF3A835F4 /* ProactiveAPI.swift */; };
+		8B5CE23EA5131455904995AF /* V2ChatEntryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4056C4DC46A1D702F6A53762 /* V2ChatEntryView.swift */; };
+		DD47CCD77D3A98724182B7B6 /* V2ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0291F2BC586D8B80F999FD3E /* V2ChatStore.swift */; };
+		C3FBD1CB1D5A01AAC455E7D8 /* V2Client.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8794B22E74841BFB918A14E3 /* V2Client.swift */; };
+		38BC87FC9CDE6FFB09B4427C /* V2Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6212F91D812B0356B33B715F /* V2Models.swift */; };
+		BC9270DAA50472C1DCFDAE05 /* V2SSE.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00813DF1AD4F81C2D1AC3186 /* V2SSE.swift */; };
+		368D034934B17AE9DC3C3388 /* V2Vault.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F2FF0A922157D409709882 /* V2Vault.swift */; };
 		836AB51F3426A557216D2B62 /* WorldBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4E376AD69F4D090ACCABB12 /* WorldBridge.swift */; };
 		E5DBECFE172223CC3341721E /* WorldBridgeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6FABE599FB5BF112E1E6EE0 /* WorldBridgeModels.swift */; };
 		9F2838BB77155761E522E751 /* WorldBridgeProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2422A07AE80A579EED28CDD7 /* WorldBridgeProtocol.swift */; };
@@ -145,6 +152,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+858E33F033846B57054E0712 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = MaomaoV2Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+07049CDF8D65F36BBC6E84AB = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/V2Tests.swift; sourceTree = SOURCE_ROOT; };
 		F5BF48AA40CAD7891EB709FC /* Maomao.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Maomao.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6EB8551F861F4AF3CC085244 /* MaomaoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaomaoApp.swift; sourceTree = "<group>"; };
 		9740FBDFEAB1CBBE29CF2E18 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -157,6 +166,12 @@
 		C1D6CC7622B0784243D14A0B /* PairTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairTransport.swift; sourceTree = "<group>"; };
 		C04235A5C379808FFF72EF0E /* PairVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairVault.swift; sourceTree = "<group>"; };
 		2EE763B01980A3EFF3A835F4 /* ProactiveAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveAPI.swift; sourceTree = "<group>"; };
+		4056C4DC46A1D702F6A53762 /* V2ChatEntryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2ChatEntryView.swift; sourceTree = "<group>"; };
+		0291F2BC586D8B80F999FD3E /* V2ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2ChatStore.swift; sourceTree = "<group>"; };
+		8794B22E74841BFB918A14E3 /* V2Client.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Client.swift; sourceTree = "<group>"; };
+		6212F91D812B0356B33B715F /* V2Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Models.swift; sourceTree = "<group>"; };
+		00813DF1AD4F81C2D1AC3186 /* V2SSE.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2SSE.swift; sourceTree = "<group>"; };
+		D7F2FF0A922157D409709882 /* V2Vault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Vault.swift; sourceTree = "<group>"; };
 		A4E376AD69F4D090ACCABB12 /* WorldBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldBridge.swift; sourceTree = "<group>"; };
 		C6FABE599FB5BF112E1E6EE0 /* WorldBridgeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldBridgeModels.swift; sourceTree = "<group>"; };
 		2422A07AE80A579EED28CDD7 /* WorldBridgeProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldBridgeProtocol.swift; sourceTree = "<group>"; };
@@ -297,6 +312,7 @@
 		8D3FC6DB5D0827F168A73277 = {
 			isa = PBXGroup;
 			children = (
+07049CDF8D65F36BBC6E84AB,
 				B9340614599AB78F485950C7 /* Maomao */,
 				1BADDC1D73C1A20F347483E1 /* Products */,
 			);
@@ -319,9 +335,23 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		C1B667110C6AA20246D6B25C /* V2 */ = {
+			isa = PBXGroup;
+			children = (
+				4056C4DC46A1D702F6A53762 /* V2ChatEntryView.swift */,
+				0291F2BC586D8B80F999FD3E /* V2ChatStore.swift */,
+				8794B22E74841BFB918A14E3 /* V2Client.swift */,
+				6212F91D812B0356B33B715F /* V2Models.swift */,
+				00813DF1AD4F81C2D1AC3186 /* V2SSE.swift */,
+				D7F2FF0A922157D409709882 /* V2Vault.swift */,
+			);
+			path = V2;
+			sourceTree = "<group>";
+		};
 		50B87C8A0011A61FC7E4E830 /* Backend */ = {
 			isa = PBXGroup;
 			children = (
+				C1B667110C6AA20246D6B25C /* V2 */,
 				7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */,
 				C908A7DB0E92D34F9C84C967 /* Backend.swift */,
 				3CC762CBED63058C3B0D48D4 /* DiaryAPI.swift */,
@@ -591,6 +621,7 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+DFEE19449146DDDB4DD78AD1 = {isa = PBXNativeTarget; name = MaomaoV2Tests; productName = MaomaoV2Tests; productReference = 858E33F033846B57054E0712; productType = "com.apple.product-type.bundle.unit-test"; buildConfigurationList = 85D93B48F2EB6F03F076265B; buildPhases = (8F11E0AE1293B031D2165BF2,); dependencies = (EBE8F3D6D5F03BFD34393319,); };
 		42AEFBAE01D2DFD981F7DA7D /* Maomao */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = EAF116FE40D68E4ABB26094B /* Build configuration list for PBXNativeTarget "Maomao" */;
@@ -637,6 +668,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+DFEE19449146DDDB4DD78AD1,
 				42AEFBAE01D2DFD981F7DA7D /* Maomao */,
 			);
 		};
@@ -715,6 +747,7 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+8F11E0AE1293B031D2165BF2 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (F9ED12D6A310816950B29790,); runOnlyForDeploymentPostprocessing = 0; };
 		F2AB5FB218DA8B84623F4557 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -730,6 +763,12 @@
 				24F98A26D234133338FB2621 /* PairTransport.swift in Sources */,
 				011F5D1B3472272F19F2995A /* PairVault.swift in Sources */,
 				460562B96EDC02245D9880A7 /* ProactiveAPI.swift in Sources */,
+				8B5CE23EA5131455904995AF /* V2ChatEntryView.swift in Sources */,
+				DD47CCD77D3A98724182B7B6 /* V2ChatStore.swift in Sources */,
+				C3FBD1CB1D5A01AAC455E7D8 /* V2Client.swift in Sources */,
+				38BC87FC9CDE6FFB09B4427C /* V2Models.swift in Sources */,
+				BC9270DAA50472C1DCFDAE05 /* V2SSE.swift in Sources */,
+				368D034934B17AE9DC3C3388 /* V2Vault.swift in Sources */,
 				836AB51F3426A557216D2B62 /* WorldBridge.swift in Sources */,
 				E5DBECFE172223CC3341721E /* WorldBridgeModels.swift in Sources */,
 				9F2838BB77155761E522E751 /* WorldBridgeProtocol.swift in Sources */,
@@ -898,6 +937,32 @@
 			};
 			name = Debug;
 		};
+		5AB3A6BF84C2901E813939E6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maomao.v2tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maomao.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Maomao";
+			};
+			name = Debug;
+		};
+		54ECD3B736C66C8688F6C25B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maomao.v2tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maomao.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Maomao";
+			};
+			name = Release;
+		};
 		553194FECB7E1C4EBBAFB6CE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -949,7 +1014,18 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		85D93B48F2EB6F03F076265B /* V2 tests */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5AB3A6BF84C2901E813939E6 /* Debug */,
+				54ECD3B736C66C8688F6C25B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+3AAB893A2F03A5775690C89F = {isa = PBXContainerItemProxy; containerPortal = 46F86FAA6BBF9AC94A7E4595; proxyType = 1; remoteGlobalIDString = 42AEFBAE01D2DFD981F7DA7D; remoteInfo = Maomao; };
+EBE8F3D6D5F03BFD34393319 = {isa = PBXTargetDependency; target = 42AEFBAE01D2DFD981F7DA7D; targetProxy = 3AAB893A2F03A5775690C89F; };
 	};
 	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
 }

@@ -88,6 +88,7 @@ class Tree:
 
 def main():
     swift_files, resource_files = collect()
+    test_files = sorted(name for name in os.listdir(os.path.join(ROOT, "V2Tests")) if name.endswith(".swift"))
     if not swift_files:
         raise SystemExit("no Swift sources found under %s" % SOURCE_DIR)
 
@@ -109,6 +110,8 @@ def main():
     # ---- PBXBuildFile
     out("")
     out("/* Begin PBXBuildFile section */")
+    for name in test_files:
+        out('%s = {isa = PBXBuildFile; fileRef = %s; };' % (oid("testBuild:" + name), oid("testFile:" + name)))
     for path in swift_files:
         out("\t\t%s /* %s in Sources */ = {isa = PBXBuildFile; fileRef = %s /* %s */; };"
             % (oid("build:" + path), os.path.basename(path), oid("file:" + path), os.path.basename(path)))
@@ -120,6 +123,9 @@ def main():
     # ---- PBXFileReference
     out("")
     out("/* Begin PBXFileReference section */")
+    out('%s = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = MaomaoV2Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };' % oid("testProduct"))
+    for name in test_files:
+        out('%s = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/%s; sourceTree = SOURCE_ROOT; };' % (oid("testFile:" + name), name))
     out('\t\t%s /* %s.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; '
         'includeInIndex = 0; path = %s.app; sourceTree = BUILT_PRODUCTS_DIR; };'
         % (oid("product"), PROJECT, PROJECT))
@@ -173,6 +179,8 @@ def main():
     out("\t\t%s = {" % oid("mainGroup"))
     out("\t\t\tisa = PBXGroup;")
     out("\t\t\tchildren = (")
+    for name in test_files:
+        out('%s,' % oid("testFile:" + name))
     out("\t\t\t\t%s /* %s */," % (oid("group:root"), PROJECT))
     out("\t\t\t\t%s /* Products */," % oid("productsGroup"))
     out("\t\t\t);")
@@ -192,6 +200,7 @@ def main():
     # ---- PBXNativeTarget
     out("")
     out("/* Begin PBXNativeTarget section */")
+    out('%s = {isa = PBXNativeTarget; name = MaomaoV2Tests; productName = MaomaoV2Tests; productReference = %s; productType = "com.apple.product-type.bundle.unit-test"; buildConfigurationList = %s; buildPhases = (%s,); dependencies = (%s,); };' % (oid("testTarget"), oid("testProduct"), oid("testConfigs"), oid("testSources"), oid("testDependency")))
     out("\t\t%s /* %s */ = {" % (oid("target"), PROJECT))
     out("\t\t\tisa = PBXNativeTarget;")
     out("\t\t\tbuildConfigurationList = %s /* Build configuration list for PBXNativeTarget \"%s\" */;"
@@ -242,6 +251,7 @@ def main():
     out('\t\t\tprojectDirPath = "";')
     out('\t\t\tprojectRoot = "";')
     out("\t\t\ttargets = (")
+    out('%s,' % oid("testTarget"))
     out("\t\t\t\t%s /* %s */," % (oid("target"), PROJECT))
     out("\t\t\t);")
     out("\t\t};")
@@ -278,6 +288,7 @@ def main():
     # ---- PBXSourcesBuildPhase
     out("")
     out("/* Begin PBXSourcesBuildPhase section */")
+    out('%s = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (%s); runOnlyForDeploymentPostprocessing = 0; };' % (oid("testSources"), ''.join(oid("testBuild:" + name) + ',' for name in test_files)))
     out("\t\t%s /* Sources */ = {" % oid("sources"))
     out("\t\t\tisa = PBXSourcesBuildPhase;")
     out("\t\t\tbuildActionMask = 2147483647;")
@@ -369,6 +380,9 @@ def main():
     emit_config("projectDebug", "Debug", project_debug)
     emit_config("projectRelease", "Release", project_release)
     emit_config("targetDebug", "Debug", target_common)
+    test_settings = [("PRODUCT_BUNDLE_IDENTIFIER", "com.maomao.v2tests"), ("PRODUCT_NAME", '"$(TARGET_NAME)"'), ("SWIFT_VERSION", SWIFT_VERSION), ("GENERATE_INFOPLIST_FILE", "YES"), ("TEST_HOST", '"$(BUILT_PRODUCTS_DIR)/Maomao.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Maomao"'), ("BUNDLE_LOADER", '"$(TEST_HOST)"'), ("CODE_SIGN_STYLE", "Automatic")]
+    emit_config("testDebug", "Debug", test_settings)
+    emit_config("testRelease", "Release", test_settings)
     emit_config("targetRelease", "Release", [(k,v) for k,v in target_common if k != "CATTT_APNS_ENVIRONMENT"] + [("CATTT_APNS_ENVIRONMENT", "production")])
     out("/* End XCBuildConfiguration section */")
 
@@ -380,6 +394,7 @@ def main():
          "projectDebug", "projectRelease"),
         ("targetConfigList", 'Build configuration list for PBXNativeTarget "%s"' % PROJECT,
          "targetDebug", "targetRelease"),
+        ("testConfigs", "V2 tests", "testDebug", "testRelease"),
     ]:
         out("\t\t%s /* %s */ = {" % (oid(key), name))
         out("\t\t\tisa = XCConfigurationList;")
@@ -391,6 +406,8 @@ def main():
         out("\t\t\tdefaultConfigurationName = Release;")
         out("\t\t};")
     out("/* End XCConfigurationList section */")
+    out('%s = {isa = PBXContainerItemProxy; containerPortal = %s; proxyType = 1; remoteGlobalIDString = %s; remoteInfo = Maomao; };' % (oid("testProxy"), oid("project"), oid("target")))
+    out('%s = {isa = PBXTargetDependency; target = %s; targetProxy = %s; };' % (oid("testDependency"), oid("target"), oid("testProxy")))
 
     out("\t};")
     out("\trootObject = %s /* Project object */;" % oid("project"))
@@ -407,6 +424,16 @@ def main():
             "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
         }, handle)
     os.makedirs(project_dir, exist_ok=True)
+    scheme_dir = os.path.join(project_dir, "xcshareddata", "xcschemes")
+    os.makedirs(scheme_dir, exist_ok=True)
+    with open(os.path.join(scheme_dir, "Maomao.xcscheme"), "w") as handle:
+        handle.write('''<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2660" version="1.3">
+<BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="%s" BuildableName="Maomao.app" BlueprintName="Maomao" ReferencedContainer="container:Maomao.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction>
+<TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="%s" BuildableName="MaomaoV2Tests.xctest" BlueprintName="MaomaoV2Tests" ReferencedContainer="container:Maomao.xcodeproj"/></TestableReference></Testables></TestAction>
+<LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="YES"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="%s" BuildableName="Maomao.app" BlueprintName="Maomao" ReferencedContainer="container:Maomao.xcodeproj"/></BuildableProductRunnable></LaunchAction>
+</Scheme>
+''' % (oid("target"), oid("testTarget"), oid("target")))
     with open(os.path.join(project_dir, "project.pbxproj"), "w") as handle:
         handle.write("\n".join(lines) + "\n")
 

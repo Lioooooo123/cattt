@@ -11,6 +11,20 @@
 
 ## 跑起来
 
+### API v2 聊天（R8 首段）
+
+使用 `host/` 生成的 `maomao://pair?v=2&h=…&p=8789&c=…&fp=…` 链接，在手机核对 CA 指纹后连接。设备凭证单独保存在 Keychain 的 ThisDeviceOnly 项，不覆盖旧配对。v1 配对和本地模拟路径仍保留。
+
+v2 配对后，「聊会儿」进入两行聊天列表：「我们仨」是家庭群聊，「我和团子」只展示当前成员的单聊。消息标明「我」、伴侣姓名或「团子」；打开聊天时每三秒通过不透明 after 游标补收消息，顶部可加载更早记录。发送前将请求键和文本保存在本机队列；断线后点重试仍使用原键，收到 200/201 才移除。
+
+协议层在 `Maomao/Backend/V2/`，含请求、分页、错误码、轮次 SSE 解析与快照替换。host R3-1 发送只返回 `turn:null`，不会伪造团子回复；轮次、取消、重答与 SSE 等待 host R3-2，目前仅单元测试覆盖。身份接口当前返回 camelCase 公开成员字段，与聊天契约的 snake_case 通则不一致；解码同时兼容这两种字段拼法，不改变宿主。
+
+运行协议测试：
+
+```sh
+xcodebuild -project ios/Maomao.xcodeproj -scheme Maomao -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' test
+```
+
 ```
 open ios/Maomao.xcodeproj
 ```

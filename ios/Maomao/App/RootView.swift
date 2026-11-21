@@ -96,6 +96,7 @@ struct RootView: View {
         .onChange(of: store.screen) { updateWorldVisibility() }
         .onChange(of: store.onboarding) { updateWorldVisibility() }
         .onAppear {
+            if store.v2Chat != nil { store.onboarding = nil }
             updateWorldVisibility()
             #if DEBUG
             if !store.yardProbeVisible { DebugScript.run(on: store) }
@@ -123,12 +124,14 @@ struct RootView: View {
 
     @ViewBuilder
     private var screen: some View {
-        if store.onboarding != nil {
+        if store.onboarding != nil && store.v2Chat == nil {
             OnboardingView()
         } else {
             switch store.screen {
             case .home: CompanionHomeView()
-            case .chat: ChatView()
+            case .chat:
+                if let chat = store.v2Chat { V2ChatEntryView(chat: chat) }
+                else { ChatView() }
             }
         }
     }

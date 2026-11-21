@@ -28,6 +28,7 @@ export type ModelUsage = { inputTokens: number | null; cacheReadTokens: number |
 export const emptyUsage = (): ModelUsage => ({ inputTokens: null, cacheReadTokens: null, outputTokens: null, reasoningTokens: null });
 export type ToolCall = { toolCallId: string; toolName: string; input: Record<string, unknown>; rawInput: string };
 export type ModelEvent = { type: 'text-delta' | 'reasoning-delta'; delta: string }
+  | { type: 'tool-call-start' }
   | ({ type: 'tool-call' } & ToolCall)
   | { type: 'finish'; finishReason: FinishReason; usage: ModelUsage };
 export interface ModelClient {

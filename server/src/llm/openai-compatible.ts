@@ -127,6 +127,7 @@ export function createOpenAICompatible(options: ClientOptions): ModelClient {
       let usage: ModelUsage = emptyUsage();
       let reason: FinishReason = 'other';
       let finished = false;
+      let toolCallStarted = false;
       for await (const data of sse(body)) {
         abortSignal?.throwIfAborted();
         if (data.trim() === '[DONE]') break;
@@ -142,6 +143,10 @@ export function createOpenAICompatible(options: ClientOptions): ModelClient {
         const choice = chunk.choices?.[0];
         if (choice?.finish_reason != null) { reason = finishReason(choice.finish_reason); finished = true; }
         const delta = choice?.delta;
+        if (delta?.tool_calls?.length && !toolCallStarted) {
+          toolCallStarted = true;
+          yield { type: 'tool-call-start' };
+        }
         if (delta?.content) yield { type: 'text-delta', delta: delta.content };
         if (delta?.reasoning_content ?? delta?.reasoning) yield { type: 'reasoning-delta', delta: delta.reasoning_content ?? delta.reasoning };
         for (const part of delta?.tool_calls ?? []) {

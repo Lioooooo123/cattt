@@ -37,13 +37,15 @@ export type ModelStepOptions = {
   toolChoice?: ModelRequest['toolChoice'];
   maxOutputTokens?: number;
   preserveUsers?: boolean;
-  streamText?: boolean;
+  streamText?: boolean | 'holdback';
   onText?: (text: string) => Promise<void>;
   recoverToolValidation?: boolean;
   onToolValidationFailure?: (call: ToolCall, observation: Observation) => Promise<void>;
 };
 
 export const TOOL_VALIDATION_CORRECTION_INSTRUCTIONS = '上一批工具调用已整体拒绝，未执行任何工具。请依据已提供的工具定义和结构诊断，只修正调用参数后重新请求；不要声称已执行，不要重复无关工具调用。';
+
+const ANSWER_HOLDBACK_CHARS = 40;
 
 function validationIssues(error: z.ZodError) {
   return error.issues.slice(0, 5).map(issue => ({
@@ -69,6 +71,7 @@ export async function runModelStep(options: ModelStepOptions) {
   let text = '', reasoning = '', finished = false;
   let finishReason = 'other';
   let usage = emptyUsage();
+  let toolCallStarted = false, answerCommitted = false;
   const toolCalls: ToolCall[] = [];
   for await (const event of options.client.stream({ system: options.instructions, messages,
     tools: Object.entries(options.tools).map(([name, tool]) => ({ name, description: tool.description, inputSchema: tool.inputSchema })),
@@ -78,9 +81,14 @@ export async function runModelStep(options: ModelStepOptions) {
     options.signal.throwIfAborted();
     if (event.type === 'text-delta') {
       text += event.delta;
-      if (options.streamText && options.onText) { await guarded(options); await options.onText(event.delta); }
+      if (options.streamText === true || options.streamText === 'holdback' && (answerCommitted || !toolCallStarted && text.length >= ANSWER_HOLDBACK_CHARS)) {
+        const delta = answerCommitted || options.streamText === true ? event.delta : text;
+        if (options.onText) { await guarded(options); await options.onText(delta); }
+        answerCommitted = true;
+      }
     } else if (event.type === 'reasoning-delta') reasoning += event.delta;
-    else if (event.type === 'tool-call') toolCalls.push(event);
+    else if (event.type === 'tool-call-start') toolCallStarted = true;
+    else if (event.type === 'tool-call') { toolCallStarted = true; toolCalls.push(event); }
     else if (event.type === 'finish') { finished = true; finishReason = event.finishReason; usage = event.usage; }
   }
   options.signal.throwIfAborted();
@@ -94,13 +102,14 @@ export async function runModelStep(options: ModelStepOptions) {
     ids.add(call.toolCallId);
     if (!isInputObject(call.input)) throw new ModelOutputError('工具参数不是对象');
   }
-  if (!options.streamText && !toolCalls.length && text && options.onText) { await guarded(options); await options.onText(text); }
+  if (options.streamText !== true && !answerCommitted && !toolCallStarted && text && options.onText) { await guarded(options); await options.onText(text); }
   const responseMessages: ModelMessage[] = [{ role: 'assistant', content: [
     ...(reasoning ? [{ type: 'reasoning' as const, text: reasoning }] : []),
     ...(text ? [{ type: 'text' as const, text }] : []),
     ...toolCalls.map(call => ({ type: 'tool-call' as const, toolCallId: call.toolCallId, toolName: call.toolName, input: call.input })),
   ] }];
   const preflight = toolCalls.map(call => {
+    if (answerCommitted) return { call, failure: 'answer_already_streamed' as const };
     if (!Object.hasOwn(options.tools, call.toolName)) return { call, failure: 'unknown_tool' as const };
     const definition = options.tools[call.toolName]!;
     const parsed = definition.inputSchema.safeParse(call.input);
@@ -109,7 +118,7 @@ export async function runModelStep(options: ModelStepOptions) {
   });
   const invalid = preflight.some(item => 'failure' in item);
   if (invalid) {
-    if (!options.recoverToolValidation) {
+    if (!answerCommitted && !options.recoverToolValidation) {
       const failure = preflight.find(item => 'failure' in item)!;
       throw new ModelOutputError(failure.failure === 'unknown_tool' ? '未知工具调用' : '工具参数不符合结构');
     }
@@ -129,7 +138,7 @@ export async function runModelStep(options: ModelStepOptions) {
     }
     await guarded(options);
     responseMessages.push({ role: 'tool', content: toolResults });
-    return { text, reasoning, toolCalls, finishReason, usage, responseMessages, toolValidationFailed: true };
+    return { text, reasoning, toolCalls, finishReason, usage, responseMessages, toolValidationFailed: true, answerAlreadyStreamed: answerCommitted };
   }
 
   const toolResults: ToolResultPart[] = [];
@@ -204,7 +213,7 @@ export async function runCatAgent(options: AgentOptions): Promise<void> {
           return output;
         },
       }]));
-      const result = await runModelStep({ ...options, instructions, messages, tools, streamText: finalStep, toolChoice: finalStep ? 'none' : 'auto',
+      const result = await runModelStep({ ...options, instructions, messages, tools, streamText: finalStep ? true : 'holdback', toolChoice: finalStep ? 'none' : 'auto',
         recoverToolValidation: !correctionUsed,
         onToolValidationFailure: async (call, output) => {
           await guarded(options);
@@ -223,7 +232,7 @@ export async function runCatAgent(options: AgentOptions): Promise<void> {
       ended = true;
       await options.onStep({ step, phase: result.toolCalls.length ? 'tools' : 'answer', finishReason: result.finishReason,
         durationMs: Math.round(performance.now() - started), usage: result.usage });
-      if (!result.toolCalls.length) break;
+      if (!result.toolCalls.length || result.answerAlreadyStreamed) break;
     } finally {
       if (!ended) await options.onStep({ step, phase: finalStep ? 'answer' : 'tools', finishReason: options.signal.aborted ? 'aborted' : 'error',
         durationMs: Math.round(performance.now() - started), usage: null });

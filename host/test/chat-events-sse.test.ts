@@ -109,9 +109,9 @@ test("真实 SSE 实时送达、断线补齐、终态排空关闭和坏游标 41
   }
 });
 
-test("空闲 SSE 发送十五秒心跳，宿主停止中断等待后再关闭数据库", async () => {
+test("空闲 SSE 按配置发送心跳，宿主停止中断等待后再关闭数据库", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cattt-sse-stop-"));
-  const gateway = new Gateway();
+  const gateway = new Gateway({ heartbeatIntervalMs: 10 });
   const host = await startHost({ dataDir: directory, port: 0 }, [gateway]);
   try {
     const events = new ChatEvents(host);
@@ -129,4 +129,10 @@ test("空闲 SSE 发送十五秒心跳，宿主停止中断等待后再关闭数
     await host.stop();
     rmSync(directory, { recursive: true, force: true });
   }
-}, 20_000);
+});
+
+test("Gateway 拒绝无效心跳间隔", () => {
+  for (const heartbeatIntervalMs of [0, -1, 1.5, NaN, Infinity]) {
+    expect(() => new Gateway({ heartbeatIntervalMs })).toThrow(RangeError);
+  }
+});

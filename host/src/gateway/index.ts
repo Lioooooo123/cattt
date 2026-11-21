@@ -5,6 +5,14 @@ export class Gateway implements Component {
   readonly name = "gateway";
   private server: ReturnType<typeof Bun.serve> | undefined;
   private readonly streams = new Set<AbortController>();
+  private readonly heartbeatIntervalMs: number;
+
+  constructor(options: { heartbeatIntervalMs?: number } = {}) {
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 15_000;
+    if (!Number.isSafeInteger(this.heartbeatIntervalMs) || this.heartbeatIntervalMs < 1) {
+      throw new RangeError("心跳间隔必须是正整数毫秒");
+    }
+  }
 
   get port(): number | undefined {
     return this.server?.port;
@@ -86,7 +94,7 @@ export class Gateway implements Component {
           if ((controller.desiredSize ?? 0) > 0) {
             controller.enqueue(encoder.encode(": heartbeat\n\n"));
           }
-        }, 15_000);
+        }, this.heartbeatIntervalMs);
       },
       pull: async (controller) => {
         try {

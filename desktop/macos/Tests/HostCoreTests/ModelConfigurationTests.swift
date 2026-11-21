@@ -104,7 +104,7 @@ final class ModelConfigurationTests: XCTestCase {
         let deadline = Date().addingTimeInterval(30)
         repeat {
             host.tick()
-            if host.status["API"] == "正常", host.status["worker"] == "运行中" {
+            if host.status["API"] == "正常", host.status["worker"] == "队列正常" {
                 print("混合配置：/healthz 200，API 与 worker 已启动；保存 key 与本地设置成功路径均已重启服务。数据：\(dir.path)")
                 return
             }

@@ -94,7 +94,7 @@ export function createOpenAICompatible(options: ClientOptions): ModelClient {
         method: 'POST', signal: abortSignal,
         headers: { 'Content-Type': 'application/json', ...(options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}) },
         body: JSON.stringify({ ...options.extraBody, ...request.extraBody,
-          model: options.modelId, messages, stream: true, stream_options: { include_usage: true },
+          model: options.modelId, messages, stream: request.stream ?? true, stream_options: request.stream === false ? undefined : { include_usage: true },
           max_tokens: request.maxOutputTokens,
           tools: request.tools?.map(tool => ({ type: 'function', function: {
             name: tool.name, description: tool.description, parameters: jsonSchema(tool.inputSchema),
@@ -110,11 +110,24 @@ export function createOpenAICompatible(options: ClientOptions): ModelClient {
         throw new ModelHttpError(response.status, `模型请求失败：${response.status} ${response.statusText}`, snippet);
       }
       if (!response.body) throw new ModelOutputError('模型返回了空响应流');
+      let body = response.body;
+      if (request.stream === false) {
+        let completion;
+        try { completion = await response.json(); } catch (cause) { throw new ModelOutputError('模型响应不是合法 JSON', { cause }); }
+        if (completion.error) throw new ModelOutputError('模型响应错误');
+        const choice = completion.choices?.[0];
+        const chunk = { usage: completion.usage, choices: [{ finish_reason: choice?.finish_reason, delta: {
+          ...choice?.message, tool_calls: choice?.message?.tool_calls?.map((call: unknown, index: number) => ({ ...call as object, index })),
+        } }] };
+        body = new ReadableStream({ start(controller) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\n`)); controller.close();
+        } });
+      }
       const calls = new Map<number, { id: string; name: string; input: string }>();
       let usage: ModelUsage = emptyUsage();
       let reason: FinishReason = 'other';
       let finished = false;
-      for await (const data of sse(response.body)) {
+      for await (const data of sse(body)) {
         abortSignal?.throwIfAborted();
         if (data.trim() === '[DONE]') break;
         let chunk;

@@ -82,7 +82,7 @@ export function classifyModelError(err: unknown): ModelErrorInfo {
 
 /** 成本账本：每次模型调用记一行，按用途分 */
 export async function recordModelCall(entry: {
-  purpose: 'errand' | 'route' | 'chat' | 'memory_extract' | 'boundary_summarize' | 'cat_diary' | 'memory_recall' | 'diary_read';
+  purpose: 'errand' | 'route' | 'chat' | 'memory_extract' | 'boundary_summarize' | 'cat_diary' | 'memory_recall' | 'diary_read' | 'context_summary';
   modelId: string;
   usage: ModelUsage | null;
   latencyMs: number;

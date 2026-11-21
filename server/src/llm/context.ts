@@ -12,9 +12,9 @@ export function toolSchemas(tools: Record<string, { description?: string; inputS
 export function estimateRequest(instructions: string, messages: ModelMessage[], tools: unknown): number {
   return Buffer.byteLength(JSON.stringify({ instructions, messages, tools }), 'utf8') + 1024;
 }
-export function budgetMessages(instructions: string, messages: ModelMessage[], tools: unknown, preserveUsers = false): ModelMessage[] {
+export function budgetMessages(instructions: string, messages: ModelMessage[], tools: unknown, preserveUsers = false, inputBudget = INPUT_BUDGET): ModelMessage[] {
   let result = messages.slice();
-  while (estimateRequest(instructions, result, tools) > INPUT_BUDGET) {
+  while (estimateRequest(instructions, result, tools) > inputBudget) {
     const next = preserveUsers ? -1 : result.findIndex((m, i) => i > 0 && m.role === 'user');
     if (next >= 0) { result = result.slice(next); continue; }
     const calls = result.flatMap((m, i) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some(p => p.type === 'tool-call') ? [i] : []);

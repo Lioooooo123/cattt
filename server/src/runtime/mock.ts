@@ -3,6 +3,7 @@ import { localISO, parseFollowupTime } from '../agent/tickets.ts';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ModelClient, ModelEvent, ModelRequest, ModelMessage, ModelUsage } from '../llm/index.ts';
 import { config } from '../config.ts';
+import { SUMMARY_INSTRUCTIONS } from '../llm/summary.ts';
 
 /**
  * 假模型：MODEL_PROVIDER=mock 时用。不花钱、结果固定，测试和没有 key 时用它。
@@ -23,6 +24,11 @@ function mockClient(options: { provider: string; modelId: string; doGenerate?: (
     const signals = [request.signal, signal].filter((s): s is AbortSignal => !!s);
     const combined = signals.length ? AbortSignal.any(signals) : undefined;
     combined?.throwIfAborted();
+    if (request.system === SUMMARY_INSTRUCTIONS) {
+      yield { type: 'text-delta', delta: '较早对话与工具观察已记录；具体事实和状态以后续上下文为准。' };
+      yield { type: 'finish', finishReason: 'stop', usage: usage(100, 30) };
+      return;
+    }
     const messages: MockMessage[] = request.messages.map(m => m.role === 'user' && typeof m.content === 'string' ? { role: 'user', content: [{ type: 'text', text: m.content }] } : m) as MockMessage[];
     if (request.system) messages.unshift({ role: 'system', content: request.system });
     const result = await (options.doStream ?? options.doGenerate)!({ ...request, messages, signal: combined });

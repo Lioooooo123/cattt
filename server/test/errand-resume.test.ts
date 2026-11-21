@@ -3,10 +3,10 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { afterAll, beforeEach, expect, it, vi } from 'vitest';
 import { scriptedClient } from '../src/llm/testing.ts';
-import { emptyUsage, type ModelClient, type ModelEvent } from '../src/llm/index.ts';
+import { emptyUsage, SUMMARY_INSTRUCTIONS, SUMMARY_LABEL, type ModelClient, type ModelEvent, type ModelMessage } from '../src/llm/index.ts';
 import { and, asc, eq } from 'drizzle-orm';
 import { db, sql } from '../src/db/client.ts';
-import { users, cats, conversations, messages, tickets, ticketInputs, runs, runSteps, workerReports, asyncJobs, mailboxLetters, boundaries, pushNotifications } from '../src/db/schema.ts';
+import { users, cats, conversations, messages, tickets, ticketInputs, runs, runSteps, workerReports, asyncJobs, mailboxLetters, boundaries, pushNotifications, modelCalls } from '../src/db/schema.ts';
 import { startErrand, appendTicketInput, scanErrands } from '../src/agent/errands.ts';
 import { cancelTicket, listTickets } from '../src/agent/tickets.ts';
 import { processErrand } from '../src/agent/executor.ts';
@@ -104,6 +104,35 @@ it('工具执行中的网络类错误不会重试已成功的前序工具', asyn
   } finally {
     timeSpy.mockRestore(); weatherSpy.mockRestore();
   }
+});
+
+it.each([5, 7993])('worker 为大型工具观察生成临时摘要并遵守剩余额度（已用 %s），检查点不存摘要', async initialOutput => {
+  const t = await startErrand(catId, sourceId, '周末建议', now), [r] = await runList(t.ticket_id);
+  const history: ModelMessage[] = [{ role: 'user', content: '用户托付：周末建议' }];
+  for (const [id, value] of [['old', '旧观察'.repeat(10000)], ['recent', '最近观察']] as const) {
+    history.push({ role: 'assistant', content: [{ type: 'tool-call', toolCallId: id, toolName: 'get_time', input: {} }] },
+      { role: 'tool', content: [{ type: 'tool-result', toolCallId: id, toolName: 'get_time', output: { type: 'json', value: { status: 'succeeded', data: value } } }] });
+  }
+  await db.insert(runSteps).values({ runId: r!.id, step: 0, messages: history, usage: { outputTokens: initialOutput } });
+  await db.update(runs).set({ outputTokens: initialOutput }).where(eq(runs.id, r!.id));
+  const model = scriptedClient(request => request.system === SUMMARY_INSTRUCTIONS
+    ? [{ type: 'text-delta', delta: '早先工具查询成功。' }, { type: 'finish', finishReason: 'stop', usage: { ...emptyUsage(), inputTokens: 30, outputTokens: 7 } }]
+    : reportStep({ status: 'ready', result: '周末可以在家休息。' }, 'summary-ready'));
+  try {
+    await processErrand(r!.id, { now: () => now, model });
+    expect(model.requests).toHaveLength(initialOutput === 5 ? 2 : 1);
+    expect(model.requests[0]).toMatchObject({ system: SUMMARY_INSTRUCTIONS, stream: false, maxOutputTokens: Math.min(800, 8000 - initialOutput) });
+    const steps = await db.select().from(runSteps).where(eq(runSteps.runId, r!.id)).orderBy(asc(runSteps.step));
+    expect(steps).toHaveLength(initialOutput === 5 ? 2 : 1);
+    expect(steps.at(-1)!.messages.slice(0, history.length)).toEqual(history);
+    expect(JSON.stringify(steps.at(-1)!.messages)).not.toContain(SUMMARY_LABEL.trim());
+    expect(JSON.stringify(steps.at(-1)!.messages)).not.toContain('早先工具查询成功');
+    const calls = await db.select().from(modelCalls).where(and(eq(modelCalls.jobId, r!.id), eq(modelCalls.purpose, 'context_summary')));
+    expect(calls).toHaveLength(1); expect(calls[0]).toMatchObject({ inputTokens: 30, outputTokens: 7 });
+    expect((await runList(t.ticket_id))[0]!.outputTokens).toBe(initialOutput === 5 ? 20 : 8000);
+    if (initialOutput === 5) expect(JSON.stringify(model.requests[1]!.messages)).toContain(SUMMARY_LABEL.trim());
+    else expect((await db.select().from(runs).where(eq(runs.id, r!.id)))[0]!.report.active?.status).toBe('failed');
+  } finally { await db.delete(modelCalls).where(eq(modelCalls.jobId, r!.id)); }
 });
 
 it('重启从检查点恢复修正额度，不允许第二个无效批次再获得修正', async () => {

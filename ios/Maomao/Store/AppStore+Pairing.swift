@@ -1,9 +1,20 @@
 import SwiftUI
 
 extension AppStore {
+    func unpairV2Host() async {
+        guard let chat = v2Chat else { return }
+        do {
+            let client = try await chat.connection.select()
+            try await client.unpair()
+            try V2Vault.save(nil)
+            v2Chat = nil
+            screen = .home
+        } catch { identityError = error.localizedDescription }
+    }
+
     func openPairing(_ url: URL? = nil) {
         pairingError = nil
-        pairInvitation = url.flatMap(PairInvitation.parse)
+        pairInvitation = url.flatMap { PairInvitation.parse($0, versions: [1, 2]) }
         if url != nil && pairInvitation == nil { pairingError = PairingError.invalidLink.localizedDescription }
         showsMe = false
         showsPairing = true
@@ -14,6 +25,19 @@ extension AppStore {
         pairingBusy = true; pairingError = nil
         defer { pairingBusy = false }
         do {
+            if invitation.version == 2 {
+                let pending = V2Connection(hosts: invitation.hosts, port: invitation.port, fingerprint: invitation.fingerprint,
+                    identity: V2.PairResult(deviceId: "", deviceToken: "", member: V2.Member(id: "", householdId: "", displayName: "", homeHostId: ""), household: V2.Household(id: "", name: "")))
+                let client = try await pending.select()
+                let result = try await client.pair(code: invitation.code, deviceName: UIDevice.current.name)
+                let connection = V2Connection(hosts: invitation.hosts, port: invitation.port, fingerprint: invitation.fingerprint, identity: result)
+                try V2Vault.save(connection)
+                v2Chat = V2ChatStore(connection: connection)
+                onboarding = nil
+                screen = .chat
+                showsPairing = false; pairInvitation = nil
+                return
+            }
             let url = try await PairTransport.select(hosts: invitation.hosts, port: invitation.port, fingerprint: invitation.fingerprint)
             let pending = PairedHost(hosts: invitation.hosts, port: invitation.port, fingerprint: invitation.fingerprint,
                                      deviceID: "", deviceToken: "", accountID: "")

@@ -41,7 +41,11 @@ struct MeView: View {
     private var accountSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionTitle(text: "和团子的账号")
-            if store.backend.mode == .paired {
+            if let chat = store.v2Chat {
+                Text("已连接\(chat.connection.identity.household.name) · \(chat.connection.identity.member.displayName)")
+                    .font(Typo.sans(14)).foregroundStyle(Palette.ink2)
+                TextLink(text: "解除配对", size: 13) { Task { await store.unpairV2Host() } }
+            } else if store.backend.mode == .paired {
                 Text("已连接家里的电脑").font(Typo.sans(14)).foregroundStyle(Palette.ink2)
                 if let status = store.backendStatus { Text(status).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
                 TextLink(text: "解除配对", size: 13) { store.unpairHost() }

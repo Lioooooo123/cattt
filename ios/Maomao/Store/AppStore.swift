@@ -287,6 +287,7 @@ final class AppStore: ObservableObject {
     }
     /// 调试面板上显示的连接状态。
     @Published var backendStatus: String?
+    @Published var v2Chat: V2ChatStore? = V2Vault.load().map(V2ChatStore.init)
     @Published var showsPairing = false
     @Published var pairInvitation: PairInvitation?
     @Published var pairingError: String?

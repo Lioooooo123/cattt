@@ -4,11 +4,10 @@ import { Gateway } from "./gateway/index.ts";
 import { startHost } from "./runtime/index.ts";
 import { configFromEnv } from "./runtime/config.ts";
 import { TurnRunner } from "./turns/index.ts";
-import { DevelopmentEchoReplier } from "./turns/development-replier.ts";
 
 async function main(): Promise<void> {
   const config = configFromEnv(process.env);
-  const host = await startHost({ ...config, replier: config.replier ?? new DevelopmentEchoReplier() }, [
+  const host = await startHost(config, [
     new ChatEventSweeper(), new TurnRunner(), new Gateway(),
   ]);
   const shutdown = () => {

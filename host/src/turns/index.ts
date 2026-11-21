@@ -6,6 +6,9 @@ import { active } from "../store/turn-writes.ts";
 import { appendDelta, claimTurn, finishTurn, getTurnRow, heartbeatTurn, queuedTurns, recoverTurns, turnInput } from "../store/turns.ts";
 import type { TurnFence } from "../store/turns.ts";
 import { ConversationNotFoundError } from "../store/conversations.ts";
+import { configuredReplier } from "./chat-replier.ts";
+import type { Replier } from "./types.ts";
+import { ModelReplyError } from "../llm/errors.ts";
 
 interface RunnerOptions {
   budgetMs?: number;
@@ -36,6 +39,7 @@ export class TurnRunner implements Component {
   private stopping = false;
   private scheduled = false;
   private holder = "";
+  private replier: Replier | undefined;
   private readonly options: Required<RunnerOptions>;
 
   constructor(options: RunnerOptions = {}) {
@@ -51,9 +55,7 @@ export class TurnRunner implements Component {
   }
 
   start(ctx: HostContext): void {
-    if (!ctx.config.replier) {
-      throw new Error("TurnRunner 需要配置 Replier");
-    }
+    this.replier = ctx.config.replier ?? configuredReplier(ctx);
     this.ctx = ctx;
     this.stopping = false;
     this.holder = `${ctx.hostId}:${uuidv7(ctx.clock)}`;
@@ -137,7 +139,7 @@ export class TurnRunner implements Component {
       if (input.conversation.publisher_host_id !== ctx.hostId) {
         throw new ConversationNotFoundError();
       }
-      iterator = ctx.config.replier!.reply({ ...input, signal: abort.signal })[Symbol.asyncIterator]();
+      iterator = this.replier!.reply({ ...input, signal: abort.signal })[Symbol.asyncIterator]();
       for (;;) {
         abort.signal.throwIfAborted();
         const next = await nextWithAbort(Promise.resolve(iterator.next()), abort.signal);
@@ -161,7 +163,7 @@ export class TurnRunner implements Component {
     } catch (error) {
       if (!(error instanceof LeaseLostError) && !(abort.signal.reason instanceof LeaseLostError)) {
         events.write((db, append) => finishTurn(db, ctx.clock, id, {
-          status: "failed", errorCode: error instanceof ConversationNotFoundError ? "conversation_unavailable" : abort.signal.aborted ? failure : "replier_error", fence,
+          status: "failed", errorCode: error instanceof ConversationNotFoundError ? "conversation_unavailable" : abort.signal.aborted ? failure : error instanceof ModelReplyError ? error.code : "replier_error", fence,
         }, append));
       }
     } finally {

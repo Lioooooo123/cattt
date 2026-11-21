@@ -23,7 +23,22 @@ bash desktop/macos/scripts/smoke-host.sh
 
 构建使用缓存中经过 SHA256 验证的 Node 22.16.0 和 EDB PostgreSQL 17.7；输出 `build/Cattt.app` 和 DMG，仅临时签名，未公证。
 构建脚本执行 `pnpm --dir web build:ios`，并将输出复制到 `Cattt.app/Contents/Resources/YardWeb`；运行时不需要网页开发服务器。正常启动会显示小院主窗口；关闭窗口不会退出菜单栏宿主，Dock 重开和菜单中的「打开小院」均可重新打开。宿主就绪后自动加载聊天历史；网络中断后按事件游标续接，未确认接收时用稳定 `client_message_id` 重试，已接收的消息改走既有回复接口。停止回复时，按屏幕已显示的 UTF-16 长度保存。
-当前构建为 ad-hoc 签名，下载副本会被 Gatekeeper 拦截。确认来源可信后可右键打开，或对应用执行 `xattr -dr com.apple.quarantine /path/to/Cattt.app`。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。
+开发 DMG 未公证，从浏览器下载后可能被 Gatekeeper 拦截。正式分发需要 Developer ID 签名和 Apple 公证（notarization）。开发试用无需更改 Gatekeeper：从源码构建后直接打开本机生成的应用。
+
+### 不配置模型也能试用聊天
+
+先退出任何已运行的团子宿主（客户端仍使用 8787、8788 和 54329）。在仓库根目录安装上述依赖并运行构建命令，然后运行：
+
+```sh
+TRIAL_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cattt-trial.XXXXXX")
+(umask 077; printf 'MODEL_PROVIDER=mock\n' > "$TRIAL_DIR/env")
+open desktop/macos/build/Cattt.app --args --data-dir "$TRIAL_DIR"
+```
+
+小院加载后，等聊天旁显示已连接即可发消息。模拟模型不会联网，回复是预设的；这次对话只存入试用目录。退出 App 后在同一终端重跑 `open` 命令可查看试用记录。日常使用时正常打开本机应用，从窗口的「设置」选择模型，不传 `--data-dir`。
+
+### 宿主烟测
+
 烟测不启动或依赖 Redis；运行前要求没有 `redis-server` 进程，并验证健康 JSON 中 `ok=true`、`db=true` 且无 `redis` 字段。它使用自己的新数据目录，但仍需空闲的 8787、8788 和 54329 端口；不要与运行中的宿主同时执行。
 
 首次启动无需模型密钥：API 和 worker 照常运行，不内置开发者密钥，也不会自动切换 mock。未设置 `MODEL_PROVIDER` 时与服务端一致使用 `openai-compatible`，默认 `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:11434/v1`（Ollama，也可指向 LM Studio 等兼容服务）。填 `OPENAI_COMPAT_MODEL` 设置共用模型名，聊天槽位的 `CHAT_MODEL` 优先；`MAOMAO_OPENAI_COMPAT_API_KEY` 可选，本机服务通常不需要。

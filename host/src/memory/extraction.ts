@@ -266,7 +266,13 @@ const KEY_ALIASES = new Map([
   ["奶茶糖度", "奶茶甜度"],
 ]);
 
+class QuoteValidationError extends ModelOutputError {
+  readonly kind = "non_verbatim_quote";
+  constructor(readonly field: "sourceQuote" | "subjectEvidence.quote", readonly quote: string) { super(); }
+}
+
 function sourceEvidence(text: string, candidate: Candidate | PendingCandidate) {
+  if (!text.includes(candidate.sourceQuote)) { throw new QuoteValidationError("sourceQuote", candidate.sourceQuote); }
   if (!candidate.sourceQuote.includes(candidate.value)) { throw new ModelOutputError(); }
   const sentence = text.split(/(?<=[。！？!?\n])/u).find((part) => part.includes(candidate.sourceQuote));
   if (!sentence) { throw new ModelOutputError(); }
@@ -305,6 +311,8 @@ function subjectContext(prepared: Prepared, candidate: Candidate, evidence: Retu
   const { current, previous } = prepared;
   const { subject, subjectEvidence: { messageId, quote }, sourceQuote, value } = candidate;
   const { sentence, prefix, quoteStart } = evidence;
+  const message = messageId === current.id ? current : previous?.id === messageId ? previous : undefined;
+  if (message && !message.text.includes(quote)) { throw new QuoteValidationError("subjectEvidence.quote", quote); }
   const quotePrefix = sourceQuote.slice(0, sourceQuote.indexOf(value));
   if (messageId === current.id) {
     if (subject.kind === "member" && THIRD_PERSON.test(sourceQuote)) {
@@ -419,25 +427,40 @@ export async function extractMemoryForMessage(input: ExtractionInput, client: Mo
   if (typeof prepared === "string") {
     return { messageId: input.current.id, status: "skipped", reason: prepared, confirmed: [], pending: [] };
   }
-  const request = modelRequest(prepared, client, input.signal, guard);
+  let request = modelRequest(prepared, client, input.signal, guard);
   try {
-    let output = "";
-    let finished = false;
-    for await (const event of client.stream(request, input.signal)) {
-      input.signal?.throwIfAborted();
-      if (finished) { throw new ModelOutputError(); }
-      if (event.type === "text-delta") {
-        output += event.delta;
-        if (output.length > MAX_OUTPUT_CHARS) { throw new ModelOutputError(); }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let output = "";
+      let finished = false;
+      for await (const event of client.stream(request, input.signal)) {
+        input.signal?.throwIfAborted();
+        if (finished) { throw new ModelOutputError(); }
+        if (event.type === "text-delta") {
+          output += event.delta;
+          if (output.length > MAX_OUTPUT_CHARS) { throw new ModelOutputError(); }
+        }
+        if (event.type === "finish") {
+          if (event.finishReason !== "stop") { throw new ModelOutputError(); }
+          finished = true;
+        }
       }
-      if (event.type === "finish") {
-        if (event.finishReason !== "stop") { throw new ModelOutputError(); }
-        finished = true;
+      input.signal?.throwIfAborted();
+      if (!finished) { throw new ModelOutputError(); }
+      try {
+        return validateOutput(JSON.parse(output), prepared);
+      } catch (error) {
+        if (!(error instanceof QuoteValidationError) || attempt !== 0) { throw error; }
+        request = { ...request, messages: [...request.messages, {
+          role: "user",
+          content: JSON.stringify({
+            previousOutput: output,
+            correction: { kind: error.kind, field: error.field, quote: error.quote },
+            instruction: "引文不是对应消息的连续原文。请重新逐字复制证据，保留主体词；不要猜主体或来源。返回完整 JSON，仍须满足全部规则。",
+          }),
+        }] };
       }
     }
-    input.signal?.throwIfAborted();
-    if (!finished) { throw new ModelOutputError(); }
-    return validateOutput(JSON.parse(output), prepared);
+    throw new ModelOutputError();
   } catch (error) {
     input.signal?.throwIfAborted();
     throw new ModelReplyError(classifyModelError(error).code);

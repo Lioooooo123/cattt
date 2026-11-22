@@ -4,22 +4,27 @@ import SwiftUI
 import WebKit
 
 @MainActor
-final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
+public final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     private static let scheme = "cattt-yard"
     private let runID = UUID().uuidString
     private var pageID = UUID().uuidString
     private var started = false
-    private var active = false
+    @Published private(set) var isActive = false
+    private var sharedProjection: [String: Any]?
+    var onCatFrame: ((YardFrame) -> Void)?
     private var readinessTask: Task<Void, Never>?
     private let messageProxy = HostYardMessageProxy()
+    private struct CommandReply: Decodable { let error: String? }
     let webView: WKWebView
     @Published private(set) var ready = false
     @Published private(set) var surfaceReady = false
     @Published private(set) var failure: String?
 
-    override init() {
+    public override convenience init() { self.init(resourceDirectory: nil) }
+
+    init(resourceDirectory: URL?) {
         let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(HostYardSchemeHandler(), forURLScheme: Self.scheme)
+        configuration.setURLSchemeHandler(HostYardSchemeHandler(root: resourceDirectory), forURLScheme: Self.scheme)
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         messageProxy.owner = self
@@ -70,24 +75,37 @@ final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate
         }
         let loadingPageID = pageID
         readinessTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(20))
+            do { try await Task.sleep(for: .seconds(20)) } catch { return }
             guard let self, self.pageID == loadingPageID, !self.surfaceReady else { return }
             self.failure = self.ready ? "小院画面尚未准备好，请重新加载" : "小院启动超时，请重新加载"
         }
         webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
     }
 
-    func findCat() {
+    public func findCat() {
         send(["type": "findCat"])
     }
 
-    func setActive(_ value: Bool) {
-        active = value
+    public func setActive(_ value: Bool) {
+        guard isActive != value else { return }
+        isActive = value
         guard ready else { return }
         send(["type": "active", "on": value])
     }
 
+    func sendShared(_ command: [String: Any]) {
+        if command["type"] as? String == "sharedWorld" { sharedProjection = command }
+        if ready { send(command) }
+    }
+
+    private func initialize() {
+        var command: [String: Any] = ["type": "initialize", "active": isActive]
+        if let sharedProjection { command["sharedWorld"] = sharedProjection }
+        send(command)
+    }
+
     private func send(_ command: [String: Any]) {
+        guard ready else { return }
         var envelope = command
         envelope["runId"] = runID
         envelope["pageId"] = pageID
@@ -95,25 +113,30 @@ final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate
               let json = String(data: data, encoding: .utf8),
               let literalData = try? JSONSerialization.data(withJSONObject: json, options: .fragmentsAllowed),
               let literal = String(data: literalData, encoding: .utf8) else { return }
-        webView.evaluateJavaScript("window.__app?.command(\(literal))") { _, error in
+        let sentPage = pageID
+        webView.evaluateJavaScript("window.__app.command(\(literal))") { [weak self] result, error in
+            guard let self, self.pageID == sentPage else { return }
+            let problem: String
             if let error {
-                Task { @MainActor [weak self] in
-                    self?.failure = "小院暂时没有响应：\(error.localizedDescription)"
-                    self?.surfaceReady = false
-                }
+                problem = error.localizedDescription
+            } else if let reply = result as? String,
+                      let decoded = try? JSONDecoder().decode(CommandReply.self, from: Data(reply.utf8)) {
+                guard let rejection = decoded.error else { return }
+                problem = rejection
+            } else {
+                problem = "网页命令没有返回有效结果"
             }
+            self.readinessTask?.cancel()
+            self.failure = "小院暂时没有响应：\(problem)"
+            self.surfaceReady = false
         }
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        send(["type": "initialize", "active": active])
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         navigationFailed(error)
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         navigationFailed(error)
     }
 
@@ -125,15 +148,17 @@ final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate
         failure = "小院加载失败：\(error.localizedDescription)"
     }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+    public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         failure = "小院内容意外中断，请重新加载"
         reload()
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "maomao", message.frameInfo.isMainFrame,
               message.frameInfo.securityOrigin.protocol == Self.scheme,
               message.frameInfo.securityOrigin.host == "yard",
+              message.frameInfo.securityOrigin.port == 0,
+              message.frameInfo.request.url?.path == "/app.html",
               let source = message.body as? String,
               let data = source.data(using: .utf8),
               let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -142,21 +167,26 @@ final class HostYardController: NSObject, ObservableObject, WKNavigationDelegate
 
         switch envelope["type"] as? String {
         case "ready":
+            guard !ready else { return }
             ready = true
-            send(["type": "initialize", "active": active])
+            initialize()
         case "visualReady":
             ready = true
             surfaceReady = true
             failure = nil
             readinessTask?.cancel()
+        case "cat":
+            if isActive, let frame = try? JSONDecoder().decode(YardFrame.self, from: data) { onCatFrame?(frame) }
         case "tap":
-            if active, surfaceReady, envelope["target"] as? String == "cat" {
+            if isActive, surfaceReady, envelope["target"] as? String == "cat" {
                 send(["type": "poke"])
             }
         case "error":
+            readinessTask?.cancel()
             failure = envelope["message"] as? String ?? "小院暂时没有响应"
             surfaceReady = false
         case "contextLost":
+            readinessTask?.cancel()
             surfaceReady = false
             failure = "小院画面中断，请重新加载"
         case "contextRestored", "resumed":
@@ -176,7 +206,11 @@ private final class HostYardMessageProxy: NSObject, WKScriptMessageHandler {
 }
 
 private final class HostYardSchemeHandler: NSObject, WKURLSchemeHandler {
-    private let root = Bundle.main.resourceURL?.appendingPathComponent("YardWeb", isDirectory: true).standardizedFileURL
+    private let root: URL?
+
+    init(root: URL?) {
+        self.root = (root ?? Bundle.main.resourceURL?.appendingPathComponent("YardWeb", isDirectory: true))?.standardizedFileURL
+    }
     private static let contentTypes: [String: String] = [
         "html": "text/html", "js": "text/javascript", "mjs": "text/javascript", "css": "text/css",
         "json": "application/json", "glb": "model/gltf-binary", "gltf": "model/gltf+json",
@@ -219,10 +253,12 @@ private final class HostYardSchemeHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
 
-struct HostYardView: View {
-    @ObservedObject var controller: HostYardController
+public struct HostYardView: View {
+    @ObservedObject private var controller: HostYardController
 
-    var body: some View {
+    public init(controller: HostYardController) { self.controller = controller }
+
+    public var body: some View {
         ZStack {
             CompanionPalette.page
             HostYardWebView(controller: controller)
@@ -249,7 +285,9 @@ struct HostYardView: View {
                 .frame(maxWidth: 380)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
             }
-            HostYardVisibilityProbe { controller.setActive($0) }
+            HostYardVisibilityProbe { active in
+                DispatchQueue.main.async { controller.setActive(active) }
+            }
                 .frame(width: 0, height: 0)
         }
         .background(CompanionPalette.page)

@@ -31,14 +31,18 @@ struct RootView: View {
                         anchor: store.mailboxAnchor,
                         onDismiss: { store.closeMailbox() }
                     ) {
-                        DiaryPaperHeader()
+                        if let chat = store.v2Chat { V2SharedDiaryHeader(resources: chat.resources, catDiary: chat.catDiary) }
+                        else { DiaryPaperHeader() }
                     } content: {
-                        DiaryPaperView()
+                        if let chat = store.v2Chat {
+                            V2SharedDiaryView(resources: chat.resources, catDiary: chat.catDiary)
+                                .id(ObjectIdentifier(chat))
+                        } else { DiaryPaperView() }
                     }
                     .environment(\.screenInsets, proxy.safeAreaInsets)
 
                     // 「记一下」抽屉叠在纸上面。
-                    if store.isCapturing {
+                    if store.v2Chat == nil && store.isCapturing {
                         CaptureSheet()
                     }
                 }
@@ -73,24 +77,43 @@ struct RootView: View {
         .onOpenURL { store.openPairing($0) }
         .sheet(isPresented: $store.showsPairing) { PairingView().environmentObject(store) }
         .onReceive(NotificationCenter.default.publisher(for: .pairedConnectionFailed)) { notification in
-            guard notification.object as? String == store.backend.storageIdentity else { return }
+            guard store.v2Chat == nil, notification.object as? String == store.backend.storageIdentity else { return }
             store.reprobePairedHost()
         }
-        .task(id: scenePhase) {
-            guard scenePhase == .active else { return }
-            store.reprobePairedHost(foreground: true)
-            store.resolveNotificationIntent()
-            store.refreshInbox()
-            await store.refreshFollowupNotifications()
-            while !Task.isCancelled {
-                store.syncDiary()
-                do { try await Task.sleep(for: .seconds(15)) } catch { return }
+        .task(id: Foreground(phase: scenePhase, chat: store.v2Chat.map(ObjectIdentifier.init))) {
+            guard !Task.isCancelled else { return }
+            if let chat = store.v2Chat {
+                chat.changes.setForeground(scenePhase == .active)
+                guard scenePhase == .active else { return }
+                store.registeredV2PushState = nil
+                while !Task.isCancelled {
+                    async let legacyDiary: Void = chat.resources.resumeLegacyDiary(from: PairVault.load())
+                    store.flushV2PairingRetirements()
+                    store.resolveV2LocalReminder()
+                    await store.resolveV2PushIntent(chat)
+                    await store.syncV2PushRegistration(chat)
+                    await legacyDiary
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                    chat.changes.refresh()
+                }
+            } else if scenePhase == .active {
+                store.reprobePairedHost(foreground: true)
+                store.resolveNotificationIntent()
+                store.refreshInbox()
+                await store.refreshFollowupNotifications()
+                while !Task.isCancelled {
+                    store.flushV2PairingRetirements()
+                    store.syncDiary()
+                    do { try await Task.sleep(for: .seconds(15)) } catch { return }
+                }
             }
         }
         .sheet(isPresented: $store.showsMe) {
             MeView()
                 .environmentObject(store)
         }
+        .onChange(of: store.v2Chat.map(ObjectIdentifier.init)) { updateWorldVisibility() }
+        .onChange(of: store.v2Work?.hasUnreadMail) { store.syncHomeFacts() }
         .onChange(of: store.yardProbeVisible) { updateWorldVisibility() }
         .onChange(of: scenePhase) { updateWorldVisibility() }
         .onChange(of: store.screen) { updateWorldVisibility() }
@@ -104,7 +127,12 @@ struct RootView: View {
         }
         // 全套令牌只有浅色一版，深色模式会把院子的地面色冲掉。
         // 例外是入夜后的聊天页：背景是夜里的院子，状态栏、键盘、长按菜单要跟着暗（见 ChatTone）。
-        .preferredColorScheme(store.onboarding == nil && store.screen == .chat && ChatTone.from(store.atmosphere).isDark ? .dark : .light)
+        .preferredColorScheme(store.v2Chat == nil && store.onboarding == nil && store.screen == .chat && ChatTone.from(store.atmosphere).isDark ? .dark : .light)
+    }
+
+    private struct Foreground: Equatable {
+        let phase: ScenePhase
+        let chat: ObjectIdentifier?
     }
 
     private var usesSystemKeyboardAvoidance: Bool {
@@ -112,8 +140,13 @@ struct RootView: View {
     }
 
     private func updateWorldVisibility() {
-        store.world.setVisibility(home: store.screen == .home && store.onboarding == nil, foreground: scenePhase == .active, enabled: store.onboarding == nil && !store.yardProbeVisible)
-        if store.world.uses3D, store.onboarding == nil, !store.yardProbeVisible {
+        let enabled = store.onboarding == nil && !store.yardProbeVisible
+        let foreground = scenePhase == .active
+        store.world.setVisibility(home: store.screen == .home && enabled, foreground: foreground, enabled: enabled)
+        if let bridge = store.v2World {
+            bridge.setForeground(enabled && foreground)
+            store.syncHomeFacts()
+        } else if store.world.uses3D, enabled {
             store.conditionsClock = 1; store.advanceConditions(0)
             store.world.yard3D?.start(intent: store.world.intent3D.request, slot: store.dayPhase.rawValue, weather: store.weather.rawValue)
         }
@@ -130,7 +163,7 @@ struct RootView: View {
             switch store.screen {
             case .home: CompanionHomeView()
             case .chat:
-                if let chat = store.v2Chat { V2ChatEntryView(chat: chat) }
+                if let chat = store.v2Chat { V2ChatEntryView(chat: chat).id(ObjectIdentifier(chat)) }
                 else { ChatView() }
             }
         }

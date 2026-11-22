@@ -76,3 +76,46 @@ desktop/macos/build/Cattt.app/Contents/MacOS/CatttHost --headless --data-dir /pa
 备份含数据库、TLS、管理令牌和模型配置（包含密钥，务必妥善保管）。保留普通备份 7 份、升级前及恢复前备份 3 份。恢复前暂停服务并备份当前状态，应用备份后验证本机 API 和 HTTPS。恢复出错时尝试自动回退，回退也失败时保留恢复前备份并报告其名称。数据库主版本不符会拒绝启动，不自动升级。
 
 恢复后的宿主用新的日记同步世代让已配对的新版 iOS 重新拉取，手机保留尚未上传的内容，旧分享需要重新确认。若备份早于当前手机的配对，手机需重新配对。菜单的「局域网 HTTPS」验证本机 TLS 监听和证书，手机到电脑的网络可达性由手机连接确认。worker 状态来自最近的队列检查，可显示投递失败或有待办积压。
+
+## Bun 成品与共享小院
+
+Apple Silicon、macOS 14+。Bun 版本见 `host/.bun-version`。应用包内运行一个 Bun 进程，随包提供 SQLite 迁移、隔离计算入口和 `Contents/Resources/YardWeb`。
+
+```sh
+pnpm --dir web install --frozen-lockfile
+bash desktop/macos/scripts/build-bun-app.sh
+APP=desktop/macos/build/CatttBunHost.app
+codesign --verify --deep --strict "$APP"
+```
+
+菜单栏可打开小院、共享设置、备份和恢复。共享设置中先交换 Mac 描述符并核对完整指纹，在已有家庭的 Mac 上批准，再到另一台 Mac 连接并加入。手机配对码、邀请与同步水位也在此查看。聊天面板使用本机成员的设备凭证，保存于 macOS 钥匙串。本机管理请求走回环，设备请求走本人宿主的固定 CA HTTPS，Mac 复制使用独立 mTLS。
+
+小院窗口显示宿主确认的位置、环境和在场成员。有发布权且取得执行资格的设备可邀请团子移动或陪坐。小院以 3D 实际就位或 `sit_idle` 回报，并在宿主确认后显示成功。副本继续展示已同步状态。相同成员在另一设备重新注册会替换当前会话，Mac 在自动重连一次后交给用户决定是否重连。
+
+### 独立试用、备份与恢复
+
+```sh
+TRIAL_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cattt-bun-trial.XXXXXX")
+(umask 077; printf 'MODEL_PROVIDER=mock\n' > "$TRIAL_DIR/env")
+open -n "$APP" --args --data-dir "$TRIAL_DIR" --port 28788 --lan-port 28789 --peer-port 28790
+LAUNCHER="$APP/Contents/MacOS/CatttBunHost"
+"$LAUNCHER" --headless --data-dir "$TRIAL_DIR" --port 28788 --lan-port 28789 --peer-port 28790 --backup
+# 退出当前试用宿主后，将下方路径换成上一步返回的目录
+"$LAUNCHER" --headless --data-dir "$TRIAL_DIR" --port 28788 --lan-port 28789 --peer-port 28790 --restore /path/to/backup
+```
+
+默认端口分别为 18788、18789、18790。无界面模式必须显式指定数据目录。备份包含 SQLite 快照、TLS、配置、已完成的本机附件和未完成上传的续传字节，附带 SHA-256 清单。包内应用和小院静态资源随构建交付。恢复期间暂停业务，验证回环和可信 HTTPS 后再开放请求。恢复更换手机同步世代，较新的已确认业务可能由恢复前的数据库保留。备份目录含本机私钥和模型配置。
+
+### R8.24 合体与复验
+
+默认构建当前工作树的 `host/` 和 `web/`。R8.18 的 iOS/Web 桥、共享世界、peer v7、通知、模型和 `import-pg` 随包构建。R8.24 接入 R8.11 备份恢复、R8.20 桌面管理、成员与邀请读取。mTLS 的维护响应有 `X-Cattt-Peer-Version`，旧成员游标和旧轮次 SSE 游标各按自己的契约处理。迁移继续使用 R8.18 的 0000–0024，合体接续见 [R8.24 决策](../../docs/决策/2026-11-22-R8.24桌面宿主合体.md)。
+
+```sh
+CATTT_R85_TEST_APP="$PWD/$APP" swift test --package-path desktop/macos
+pnpm --dir web test:app
+python3 desktop/macos/scripts/smoke-bun-host.py
+python3 desktop/macos/scripts/smoke-bun-backup.py
+python3 desktop/macos/scripts/smoke-bun-yard.py --fixture-renderer --chat-actions --skip-build
+```
+
+固定帧运行覆盖 Swift 桥到真实 HTTPS 的移动、陪坐和宿主回执。`--chat-actions` 用回环模型协议桩额外通过聊天发送「去池塘」，核对原话 ID 对应的动作和宿主快照。真实画面需在可用 macOS 桌面主动运行 `python3 desktop/macos/scripts/smoke-bun-yard.py --visible-window --skip-build`，命令会前置一个临时 XCTest 窗口。默认后台模式保留启动诊断。后台窗口已重现 `ready=true` 且无 `visualReady`，视口为 960×660、绘图缓冲为 1440×990、WebGL 上下文未丢失，页面处于 `hidden` 且探针收不到 `requestAnimationFrame`。前置窗口、界面布局、菜单操作和系统钥匙串弹窗仍待人工复验。

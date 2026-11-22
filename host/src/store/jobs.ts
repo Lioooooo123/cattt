@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, lte, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
 import type { Clock } from "../clock/index.ts";
 import { validateWallMs } from "../clock/hlc.ts";
 import { uuidv7 } from "../ids/index.ts";
@@ -16,7 +16,7 @@ export interface EnqueueJob {
 export type Job = typeof jobs.$inferSelect;
 export type JobAttempt = Pick<Job, "id" | "attempts">;
 
-export function enqueueJob(db: StoreDb, clock: Clock, input: EnqueueJob): string {
+export function enqueueJob(db: Pick<StoreDb, "transaction">, clock: Clock, input: EnqueueJob): string {
   const now = clock.wallMs();
   const runAt = input.runAt ?? now;
   validateWallMs(now);
@@ -57,7 +57,9 @@ export function enqueueJob(db: StoreDb, clock: Clock, input: EnqueueJob): string
   }, { behavior: "immediate" });
 }
 
-export function claimJob(db: StoreDb, clock: Clock, queue: string, timeoutMs: number): Job | undefined {
+export function claimJob(
+  db: StoreDb, clock: Clock, queue: string, timeoutMs: number, settleExhausted = false,
+): Job | undefined {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
     throw new RangeError("租期必须是正整数毫秒");
   }
@@ -76,7 +78,7 @@ export function claimJob(db: StoreDb, clock: Clock, queue: string, timeoutMs: nu
       if (!job) {
         return undefined;
       }
-      if (job.attempts >= job.maxAttempts) {
+      if (job.attempts >= job.maxAttempts && !(settleExhausted && job.attempts === job.maxAttempts)) {
         tx.update(jobs).set({
           status: "dead",
           lockedUntil: null,
@@ -104,7 +106,28 @@ function held(attempt: JobAttempt, now: number) {
   );
 }
 
-export function completeJob(db: StoreDb, clock: Clock, attempt: JobAttempt): boolean {
+export function getHeldJob(db: Pick<StoreDb, "select">, clock: Clock, attempt: JobAttempt): Job | undefined {
+  return db.select().from(jobs).where(held(attempt, clock.wallMs())).get();
+}
+
+export function renewJob(db: StoreDb, clock: Clock, attempt: JobAttempt, leaseMs: number): boolean {
+  const now = clock.wallMs();
+  validateWallMs(now + leaseMs);
+  return db.update(jobs).set({ lockedUntil: now + leaseMs, updatedAt: now })
+    .where(held(attempt, now)).returning({ id: jobs.id }).get() !== undefined;
+}
+
+/** 正常等待不占重试额度；认领计数仍单调，旧尝试永远不能恢复写入。 */
+export function deferJob(db: StoreDb, clock: Clock, attempt: JobAttempt, runAt: number): boolean {
+  validateWallMs(runAt);
+  const now = clock.wallMs();
+  return db.update(jobs).set({
+    status: "queued", runAt, lockedUntil: null, lastError: null, updatedAt: now,
+    maxAttempts: sql`${jobs.maxAttempts} + 1`,
+  }).where(held(attempt, now)).returning({ id: jobs.id }).get() !== undefined;
+}
+
+export function completeJob(db: Pick<StoreDb, "transaction">, clock: Clock, attempt: JobAttempt): boolean {
   return db.transaction((tx) => {
     const now = clock.wallMs();
     validateWallMs(now);
@@ -124,6 +147,7 @@ export function failJob(
   error: unknown,
   retryAt: number,
   permanent = false,
+  settleExhausted = false,
 ): boolean {
   validateWallMs(retryAt);
   return db.transaction((tx) => {
@@ -134,7 +158,7 @@ export function failJob(
       return false;
     }
     return tx.update(jobs).set({
-      status: permanent || job.attempts >= job.maxAttempts ? "dead" : "queued",
+      status: permanent || !settleExhausted && job.attempts >= job.maxAttempts ? "dead" : "queued",
       runAt: retryAt,
       lockedUntil: null,
       lastError: String(error).slice(0, 2000),
@@ -143,6 +167,13 @@ export function failJob(
   }, { behavior: "immediate" });
 }
 
-export function getJob(db: StoreDb, id: string): Job | undefined {
+export function getJob(db: Pick<StoreDb, "select">, id: string): Job | undefined {
   return db.select().from(jobs).where(eq(jobs.id, id)).get();
+}
+
+/** 作废属于旧业务修订的作业，并让已认领的尝试失去完成凭证。 */
+export function supersedeJob(db: Pick<StoreDb, "update">, clock: Clock, queue: string, dedupeKey: string): void {
+  db.update(jobs).set({
+    status: "dead", lockedUntil: null, lastError: "业务修订已变化", updatedAt: clock.wallMs(),
+  }).where(and(eq(jobs.queue, queue), eq(jobs.dedupeKey, dedupeKey), inArray(jobs.status, ["queued", "running"]))).run();
 }

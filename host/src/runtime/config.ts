@@ -1,12 +1,15 @@
+import { apnsConfigFromEnv } from "../push/config.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HostConfig } from "./index.ts";
 import { modelConfigFromEnv } from "../llm/config.ts";
+import { localVisionConfigFromEnv } from "../llm/local-vision.ts";
 
 export const DEFAULT_MAX_MEMBERS = 2;
 export const DEFAULT_HOUSEHOLD_NAME = "我们的家";
 export const DEFAULT_HOST_NAME = "我的 Mac";
 export const DEFAULT_LAN_HTTPS_PORT = 8789;
+export const DEFAULT_PEER_HTTPS_PORT = 8790;
 
 function parsePort(text: string, name: string): number {
   const port = Number(text);
@@ -22,10 +25,13 @@ export function configFromEnv(env: Record<string, string | undefined>): HostConf
     dataDir: env.CATTT_DATA_DIR || join(homedir(), ".cattt", "host"),
     port,
     lanHttpsPort: parsePort(env.CATTT_LAN_HTTPS_PORT ?? String(DEFAULT_LAN_HTTPS_PORT), "CATTT_LAN_HTTPS_PORT"),
+    peerHttpsPort: parsePort(env.CATTT_PEER_HTTPS_PORT ?? String(DEFAULT_PEER_HTTPS_PORT), "CATTT_PEER_HTTPS_PORT"),
     hostname: "127.0.0.1",
     householdName: env.CATTT_HOUSEHOLD_NAME ?? DEFAULT_HOUSEHOLD_NAME,
     hostName: env.CATTT_HOST_NAME ?? DEFAULT_HOST_NAME,
     maxMembers: DEFAULT_MAX_MEMBERS,
+    apns: apnsConfigFromEnv(env),
     model: modelConfigFromEnv(env),
+    localVision: localVisionConfigFromEnv(env),
   };
 }

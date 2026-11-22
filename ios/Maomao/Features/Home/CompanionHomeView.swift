@@ -35,10 +35,17 @@ struct CompanionHomeView: View {
     // MARK: - 顶部状态条
 
     private var statusBar: some View {
-        Text(store.statusText)
+        Group {
+            if let bridge = store.v2World, bridge.needsRetry {
+                Button("重新连接小院") { bridge.retry() }
+                    .accessibilityHint(store.statusText)
+            } else {
+                Text(store.statusText)
+            }
+        }
             .font(Typo.sans(12.5))
             .tracking(track(0.06, 12.5))
-            .foregroundStyle(store.dayPhase.isNight && store.world.uses3D ? Color.white.opacity(0.92) : Palette.ink2)
+            .foregroundStyle((store.v2World?.world?.snapshot?.value.dayPhase == "night" || (store.v2World == nil && store.dayPhase.isNight)) && store.world.uses3D ? Color.white.opacity(0.92) : Palette.ink2)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 14)

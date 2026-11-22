@@ -11,6 +11,13 @@ final class WorldEngine: ObservableObject {
     @Published private(set) var loadError: String?
     var stateChanged: (() -> Void)?
     var bridgeChanged: (() -> Void)?
+    var sharedActionRequested: ((String, String?) -> Void)?
+    var sharedRendererLost: (() -> Void)?
+    private(set) var sharedMode = false
+    private(set) var sharedDriver = false
+    private var sharedConnected = false
+    private var sharedProjection: V2.WorldProjection?
+    private var sharedBehavior: BehaviorParams?
     var agentActionChanged: ((WorldCommand, String, String?) -> Void)?
     private var activeAgentCommand: WorldCommand?
     private var agentFinishUptime: Double?
@@ -40,7 +47,7 @@ final class WorldEngine: ObservableObject {
 
     init() {
         // v5 树窝帧不齐就整段退回 v4，时长和动作名一起换，不混用。
-        uses3D = UserDefaults.standard.string(forKey: "world") != "2d"
+        uses3D = V2Vault.load() != nil || UserDefaults.standard.string(forKey: "world") != "2d"
         yard3D = uses3D ? YardRuntime() : nil
         if !uses3D { WorldInteraction.useV5 = CatActionCatalog.shared.hasV5 }
         let loaded = Self.load()
@@ -50,6 +57,7 @@ final class WorldEngine: ObservableObject {
         yard3D?.onState = { [weak self] message in self?.observe3D(message) }
         yard3D?.onUnavailable = { [weak self] reason in
             guard let self else { return }
+            sharedRendererLost?()
             intent3D.unavailable(reason); interruptAgentMove(reason: "world_unavailable"); notifyState()
         }
         let target=WorldClockTarget { [weak self] in self?.advance() }
@@ -88,7 +96,7 @@ final class WorldEngine: ObservableObject {
             #else
             let intentDT = dt
             #endif
-            if canRunWorld, intent3D.tick(intentDT) { dispatch3D() }
+            if canRunWorld, (!sharedMode || sharedDriver), intent3D.tick(intentDT) { dispatch3D() }
             inspectAgentAction()
             return
         }
@@ -115,6 +123,7 @@ final class WorldEngine: ObservableObject {
     }
     #if DEBUG
     func placeForReview(_ index:Int) {
+        guard !sharedMode else { return }
         if uses3D { guard YardIntent.places.indices.contains(index) else { return }; request(index); intent3D.autonomous = false; yard3D?.send(["type": "teleport", "place": YardIntent.places[index]]); return }
         interruptAgentMove(reason: "user_preempted");simulation.placeForReview(index);notifyState()}
     func writeSnapshot(label:String="world-metrics") {
@@ -165,6 +174,61 @@ final class WorldEngine: ObservableObject {
         if runtimeUnsocial { b.lookWeight = 0; b.comesToDoor = false }
         return b
     }
+    func setSharedMode(_ enabled: Bool, reset: Bool = false) {
+        guard enabled != sharedMode || reset else { return }
+        sharedMode = enabled
+        sharedDriver = false; sharedConnected = false
+        sharedProjection = nil; sharedBehavior = nil
+        interruptAgentMove(reason: "connection_closed")
+        intent3D = YardIntent()
+        intent3D.autonomous = !enabled
+        if !enabled, let goal = YardRuntime.savedGoal, let index = YardIntent.places.firstIndex(of: goal) { intent3D.choose(index) }
+        yard = WorldYardFacts()
+        yard3D?.setSharedMode(enabled, reset: reset)
+        notifyState()
+    }
+
+    func setSharedDriver(_ driving: Bool, connected: Bool) {
+        sharedDriver = driving
+        sharedConnected = connected
+        if sharedMode { intent3D.autonomous = driving && connected && activeAgentCommand == nil }
+    }
+
+    func applySharedWorld(_ world: V2.WorldRecord, behavior: BehaviorParams?, reproject: Bool) {
+        let observation = world.snapshot?.value
+        let projection = V2.WorldProjection(observation)
+        sharedBehavior = behavior ?? world.localBehavior
+        if reproject || !sharedDriver {
+            let updatePage = reproject || sharedProjection != projection
+            if updatePage { intent3D.projectShared(at: projection.place, activity: projection.activity) }
+            sharedProjection = projection
+            yard = WorldYardFacts(mood: observation?.mood ?? "calm", moodReason: observation?.moodReason ?? "",
+                dayPhase: projection.slot, weather: projection.weather, bowlFilledToday: projection.full,
+                lastDrinkAt: observation?.lastDrinkAt, placesToday: observation?.placesToday ?? [])
+            yard3D?.projectShared(projection, intent: intent3D.request, updatePage: updatePage)
+        }
+        updateSharedConditions()
+        notifyState()
+    }
+
+    private func updateSharedConditions() {
+        guard let sharedBehavior else { return }
+        let phase = DayPhase(rawValue: yard.dayPhase) ?? .day
+        let weather = Weather(rawValue: yard.weather) ?? .clear
+        intent3D.conditions(mood: Mood(rawValue: yard.mood) ?? .calm, night: phase.isNight,
+            allowed: MoodRules.allowedDestinations(phase: phase, weather: weather),
+            bowlFull: yard.bowlFilledToday, behavior: sharedBehavior)
+    }
+
+    var hasRunningSharedAction: Bool { activeAgentCommand != nil }
+    func fillSharedBowl() -> Bool {
+        guard sharedDriver, !yard.bowlFilledToday else { return false }
+        yard.bowlFilledToday = true
+        yard3D?.setSharedWater(true)
+        updateSharedConditions()
+        return true
+    }
+
     var currentIndex: Int { uses3D ? intent3D.current : simulation.current }
     var targetIndex: Int { uses3D ? intent3D.target : simulation.target }
     var moving: Bool { uses3D ? intent3D.moving : simulation.isMoving }
@@ -209,7 +273,7 @@ final class WorldEngine: ObservableObject {
     func interruptAgentMove(reason: String) {
         guard let command = activeAgentCommand else { return }
         activeAgentCommand = nil; agentFinishUptime = nil
-        intent3D.autonomous = !runtimeQuiet
+        intent3D.autonomous = sharedMode ? (sharedDriver && sharedConnected) : !runtimeQuiet
         simulation.autonomous = !runtimeQuiet
         // 不强切出窝/下栏动画。用户请求走正常重定向；暂停保留安全过渡，回前台不重发命令。
         agentActionChanged?(command, "interrupted", reason)
@@ -248,34 +312,40 @@ final class WorldEngine: ObservableObject {
     }
     #if DEBUG
     func reviewActivity(_ activity: String) {
-        guard uses3D, ["tilt", "groom", "happy", "sulk", "sad", "nestWatch", "nestSleep", "pond", "fence", "flower", "scratch", "chase", "stretch", "run"].contains(activity) else { return }
+        guard !sharedMode, uses3D, ["tilt", "groom", "happy", "sulk", "sad", "nestWatch", "nestSleep", "pond", "fence", "flower", "scratch", "chase", "stretch", "run"].contains(activity) else { return }
         intent3D.autonomous = false
         intent3D.choose((activity == "chase" || activity == "stretch" || activity == "run") ? 3 : (activity == "fence" || activity == "flower") ? 5 : activity == "pond" ? 4 : (activity.hasPrefix("nest") || activity == "scratch") ? 1 : 0, activity: activity == "fence" || activity == "pond" || activity == "nestWatch" ? "watch" : activity == "nestSleep" ? "rest" : activity)
         dispatch3D()
     }
     #endif
-    func request(_ index:Int) { interruptAgentMove(reason: "user_preempted"); if uses3D { intent3D.choose(index); dispatch3D() } else { simulation.request(index) };notifyState() }
-    func poke() {interruptAgentMove(reason: "user_preempted");if uses3D { yard3D?.send(["type": "poke"]) } else { simulation.poke() };notifyState()}
+    func request(_ index:Int) {
+        if sharedMode {
+            if YardIntent.places.indices.contains(index) { sharedActionRequested?(YardIntent.places[index], nil) }
+            return
+        }
+        interruptAgentMove(reason: "user_preempted"); if uses3D { intent3D.choose(index); dispatch3D() } else { simulation.request(index) };notifyState() }
+    func poke() {if sharedMode && (!sharedDriver || hasRunningSharedAction) { return };interruptAgentMove(reason: "user_preempted");if uses3D { yard3D?.send(["type": "poke"]) } else { simulation.poke() };notifyState()}
     /// 情绪、时段、天气、水碗：每秒由 AppStore 喂一次。
     func setConditions(mood:Mood,night:Bool,allowed:Set<Int>,bowlFull:Bool,behavior:BehaviorParams) {
+        guard !sharedMode else { return }
         if uses3D { intent3D.conditions(mood: mood, night: night, allowed: allowed, bowlFull: bowlFull, behavior: adjusted(behavior)); return }
         simulation.setConditions(mood:mood,night:night,allowed:allowed,bowlFull:bowlFull,behavior:adjusted(behavior))
     }
     /// 打开 App：按性格决定来不来门口。
-    func greet() { if uses3D { intent3D.greet(); dispatch3D() } else { simulation.greet() };notifyState() }
+    func greet() { if sharedMode { return }; if uses3D { intent3D.greet(); dispatch3D() } else { simulation.greet() };notifyState() }
     /// 院子里的事实（情绪、时段、天气、水、今天去过哪）：每秒由 AppStore 喂一次，只为送进聊天。
     func setYardFacts(_ facts: WorldYardFacts) {
-        guard facts != yard else { return }
+        guard !sharedMode, facts != yard else { return }
         yard = facts
         bridgeChanged?()
     }
     func sitTogetherInDemo() {
-        guard let seat = worldSnapshot().companionSeat, let index = YardIntent.places.firstIndex(of: seat) else { return }
+        guard !sharedMode, let seat = worldSnapshot().companionSeat, let index = YardIntent.places.firstIndex(of: seat) else { return }
         intent3D.choose(index, activity: "sit")
         dispatch3D()
         notifyState()
     }
-    func requestDrink() { if uses3D { if intent3D.drink() { dispatch3D(); notifyState() }; return }; if simulation.requestDrink() {notifyState()} }
+    func requestDrink() { if sharedMode && !sharedDriver { return }; if uses3D { if intent3D.drink() { dispatch3D(); notifyState() }; return }; if simulation.requestDrink() {notifyState()} }
     func togglePause() {
         interruptAgentMove(reason: "world_paused")
         manuallyPaused.toggle();yard3D?.setActive(worldEnabled && foreground && !manuallyPaused);simulation.setPaused(manuallyPaused || !foreground || !worldEnabled)
@@ -292,19 +362,31 @@ final class WorldEngine: ObservableObject {
     func preview(_ name:String) {guard !uses3D else { return };interruptAgentMove(reason: "world_paused");manuallyPaused=true;simulation.preview(name);notifyState()}
     private func dispatch3D() { yard3D?.intent(intent3D.request) }
     private func observe3D(_ message: [String: Any]) {
+        let previousPlace = intent3D.current
+        let previousDrinks = intent3D.drinkCount
         guard let id = message["id"] as? String, let nearest = message["nearest"] as? String,
               let moving = message["moving"] as? Bool, let action = message["action"] as? String,
               intent3D.observe(id: id, nearest: nearest, moving: moving, action: action,
                  offscreen: message["offscreen"] as? Bool ?? false, cameraMode: message["cameraMode"] as? String ?? "following",
                  fallback: message["fallback"] as? Bool ?? true, drinkDone: message["drinkDone"] as? Bool ?? false) else { return }
+        if sharedMode, sharedDriver {
+            if intent3D.current != previousPlace {
+                yard.placesToday = Array((yard.placesToday + [scene.destinations[intent3D.current].name]).suffix(40))
+            }
+            if intent3D.drinkCount != previousDrinks { yard.lastDrinkAt = ISO8601DateFormatter().string(from: Date()) }
+        }
         if message["settled"] as? Bool == true, let command = activeAgentCommand,
-           scene.destinations[intent3D.target].id == command.destinationId {
-            activeAgentCommand = nil; agentFinishUptime = nil; intent3D.autonomous = !runtimeQuiet
+           scene.destinations[intent3D.target].id == command.destinationId,
+           !sharedMode || (nearest == command.destinationId && !moving
+                && (command.activity != "sit" || (action == "sit_idle" && message["fallback"] as? Bool == false))) {
+            activeAgentCommand = nil; agentFinishUptime = nil
+            intent3D.autonomous = sharedMode ? (sharedDriver && sharedConnected) : !runtimeQuiet
             agentActionChanged?(command, "arrived", nil)
         }
         notifyState()
     }
     func reset() {
+        guard !sharedMode else { return }
         interruptAgentMove(reason: "world_reset")
         if uses3D { intent3D = YardIntent(); dispatch3D() }
         simulation=WorldSimulation(scene:scene);manuallyPaused=false

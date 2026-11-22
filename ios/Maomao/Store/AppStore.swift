@@ -32,6 +32,7 @@ final class AppStore: ObservableObject {
     @Published var worldDepthEnabled = true
     let world = WorldEngine()
     var worldBridge: WorldBridge?
+    var v2World: V2WorldBridge?
     @Published var viewedIndex = 0
     @Published private(set) var reaction: String?
     @Published private(set) var camera = WorldCamera()
@@ -99,6 +100,10 @@ final class AppStore: ObservableObject {
     }
     var statusText: String {
         if let reaction {return reaction}
+        if let v2World {
+            let presence = v2World.otherMembers.isEmpty ? "" : " · 伴侣也在"
+            return v2World.status + presence
+        }
         if world.uses3D {
             if let failure = world.intent3D.failure { return failure }
             if world.moving { return "团子正往" + Location.all[world.targetIndex].name + "走" }
@@ -287,15 +292,34 @@ final class AppStore: ObservableObject {
     }
     /// 调试面板上显示的连接状态。
     @Published var backendStatus: String?
-    @Published var v2Chat: V2ChatStore? = V2Vault.load().map(V2ChatStore.init)
+    @Published var v2Chat: V2ChatStore? = V2Vault.load().map(V2ChatStore.init) {
+        didSet {
+            guard oldValue !== v2Chat else { return }
+            oldValue?.deactivate()
+            selectedDiaryDay = nil
+            mailboxOpen = false
+            isCapturing = false
+            reactionTask?.cancel()
+            reaction = nil
+            bindV2World()
+            registeredV2PushState = nil
+            notificationLetterID = nil
+            bindV2Notifications()
+        }
+    }
+    var v2Work: V2WorkStore? { v2Chat?.work }
     @Published var showsPairing = false
     @Published var pairInvitation: PairInvitation?
+    @Published var pendingFamilyJoin: V2FamilyJoin?
     @Published var pairingError: String?
     @Published var pairingBusy = false
     var pairedProbeTask: Task<Void, Never>?
     var lastPairProbe = Date.distantPast
     @Published var identityError: String?
-    var registeredNotificationDeviceID: String?
+    var registeredV2PushState: String?
+    var syncingV2Push = false
+    var flushingV2Retirements = false
+    var resolvingV2Push = false
     var resolvingNotification = false
     @Published var notificationMessageID: String?
     @Published var notificationLetterID: String?
@@ -334,7 +358,10 @@ final class AppStore: ObservableObject {
         return creationArchive.profile?.firstReply
     }
 
-    var catName: String { nameDraft.trimmed.isEmpty ? SeedData.defaultCatName : nameDraft.trimmed }
+    var catName: String {
+        if let v2World { return v2World.world?.profile.name ?? SeedData.defaultCatName }
+        return nameDraft.trimmed.isEmpty ? SeedData.defaultCatName : nameDraft.trimmed
+    }
     var isNameValid: Bool { CreationDraft.validName(nameDraft) }
     var nameSuggestions: [String] { SeedData.namePool[namePoolIndex % SeedData.namePool.count] }
 
@@ -370,10 +397,12 @@ final class AppStore: ObservableObject {
             }
         }
         NotificationBridge.store = self
+        bindV2Notifications()
         loadPersisted()
         loadCreation()
+        bindV2World()
         connectBackend()
-        loadDiary()
+        if v2Chat == nil { loadDiary() }
     }
 
     private func run(_ body: @escaping () async throws -> Void) -> Task<Void, Never> {
@@ -496,6 +525,10 @@ final class AppStore: ObservableObject {
         }
     }
     func poke() {
+        if let v2World {
+            if v2World.canSubmit { world.poke() }
+            return
+        }
         guard !isLost,!world.moving else {return}
         let now=Date()
         pokeTimes.append(now)
@@ -532,13 +565,18 @@ final class AppStore: ObservableObject {
     func openMailbox(anchor: CGPoint) {
         guard !mailboxOpen else {return}
         mailboxAnchor=anchor
-        if let unread = entries.filter(\.hasUnreadCatDiary).max(by: { $0.dayKey < $1.dayKey }) { selectDiaryDay(unread.dayKey) }
-        markCatDiariesRead(on: diaryDay)
+        if v2Chat == nil {
+            if let unread = entries.filter(\.hasUnreadCatDiary).max(by: { $0.dayKey < $1.dayKey }) { selectDiaryDay(unread.dayKey) }
+            markCatDiariesRead(on: diaryDay)
+        }
         refreshInbox()
         mailboxOpen=true
     }
 
-    func closeMailbox() { mailboxOpen=false }
+    func closeMailbox() {
+        mailboxOpen = false
+        v2Chat?.catDiary.invalidateEntries()
+    }
 
     func openTopicCard() {
         chatSource = ChatSource(kicker: "接着昨天的", text: SeedData.topicText)

@@ -4,9 +4,8 @@
 跑法（仓库根目录）：python3 tools/check_shared_rules.py
 挂在本机 pre-commit，以及 .github/workflows/checks.yml。
 
-检查四件事：
-1. 行为参数表：4 种气质 × 81 组特征 × 熟/未熟，跑 iOS 的 Personality.swift 与后端的
-   runtime/behavior.ts，逐字段比。两边是手写两份、注释写着"必须一样"，所以用跑出来的值比。
+检查五件事：
+1. 行为参数表：4 种气质 × 81 组特征 × 熟/未熟，逐字段比较 iOS、旧后端、新宿主的实际结果。
 2. 氛围关键帧：iOS Atmosphere.keyframes 与网页 KEYFRAMES 的（小时，时段）表。
 3. 地点顺序：scene.json 的 destinations 与后端 destinationIds、iOS Location.all 的名称顺序。
 4. 场景版本：scene.json 的 version 与后端 world/protocol.ts 的 sceneVersion 字面量。
@@ -21,6 +20,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCENE = os.path.join(ROOT, 'assets/scenes/courtyard-v4/scene.json')
@@ -112,20 +112,29 @@ def behavior_rows():
     ios_rows = json.loads(subprocess.run([swift_bin], check=True, capture_output=True, text=True).stdout)
 
     ts_src = os.path.join(tmp, 'dump.mjs')
-    behavior_ts = os.path.join(ROOT, 'server/src/runtime/behavior.ts')
-    with open(ts_src, 'w', encoding='utf-8') as f:
-        f.write(TS_DUMP % behavior_ts)
-    try:
-        out = subprocess.run(['node', '--experimental-strip-types', ts_src], check=True, capture_output=True, text=True).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        fail('行为参数表 · 后端侧运行失败', [str(getattr(e, 'stderr', e)).strip()[-400:]])
-    return ios_rows, json.loads(out)
+    datasets = []
+    for name, path in [('旧后端', 'server/src/runtime/behavior.ts'), ('新宿主', 'host/src/world/behavior.ts')]:
+        with open(ts_src, 'w', encoding='utf-8') as f:
+            f.write(TS_DUMP % os.path.join(ROOT, path))
+        try:
+            out = subprocess.run(['node', '--experimental-strip-types', ts_src], check=True, capture_output=True, text=True).stdout
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            fail(f'行为参数表 · {name}运行失败', [str(getattr(e, 'stderr', e)).strip()[-400:]])
+        datasets.append((name, json.loads(out)))
+    shutil.rmtree(tmp)
+    return ios_rows, datasets
 
 
 def check_behavior():
-    ios_rows, server_rows = behavior_rows()
+    ios_rows, datasets = behavior_rows()
+    for name, rows in datasets:
+        compare_behavior(ios_rows, rows, name)
+    return f"{len(ios_rows)} 组行为参数在 iOS、旧后端和新宿主完全一致"
+
+
+def compare_behavior(ios_rows, server_rows, name):
     if len(ios_rows) != len(server_rows):
-        fail('行为参数表 · 行数不同', [f'iOS {len(ios_rows)} 行，后端 {len(server_rows)} 行'])
+        fail('行为参数表 · 行数不同', [f'iOS {len(ios_rows)} 行，{name} {len(server_rows)} 行'])
     for a, b in zip(ios_rows, server_rows):
         where = f"气质 {a['temperament']}、特征 {a['traits']}、领养 {a['days']} 天"
         if a['temperament'] != b['temperament'] or a['traits'] != b['traits'] or a['days'] != b['days']:
@@ -139,8 +148,7 @@ def check_behavior():
             else:
                 same = close(av, bv)
             if not same:
-                fail('行为参数表不一致', [f'{where}：{key} iOS = {av}，后端 = {bv}'])
-    return f"{len(ios_rows)} 组行为参数在 iOS 与后端完全一致"
+                fail('行为参数表不一致', [f'{where}：{key} iOS = {av}，{name} = {bv}'])
 
 
 # ---------- 2. 氛围关键帧 ----------
@@ -165,6 +173,9 @@ def check_keyframes():
     return f"{len(ios_frames)} 个氛围关键帧在 iOS 与网页一致"
 
 
+WORLD_PROTOCOLS = ('server/src/world/protocol.ts', 'host/src/world/protocol.ts')
+
+
 # ---------- 3. 地点顺序 ----------
 
 def check_destinations():
@@ -172,28 +183,29 @@ def check_destinations():
     ids = [d['id'] for d in scene['destinations']]
     names = [d['name'] for d in scene['destinations']]
 
-    protocol = read('server/src/world/protocol.ts')
-    server_ids = re.findall(r"'([a-z]+)'", re.search(r'destinationIds = \[(.*?)\]', protocol).group(1))
-    if server_ids != ids:
-        fail('地点表 · 后端与 scene.json 不一致', [f'scene.json {ids}', f'protocol.ts {server_ids}'])
+    for path in WORLD_PROTOCOLS:
+        protocol = read(path)
+        protocol_ids = re.findall(r"""['"]([a-z]+)['"]""", re.search(r'destinationIds = \[(.*?)\]', protocol).group(1))
+        if protocol_ids != ids:
+            fail('地点表与 scene.json 不一致', [f'scene.json {ids}', f'{path} {protocol_ids}'])
 
     location = read('ios/Maomao/Model/Location.swift')
     ios_names = re.findall(r'id: \.\w+,\s*name: "([^"]+)"', location)
     if ios_names != names:
         fail('地点表 · iOS Location.all 与 scene.json 顺序或名字不一致（模拟器按数组下标取地点）',
              [f'scene.json {names}', f'Location.all {ios_names}'])
-    return f"{len(ids)} 个地点的 id 与名称顺序在 scene.json、后端、iOS 三处一致"
+    return f"{len(ids)} 个地点的 id 与名称顺序在 scene.json、旧后端、新宿主、iOS 一致"
 
 
 # ---------- 4. 场景版本 ----------
 
 def check_scene_version():
     version = json.load(open(SCENE, encoding='utf-8'))['version']
-    protocol = read('server/src/world/protocol.ts')
-    literal = int(re.search(r'sceneVersion: z\.literal\((\d+)\)', protocol).group(1))
-    if literal != version:
-        fail('场景版本不一致', [f'scene.json version = {version}', f'protocol.ts sceneVersion = {literal}'])
-    return f"场景版本 {version} 在 scene.json 与后端一致"
+    for path in WORLD_PROTOCOLS:
+        literal = int(re.search(r'sceneVersion: z\.literal\((\d+)\)', read(path)).group(1))
+        if literal != version:
+            fail('场景版本不一致', [f'scene.json version = {version}', f'{path} sceneVersion = {literal}'])
+    return f"场景版本 {version} 在 scene.json、旧后端和新宿主一致"
 
 
 # ---------- 5. 生成物与源同步 ----------

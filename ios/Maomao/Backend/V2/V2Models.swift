@@ -37,6 +37,7 @@ enum V2 {
         let id: String
         let conversationId: String
         let cursor: String
+        var revision: Int? = nil
         let author: Author
         let text: String
         let modality: String
@@ -46,7 +47,7 @@ enum V2 {
         let turnId: String?
         let createdAt: Int64
         enum CodingKeys: String, CodingKey {
-            case id, cursor, author, text, modality, status
+            case id, cursor, revision, author, text, modality, status
             case conversationId = "conversation_id", clientMessageId = "client_message_id"
             case replyToMessageId = "reply_to_message_id", turnId = "turn_id", createdAt = "created_at"
         }
@@ -67,7 +68,7 @@ enum V2 {
         }
         var title: String { kind == .group ? "我们仨" : "我和团子" }
     }
-    struct Turn: Codable {
+    struct Turn: Codable, Equatable {
         enum Status: String, Codable {
             case queued, generating, completed, stopped, superseded, failed
         }
@@ -92,7 +93,34 @@ enum V2 {
             case messages, hasMoreBefore = "has_more_before", hasMoreAfter = "has_more_after"
         }
     }
-    struct Sent: Decodable { let message: Message; let turn: Turn? }
+    struct Sent: Codable, Equatable { let message: Message; let turn: Turn? }
+    struct PendingSend: Codable, Equatable {
+        enum Reason: String, Codable {
+            case publicationPending = "publication_pending"
+            case peerPending = "peer_pending"
+            case replicationPending = "replication_pending"
+
+            var title: String {
+                switch self {
+                case .publicationPending: return "等待群聊发布权"
+                case .peerPending: return "等待另一台电脑接收"
+                case .replicationPending: return "已接收，等待同步"
+                }
+            }
+        }
+        let requestID: String
+        let clientMessageID: String
+        let reason: Reason
+        let url: String
+        enum CodingKeys: String, CodingKey {
+            case requestID = "request_id", clientMessageID = "client_message_id", reason, url = "receipt_url"
+        }
+    }
+    enum SendResult {
+        case pending(PendingSend)
+        case accepted(Sent)
+        case rejected(String)
+    }
     enum APIError: Error, Equatable, LocalizedError {
         case unauthorized, notFound, idempotencyConflict, notPublisher, invalidRequest, pairingCodeInvalid
         case other(String)
@@ -105,6 +133,17 @@ enum V2 {
             case "invalid_request": self = .invalidRequest
             case "pairing_code_invalid": self = .pairingCodeInvalid
             default: self = .other(code)
+            }
+        }
+        var code: String {
+            switch self {
+            case .unauthorized: return "unauthorized"
+            case .notFound: return "not_found"
+            case .idempotencyConflict: return "idempotency_conflict"
+            case .notPublisher: return "not_publisher"
+            case .invalidRequest: return "invalid_request"
+            case .pairingCodeInvalid: return "pairing_code_invalid"
+            case .other(let code): return code
             }
         }
         var errorDescription: String? {

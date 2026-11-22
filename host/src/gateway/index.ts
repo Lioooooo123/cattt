@@ -1,3 +1,8 @@
+import { soulRoutes } from "../soul/routes.ts";
+import { worldRoutes } from "../world/routes.ts";
+import { backupStatus, createBackup } from "../backup/index.ts";
+import { phoneSyncGeneration } from "../store/backup.ts";
+import { join } from "node:path";
 import { Hono } from "hono";
 import type { Component, HostContext } from "../runtime/index.ts";
 import { streamTurn } from "../turns/stream.ts";
@@ -9,12 +14,32 @@ import { initializeLan } from "../identity/tls.ts";
 import type { LanTlsOptions } from "../identity/tls.ts";
 import { DEFAULT_LAN_HTTPS_PORT } from "../runtime/config.ts";
 import { memberInviteRoutes } from "../identity/invites.ts";
+import { pushRoutes } from "../push/routes.ts";
+import { proactiveRoutes } from "../inference/routes.ts";
+import { mailboxRoutes } from "../router/mailbox-routes.ts";
+import { ticketRoutes } from "../tickets/routes.ts";
 import { conversationRoutes } from "../conversations/routes.ts";
+import { BlobStorage } from "../files/blobs.ts";
+import { fileRoutes } from "../files/routes.ts";
+import { memberChangesRoutes } from "../member-changes/routes.ts";
+import { memberResourceRoutes } from "../member-resources/routes.ts";
+import type { GroupSends } from "../group-sends/index.ts";
 import { actorDto, memberProfile } from "../identity/dto.ts";
+import { startPeerService } from "../peer/index.ts";
+import { relayRoutes } from "../relay/routes.ts";
+import type { PeerBehaviorChannel } from "../peer-behavior/index.ts";
+import type { PeerHandlers, PeerProtocol } from "../peer/index.ts";
+import { isPeerAddress } from "../peer/protocol.ts";
 
-interface GatewayOptions {
+export interface GatewayOptions {
+  groupSends?: GroupSends;
+  peerBehavior?: PeerBehaviorChannel;
   heartbeatIntervalMs?: number;
   lanPort?: number;
+  peerPort?: number;
+  peerHostname?: string;
+  peerHandlers?: PeerHandlers;
+  peerProtocol?: PeerProtocol;
   tlsRefreshIntervalMs?: number;
   tls?: LanTlsOptions;
 }
@@ -24,8 +49,10 @@ export class Gateway implements Component {
   private server: ReturnType<typeof Bun.serve> | undefined;
   private readonly streams = new Set<AbortController>();
   private readonly heartbeatIntervalMs: number;
+  private peerService: Awaited<ReturnType<typeof startPeerService>> | undefined;
   private lanServer: ReturnType<typeof Bun.serve> | undefined;
   private readonly draining = new Set<ReturnType<typeof Bun.serve>>();
+  private fileShutdown: AbortController | undefined;
   private stopping = false;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshing: Promise<void> | undefined;
@@ -41,6 +68,11 @@ export class Gateway implements Component {
     }
   }
 
+  attachBehavior(channel: PeerBehaviorChannel, groupSends: GroupSends): void {
+    this.options.peerBehavior = channel;
+    this.options.groupSends = groupSends;
+  }
+
   get port(): number | undefined {
     return this.server?.port;
   }
@@ -48,6 +80,16 @@ export class Gateway implements Component {
   get lanPort(): number | undefined {
     return this.lanServer?.port;
   }
+
+  get peerPort(): number | undefined {
+    return this.peerService?.port;
+  }
+
+  get peerTransport() {
+    return this.peerService?.transport;
+  }
+
+  activatePeer(): void { this.peerService?.activate(); }
 
   async start(ctx: HostContext): Promise<void> {
     this.stopping = false;
@@ -70,9 +112,38 @@ export class Gateway implements Component {
     app.onError(internalError);
     const lanStatus = () => ({ enabled: this.lanPort !== undefined, port: this.lanPort ?? 0 });
     const auth = requireActor(ctx);
+    const generation = () => phoneSyncGeneration(ctx.store.db, ctx.hostId);
+    const maintenance = () => ctx.config.accessPaused?.() ?? false;
+    const unavailable = () => Response.json({ error: { code: "maintenance" } }, { status: 503 });
+    app.use("/v2/*", async (c, next) => {
+      if (c.req.path === "/v2/healthz") return next();
+      if (maintenance()) return unavailable();
+      const current = generation();
+      c.header("X-Cattt-Sync-Generation", current);
+      const given = c.req.header("X-Cattt-Sync-Generation");
+      // The member changes feed owns its cursor-reset envelope.
+      const ownsCursorReset = c.req.path === "/v2/sync-generation" || c.req.path === "/v2/changes";
+      if (given !== undefined && given !== current && !ownsCursorReset) {
+        return c.json({ error: { code: "reset_required" }, generation: current }, 409);
+      }
+      await next();
+    });
+    app.get("/v2/sync-generation", auth, (c) => c.json({ generation: generation() }));
     app.route("/v2", phonePairingRoutes(ctx));
     app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
-    app.route("/v2", conversationRoutes(ctx, (request, turnId, cursor) => this.stream(request, ctx, turnId, cursor)));
+    app.route("/v2", memberResourceRoutes(ctx, this.options.peerBehavior));
+    app.route("/v2", soulRoutes(ctx));
+    app.route("/v2", conversationRoutes(ctx, (request, turnId, cursor) => this.stream(request, ctx, turnId, cursor), this.options.groupSends));
+    const blobs = new BlobStorage(join(ctx.config.dataDir, "blobs"));
+    this.fileShutdown = new AbortController();
+    app.route("/v2", memberChangesRoutes(ctx, blobs));
+    app.route("/v2/world", worldRoutes(ctx, () => this.peerTransport, this.fileShutdown.signal));
+    app.route("/v2/files", fileRoutes(ctx, this.fileShutdown.signal, blobs));
+    app.route("/v2", ticketRoutes(ctx));
+    app.route("/v2", mailboxRoutes(ctx));
+    app.route("/v2", proactiveRoutes(ctx));
+    app.route("/v2", pushRoutes(ctx));
+    if (ctx.config.relay) app.route("/v2", relayRoutes(ctx, ctx.config.relay.peer));
     app.get("/v2/healthz", (c) => c.json({ ok: true, host_id: ctx.hostId, protocol_version: 1 }));
     app.get("/v2/me", auth, (c) => {
       const actor = c.get("actor");
@@ -90,7 +161,6 @@ export class Gateway implements Component {
     const loopback = new Hono<IdentityEnv>();
     loopback.onError(internalError);
     loopback.route("/", app);
-    loopback.route("/host", hostAdminRoutes(ctx, identity, lanStatus));
     loopback.notFound((c) => c.json({ error: { code: "not_found", message: "未找到接口" } }, 404));
     const lanEnabled = this.options.lanPort !== undefined || lanPort !== 0;
     const bindLan = (port: number) => Bun.serve({
@@ -104,7 +174,44 @@ export class Gateway implements Component {
       } catch {}
     };
     try {
-      this.server = Bun.serve({ hostname, port: ctx.config.port ?? 8788, idleTimeout: 0, fetch: loopback.fetch });
+      const peerPort = this.options.peerPort ?? ctx.config.peerHttpsPort ?? 0;
+      if (this.options.peerPort !== undefined || peerPort !== 0) {
+        if (!Number.isInteger(peerPort) || peerPort < 0 || peerPort > 65535) {
+          throw new RangeError("Peer HTTPS 端口必须是 0 至 65535 的整数");
+        }
+        const peerHostname = this.options.peerHostname ?? "0.0.0.0";
+        this.peerService = await startPeerService(ctx, {
+          port: peerPort, hostname: peerHostname, storage: blobs,
+          advertisedHost: () => [peerHostname, ...identity.hosts()].find(isPeerAddress) ?? "localhost",
+          handlers: this.options.peerBehavior ? {
+            ...this.options.peerHandlers,
+            inbox: (request, actor) => this.options.peerBehavior!.receive(ctx, request, actor),
+          } : this.options.peerHandlers,
+          protocol: this.options.peerProtocol,
+          report: (error) => {
+            try {
+              Promise.resolve(ctx.config.onError
+                ? ctx.config.onError(error, "gateway:peer") : console.error("Peer HTTPS 错误", error)).catch(() => {});
+            } catch {}
+          },
+        });
+      }
+      loopback.route("/host", hostAdminRoutes(ctx, identity, lanStatus, this.peerService?.admin, {
+        maintenance, generation, peerPort: () => this.peerPort,
+        list: () => backupStatus(ctx.config.dataDir),
+        create: async () => {
+          await this.refreshing;
+          if (maintenance()) throw new Error("维护期间无法创建在线备份");
+          return createBackup(ctx.config.dataDir, ctx.store, "manual", ctx.clock);
+        },
+      }));
+      this.server = Bun.serve({ hostname, port: ctx.config.port ?? 8788, idleTimeout: 0,
+        fetch: (request) => {
+          const pathname = new URL(request.url).pathname;
+          if (maintenance() && pathname !== "/v2/healthz" && pathname !== "/host/status") return unavailable();
+          return loopback.fetch(request);
+        },
+      });
       if (lanEnabled) {
         this.lanServer = bindLan(lanPort);
       }
@@ -147,6 +254,8 @@ export class Gateway implements Component {
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.fileShutdown?.abort();
+    this.fileShutdown = undefined;
     clearInterval(this.refreshTimer);
     this.refreshTimer = undefined;
     await this.refreshing;
@@ -157,7 +266,10 @@ export class Gateway implements Component {
     for (const stream of this.streams) {
       stream.abort();
     }
-    await Promise.all([server, lanServer, ...this.draining].map((listener) => listener?.stop(true)));
+    const peer = this.peerService;
+    this.peerService = undefined;
+    await Promise.all([server?.stop(true), lanServer?.stop(true), peer?.stop(),
+      ...Array.from(this.draining, (listener) => listener.stop(true))]);
     this.draining.clear();
   }
 

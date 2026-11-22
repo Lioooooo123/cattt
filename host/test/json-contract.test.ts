@@ -78,6 +78,10 @@ test("遍历全部 /v2 与 /host 路由 JSON（含 SSE data）：键名无大写
     await request("/v2/invites/accept", { body: { code: invite.code, display_name: "重复", device_name: "手机" }, status: 401 });
     await request("/v2/members", { token: a.device_token });
     await request("/v2/me", { token: b.device_token });
+    await request("/v2/world/sessions", { token: a.device_token, body: { protocolVersion: 2 }, status: 400 });
+    await request("/v2/world/sessions", { token: a.device_token, body: { protocol_version: 2 } });
+    await request("/v2/world/state", { token: a.device_token });
+    await request("/v2/changes", { token: a.device_token });
     const revoked = await request<{ invite_id: string }>("/v2/invites", { token: a.device_token, body: {} });
     await request(`/v2/invites/${revoked.invite_id}`, { method: "DELETE", token: b.device_token, status: 403 });
     await request(`/v2/invites/${revoked.invite_id}`, { method: "DELETE", token: a.device_token });
@@ -89,7 +93,7 @@ test("遍历全部 /v2 与 /host 路由 JSON（含 SSE data）：键名无大写
     await request(path + "/messages", { token: a.device_token });
     await request(path + "/messages", { token: a.device_token, body: { clientMessageId: "bad", text: "旧键" }, status: 400 });
     const message = await request<{ message: Message; turn: Turn }>(path + "/messages", {
-      token: a.device_token, body: { client_message_id: "snake", text: "Hello 大写值合法" }, status: 201,
+      token: a.device_token, body: { client_message_id: "snake", text: "团子，Hello 大写值合法" }, status: 201,
     });
     await request(path + "/messages", { token: a.device_token });
     const turnPath = path + `/turns/${message.turn.id}`;

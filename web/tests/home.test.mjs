@@ -102,3 +102,19 @@ test('第二批动作转正后进入，持续阶段才安顿；离开和恢复�
     behavior.accept({id:'leave',place:'pond',activity:'watch'});assert(!behavior.settled);assert(!behavior.drinkDone);
   }
 });
+
+test('匹配的共享快照只投影确认地点，清除旧意图后允许真实命令', () => {
+  const { cat, walker, behavior } = make();
+  cat.restorePose = () => cat.stand();
+  walker.teleport = place => { walker.goal = place; walker.arrived = true; };
+  behavior.accept({ id: 'discard', place: 'fence', activity: 'drink' });
+  behavior.projectShared({ id: 'shared', place: 'pond', activity: 'watch' });
+  assert.equal(walker.goal, 'pond');
+  assert.equal(behavior.intent.id, 'shared');
+  assert.equal(behavior.moving, false);
+  assert.equal(behavior.settled, false);
+  assert.equal(behavior.drinkDone, false);
+  behavior.accept({ id: 'confirmed', place: 'grass', activity: 'sit' });
+  assert.equal(walker.goal, 'grass');
+  assert.equal(behavior.moving, true);
+});

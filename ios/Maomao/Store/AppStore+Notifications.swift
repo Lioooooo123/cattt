@@ -5,7 +5,7 @@ import UIKit
 extension AppStore {
     /// 只有服务端明确的约定凭证才能触发首次系统授权，不根据回复文字猜测。
     func requestNotificationPermissionAfterAgreement(sourceMessageID: String?) {
-        guard backend.isRemote, !backend.token.isEmpty else { return }
+        guard v2Chat == nil, backend.isRemote, !backend.token.isEmpty else { return }
         let client = api
         Task { @MainActor in
             guard let tickets = try? await client.tickets(includeEndedFollowups: true), backend == client.config else { return }
@@ -18,7 +18,7 @@ extension AppStore {
         }
     }
     func reconcileFollowupNotifications(_ tickets: [APITicket], config: BackendConfig) async {
-        await FollowupNotifications.reconcile(tickets) { self.backend == config }
+        await FollowupNotifications.reconcile(tickets) { self.v2Chat == nil && self.backend == config }
     }
 
     func refreshFollowupNotifications() async {
@@ -28,6 +28,7 @@ extension AppStore {
         await reconcileFollowupNotifications(tickets, config: client.config)
     }
     func resolveNotificationIntent() {
+        guard v2Chat == nil else { return }
         if NotificationBridge.pendingLocal {
             NotificationBridge.pendingLocal = false
             screen = .chat

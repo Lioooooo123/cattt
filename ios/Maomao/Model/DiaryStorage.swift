@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum DiaryDay {
@@ -139,6 +140,11 @@ struct DiaryArchive: Codable, Equatable {
 /// 读取失败向上传递，调用方不能拿空列表覆盖原件。
 struct DiaryStorage {
     let url: URL
+
+    static func legacy(identity: String, root: URL = .applicationSupportDirectory) -> DiaryStorage {
+        let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+        return DiaryStorage(url: root.appendingPathComponent("DiaryRecords/" + digest + ".json"))
+    }
 
     enum Failure: Error { case unsupportedVersion, duplicateIDs }
 

@@ -32,12 +32,12 @@ afterEach(() => {
 });
 
 describe("store", () => {
-  test("文件数据库启用 WAL、外键和等待超时", () => {
+  test("文件数据库启用 WAL、持久提交、外键和等待超时", () => {
     const { raw } = open(databasePath());
 
     expect(raw.query("PRAGMA journal_mode").get()).toEqual({ journal_mode: "wal" });
     expect(raw.query("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
-    expect(raw.query("PRAGMA synchronous").get()).toEqual({ synchronous: 1 });
+    expect(raw.query("PRAGMA synchronous").get()).toEqual({ synchronous: 2 });
     expect(raw.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 5000 });
     raw.exec("CREATE TABLE parent (id INTEGER PRIMARY KEY)");
     raw.exec("CREATE TABLE child (parent_id INTEGER REFERENCES parent(id))");

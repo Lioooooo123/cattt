@@ -26,8 +26,9 @@ export function issuePairingCode(db: StoreDb, clock: Clock, memberId: string) {
     const host = tx.select().from(hosts).where(and(
       eq(hosts.id, getHostMeta(tx, "host_id") ?? ""), isNull(hosts.deletedAt),
     )).get();
-    if (!member || member.householdId !== host?.householdId || !getHousehold(tx, member.householdId)) {
-      throw new TypeError("配对码必须绑定本宿主家庭的有效成员");
+    if (!host || !member || member.homeHostId !== host.id
+      || member.householdId !== host.householdId || !getHousehold(tx, member.householdId)) {
+      throw new TypeError("配对码必须绑定本机归属的有效成员");
     }
     const { code, codeHash } = generateCode((hash) => tx.select({ id: pairingCodes.id }).from(pairingCodes)
       .where(eq(pairingCodes.codeHash, hash)).get() !== undefined);
@@ -53,12 +54,12 @@ export function redeemPairingCode(db: StoreDb, clock: Clock, input: { code: stri
     const household = member ? getHousehold(tx, member.householdId) : undefined;
     const hostId = getHostMeta(tx, "host_id");
     const host = hostId ? tx.select().from(hosts).where(and(eq(hosts.id, hostId), isNull(hosts.deletedAt))).get() : undefined;
-    if (!code || !member || !household || host?.householdId !== household.id) {
+    if (!code || !member || !household || !host || member.homeHostId !== host.id || host.householdId !== household.id) {
       tx.update(pairingCodes).set(failedCode(pairingCodes)).where(active(now)).run();
       return undefined;
     }
     tx.update(pairingCodes).set({ usedAt: now }).where(eq(pairingCodes.id, code.id)).run();
-    const issued = createDevice(tx, clock, { memberId: member.id, hostId: host!.id, name: input.deviceName.trim() });
+    const issued = createDevice(tx, clock, { memberId: member.id, hostId: host.id, name: input.deviceName.trim() });
     return {
       ...issued,
       member: { id: member.id, householdId: member.householdId, displayName: member.displayName, homeHostId: member.homeHostId },

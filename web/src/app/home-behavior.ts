@@ -53,6 +53,14 @@ export class HomeBehavior {
     else if (this.onBed || this.cat.hopping) { if (this.stage !== 'bed-out') this.stage = 'bed-exit'; }
     else this.route();
   }
+  projectShared(intent: HomeIntent) {
+    if (!intent.id || !PLACE_ORDER.includes(intent.place) || !['watch', 'sit'].includes(intent.activity)) throw new Error('共享院子投影无效');
+    this.cat.restorePose(this.cat.position, this.cat.facing);
+    this.walker.teleport(intent.place);
+    this.restore(intent, false);
+    // A confirmed seat can be displayed, but restoration never settles an action receipt.
+    if (intent.activity === 'sit') this.cat.sit();
+  }
   private route() {
     if (this.intent.place === 'tree' && this.intent.activity === 'scratch' && this.cat.state === 'idle' &&
         this.cat.position.distanceTo(new THREE.Vector3().copy(SCRATCH_ENTRY)) < .015) {

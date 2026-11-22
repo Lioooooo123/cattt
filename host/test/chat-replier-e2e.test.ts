@@ -8,7 +8,7 @@ import { ModelHttpError } from "../src/llm/errors.ts";
 import { createMockModel } from "../src/llm/mock.ts";
 import { startHost } from "../src/runtime/index.ts";
 import { configFromEnv } from "../src/runtime/config.ts";
-import { getMember } from "../src/store/identity.ts";
+import { assembleChatRequest } from "../src/context/chat.ts";
 import { TurnRunner } from "../src/turns/index.ts";
 import { ChatReplier } from "../src/turns/chat-replier.ts";
 
@@ -17,7 +17,7 @@ test("HTTPS 配对双方、独立单聊和共享群聊经模型完成；提示�
   const gateway = new Gateway({ lanPort: 0, tls: { ips: () => [], hostname: "test" } });
   const model = createMockModel(0, true);
   let host: Awaited<ReturnType<typeof startHost>>;
-  const replier = new ChatReplier(model, (id) => getMember(host.store.db, id)?.displayName);
+  const replier = new ChatReplier(model, (input) => assembleChatRequest(host.store.db, input));
   host = await startHost({ ...configFromEnv({ MODEL_PROVIDER: "mock", MOCK_DELAY_MS: "0", CATTT_PORT: "0", CATTT_DATA_DIR: directory }), replier }, [new TurnRunner(), gateway]);
   const ca = readFileSync(join(directory, "tls/ca.crt"), "utf8");
   const adminToken = readFileSync(join(directory, "host-admin.token"), "utf8");
@@ -50,8 +50,8 @@ test("HTTPS 配对双方、独立单聊和共享群聊经模型完成；提示�
     const sent = [
       await send(dmA, a.device_token, "甲私信_不可混入别处"),
       await send(dmB, b.device_token, "乙私信_不可混入别处"),
-      await send(group, a.device_token, "甲群聊_一起坐坐"),
-      await send(group, b.device_token, "乙群聊_我也来了"),
+      await send(group, a.device_token, "团子，甲群聊_一起坐坐"),
+      await send(group, b.device_token, "团子，乙群聊_我也来了"),
     ];
     for (const [index, result] of sent.entries()) {
       expect(result.stream).toContain("event: accepted");
@@ -76,8 +76,8 @@ test("HTTPS 配对双方、独立单聊和共享群聊经模型完成；提示�
       expect(requests[index]).not.toContain("甲私信"); expect(requests[index]).not.toContain("乙私信");
     }
     const groupPrompt = model.requests[3]!.messages.map((message) => message.content).join("\n");
-    expect(groupPrompt).toContain('"阿甲"：甲群聊_一起坐坐');
-    expect(groupPrompt).toContain('"阿乙"：乙群聊_我也来了');
+    expect(groupPrompt).toContain('"阿甲"：团子，甲群聊_一起坐坐');
+    expect(groupPrompt).toContain('"阿乙"：团子，乙群聊_我也来了');
     expect(sent[2]!.message.author).toEqual({ kind: "member", member_id: a.member.id });
     expect(sent[3]!.message.author).toEqual({ kind: "member", member_id: b.member.id });
     expect(await json(`/v2/conversations/${dmA.id}`, b.device_token, undefined, 404)).toEqual({ error: { code: "not_found" } });

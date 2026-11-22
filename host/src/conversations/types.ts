@@ -37,3 +37,27 @@ export interface Turn {
   error_code: string | null;
   stream_url: string;
 }
+
+export interface PendingGroupSend {
+  status: "pending";
+  request_id: string;
+  client_message_id: string;
+  reason: "publication_pending" | "peer_pending" | "replication_pending";
+  receipt_url: string;
+}
+
+export type GroupSendReceipt =
+  | {
+    status: "accepted";
+    request_id: string;
+    client_message_id: string;
+    publisher_host_id: string;
+    message: Message;
+    turn: Turn | null;
+  }
+  | {
+    status: "rejected";
+    request_id: string;
+    client_message_id: string;
+    error: { code: "group_send_rejected" };
+  };

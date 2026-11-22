@@ -10,7 +10,7 @@ extension AppStore {
     }
 
     func syncDiary() {
-        guard backend.isRemote, !backend.token.isEmpty, !diaryLoadFailed else { return }
+        guard v2Chat == nil, backend.isRemote, !backend.token.isEmpty, !diaryLoadFailed else { return }
         guard diarySyncTask == nil else { diarySyncAgain = true; return }
         let generation = diaryGeneration
         let client = api

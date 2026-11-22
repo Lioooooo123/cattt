@@ -31,7 +31,9 @@ enum PairFingerprint {
 }
 
 struct PairInvitation: Equatable {
+    enum Kind: String { case device = "pair", family = "invite" }
     var version: Int = 1
+    var kind: Kind = .device
     let hosts: [String]
     let port: Int
     let code: String
@@ -48,17 +50,19 @@ struct PairInvitation: Equatable {
         } && !host.hasPrefix(".") && !host.hasSuffix(".")
     }
     static func parse(_ url: URL, versions: [Int] = [1]) -> PairInvitation? {
-        guard url.scheme == "maomao", url.host == "pair", url.path.isEmpty,
+        guard url.scheme == "maomao", let kind = url.host.flatMap(Kind.init(rawValue:)), url.path.isEmpty,
               let parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let items = parts.queryItems,
+              parts.user == nil, parts.password == nil, parts.port == nil, parts.fragment == nil,
               Set(items.map(\.name)).count == items.count else { return nil }
         let query = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
         guard let version = query["v"].flatMap(Int.init), versions.contains(version), let rawHosts = query["h"], let rawPort = query["p"],
               let port = Int(rawPort), (1...65535).contains(port),
               let rawCode = query["c"], let code = normalizedCode(rawCode),
               let fingerprint = query["fp"], PairFingerprint.valid(fingerprint) else { return nil }
+        if kind == .family, version != 2 || query.count != 5 { return nil }
         let hosts = rawHosts.components(separatedBy: ",")
         guard !hosts.isEmpty, hosts.count <= 32, hosts.allSatisfy(validHost) else { return nil }
-        return PairInvitation(version: version, hosts: hosts, port: port, code: code, fingerprint: fingerprint)
+        return PairInvitation(version: version, kind: kind, hosts: hosts, port: port, code: code, fingerprint: fingerprint)
     }
     static func address(_ raw: String) -> (host: String, port: Int)? {
         let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: ":")

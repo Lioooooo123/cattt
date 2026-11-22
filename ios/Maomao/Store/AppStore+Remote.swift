@@ -122,7 +122,7 @@ extension AppStore {
         let remoteGeneration = remoteChatGeneration
         let client = api
         worldBridge?.stop(); worldBridge = nil
-        guard backend.isRemote else { return }
+        guard v2Chat == nil, backend.isRemote else { return }
         guard !backend.token.isEmpty else {
             backendStatus = "还没填 token"
             return

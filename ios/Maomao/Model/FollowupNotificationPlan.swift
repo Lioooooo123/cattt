@@ -35,6 +35,7 @@ struct FollowupNotificationPlan {
     struct Notice: Equatable {
         let id: String
         let fireDate: Date
+        var conversationID: String? = nil
         let title = "团子"
         let body = "约好的时间到了，想聊时再来。"
     }
@@ -48,18 +49,20 @@ struct FollowupNotificationPlan {
                   ticket.status == "open", ticket.stage == "scheduled",
                   let due = ticket.date, due > now,
                   let zone = ticket.timeZone.flatMap(TimeZone.init(identifier:)) else { return nil }
-            var calendar = Calendar(identifier: .gregorian)
-            calendar.timeZone = zone
-            let hour = calendar.component(.hour, from: due)
-            var fire = due
-            if hour < 9 || hour >= 22 {
-                let day = hour >= 22 ? calendar.date(byAdding: .day, value: 1, to: due)! : due
-                fire = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
-            }
+            guard let fire = Self.fireDate(due, in: zone) else { return nil }
             return Notice(id: "followup-" + ticket.id, fireDate: fire)
         }.sorted { $0.fireDate == $1.fireDate ? $0.id < $1.id : $0.fireDate < $1.fireDate }
         add = Array(candidates.prefix(max(0, 64 - otherCount)))
         let selected = Set(add.map(\.id))
         remove = pendingIDs.filter { $0.hasPrefix("followup-") && !selected.contains($0) }
+    }
+
+    static func fireDate(_ due: Date, in zone: TimeZone) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let hour = calendar.component(.hour, from: due)
+        if (9..<22).contains(hour) { return due }
+        let day = hour >= 22 ? calendar.date(byAdding: .day, value: 1, to: due) : due
+        return day.flatMap { calendar.date(bySettingHour: 9, minute: 0, second: 0, of: $0) }
     }
 }

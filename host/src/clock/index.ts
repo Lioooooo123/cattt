@@ -10,10 +10,14 @@ export interface Clock {
   observe(remote: Hlc): Hlc;
 }
 
+export function wallDate(instant: number): Date {
+  return new Date(instant);
+}
+
 export function clockDate(clock: Clock, offsetMs = 0): Date {
   const now = clock.wallMs();
   validateWallMs(now);
-  return new Date(now + offsetMs);
+  return wallDate(now + offsetMs);
 }
 
 export interface ClockOptions {

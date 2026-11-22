@@ -16,8 +16,8 @@ struct MeView: View {
                     accountSection
                     howWeGetAlong
                     whatItRemembers
-                    if store.backend.isRemote { agreements }
-                    if store.backend.isRemote { proactiveSettings }
+                    if store.v2Work != nil || store.backend.isRemote { agreements }
+                    if store.v2Chat == nil && store.backend.isRemote { proactiveSettings }
                     settings
                 }
                 .padding(.horizontal, 24)
@@ -31,10 +31,14 @@ struct MeView: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(Palette.bg)
         .preferredColorScheme(.light)
-        .task { await store.refreshProactivePermission() }
-        .sheet(isPresented: $showsAgreements) { AgreementsView().environmentObject(store) }
+        .task { if store.v2Chat == nil { await store.refreshProactivePermission() } }
+        .sheet(isPresented: $showsAgreements) {
+            if let work = store.v2Work { V2AgreementsView(work: work) }
+            else { AgreementsView().environmentObject(store) }
+        }
         .sheet(isPresented: $store.showsMemoryControls) {
-            MemoryCenterView(startWithBoundaries: store.memoryShowsBoundaries)
+            if let resources = store.v2Chat?.resources { V2MemoryCenterView(resources: resources) }
+            else { MemoryCenterView(startWithBoundaries: store.memoryShowsBoundaries) }
         }
     }
 
@@ -51,6 +55,9 @@ struct MeView: View {
                 TextLink(text: "解除配对", size: 13) { store.unpairHost() }
             } else {
                 TextLink(text: "连接家里的电脑", size: 14) { store.openPairing() }
+            }
+            if store.hasActivePairing {
+                TextLink(text: "使用家庭邀请链接", size: 13) { store.openPairing() }
             }
             if let error = store.identityError { Text(error).font(Typo.sans(13)).foregroundStyle(Palette.ink3) }
         }
@@ -148,7 +155,7 @@ struct MeView: View {
                     store.memoryShowsBoundaries = false; store.showsMemoryControls = true
                 } label: {
                     memoryRow(icon: { Icons.document(color: Palette.ink3) },
-                              title: "长期记忆", count: store.backend.isRemote ? "\(store.memoryCount) 条 ›" : "演示模式 ›")
+                              title: "长期记忆", count: store.v2Chat != nil ? "查看 ›" : (store.backend.isRemote ? "\(store.memoryCount) 条 ›" : "演示模式 ›"))
                 }.buttonStyle(.plain)
             }
         }

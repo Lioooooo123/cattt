@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { businessColumns } from "./columns.ts";
 import { households, hosts, members } from "./identity.ts";
@@ -31,8 +31,10 @@ export const messages = sqliteTable("messages", {
   modality: text("modality", { enum: ["text"] }).notNull(),
   status: text("status", { enum: ["complete", "stopped"] }).notNull(),
   clientMessageId: text("client_message_id"),
+  historyContextBlocked: integer("history_context_blocked", { mode: "boolean" }).notNull().default(false),
   replyToMessageId: text("reply_to_message_id").references((): AnySQLiteColumn => messages.id),
   turnId: text("turn_id"),
+  publicationEpoch: integer("publication_epoch"),
 }, (table) => [
   uniqueIndex("messages_client_idempotency").on(table.conversationId, table.authorMemberId, table.clientMessageId),
   index("messages_conversation_order").on(table.conversationId, table.hlc, table.id),

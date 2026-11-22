@@ -120,6 +120,14 @@ struct YardIntent {
         ready = true; failure = nil
         return true
     }
+    mutating func projectShared(at place: String, activity: String) {
+        guard let index = Self.places.firstIndex(of: place) else { return }
+        self = YardIntent()
+        current = index
+        autonomous = false
+        choose(index, activity: activity)
+    }
+
     mutating func unavailable(_ reason: String) { ready = false; failure = reason }
     mutating func seed(_ value: UInt64) { rng = WorldRandom(state: value) }
 }

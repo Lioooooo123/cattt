@@ -6,7 +6,7 @@ enum PairingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unavailable: return "团子在家里的电脑上"
-        case .invalidLink: return "配对链接不完整或版本不支持，请在电脑上重新生成"
+        case .invalidLink: return "配对或邀请链接不完整，或版本不支持，请在电脑上重新生成"
         case .invalidAddress: return "请填写电脑地址和八位配对码"
         case .certificate: return "电脑证书与配对指纹不一致，未发送配对码"
         case .storage: return "没能安全保存配对信息，请重试"
@@ -43,6 +43,13 @@ final class PairTrustDelegate: NSObject, URLSessionDelegate, URLSessionTaskDeleg
         }
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        // A reconnecting byte stream can receive its server-trust challenge at the task level.
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)

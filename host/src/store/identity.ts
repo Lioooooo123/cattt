@@ -2,26 +2,22 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
 import type { Clock } from "../clock/index.ts";
 import type { Actor } from "../identity/index.ts";
+import { AccessDeniedError } from "../identity/access.ts";
 import { DEFAULT_MAX_MEMBERS } from "../runtime/config.ts";
-import { getHostMeta } from "./host-meta.ts";
+import { getHostMeta, requireLocalHostId as localHostId } from "./host-meta.ts";
 import type { StoreDb } from "./index.ts";
+import { devicePushRegistrations } from "./schema/push.ts";
 import { deviceCredentials, devices, households, hosts, members } from "./schema/identity.ts";
 import { businessRow, revision } from "./business.ts";
 import { ensureGroup, reconcileConversations } from "./conversation-lifecycle.ts";
+import { appendNativeChange, initializeNativeReplication } from "./replication.ts";
+import { replicaAdapters } from "./replica-records.ts";
 
 export class MemberLimitError extends Error {
   constructor(public readonly maxMembers: number) {
     super(`家庭成员数已达上限：${maxMembers}`);
     this.name = "MemberLimitError";
   }
-}
-
-function localHostId(db: Pick<StoreDb, "select">): string {
-  const id = getHostMeta(db, "host_id");
-  if (!id) {
-    throw new Error("宿主身份尚未初始化");
-  }
-  return id;
 }
 
 function requireName(name: string): void {
@@ -40,6 +36,11 @@ export function getMember(db: Pick<StoreDb, "select">, memberId: string) {
   return db.select().from(members).where(and(eq(members.id, memberId), isNull(members.deletedAt))).get();
 }
 
+export function getHouseholdMember(db: Pick<StoreDb, "select">, householdId: string, memberId: string) {
+  const member = getMember(db, memberId);
+  return member?.householdId === householdId ? member : undefined;
+}
+
 export function ensureHousehold(
   db: StoreDb,
   clock: Clock,
@@ -54,6 +55,7 @@ export function ensureHousehold(
       if (existing.deletedAt !== null || !getHousehold(tx, existing.householdId)) {
         throw new Error("宿主或家庭已删除，不能自动重新引导");
       }
+      initializeNativeReplication(tx, hostId, existing.householdId);
       return existing.householdId;
     }
     const household = { ...businessRow(clock, hostId), name: input.householdName };
@@ -69,6 +71,7 @@ export function ensureHousehold(
       householdId: household.id,
       displayName: input.hostName,
     }).run();
+    initializeNativeReplication(tx, hostId, household.id);
     ensureGroup(tx, clock, hostId, household.id);
     return household.id;
   }, { behavior: "immediate" });
@@ -103,14 +106,16 @@ export function createMember(
     if (active >= maxMembers) {
       throw new MemberLimitError(maxMembers);
     }
+    const hostId = localHostId(tx);
     const row = {
-      ...businessRow(clock, localHostId(tx)),
+      ...businessRow(clock, hostId),
       householdId: input.householdId,
       displayName: input.displayName,
       homeHostId: input.homeHostId,
     };
     tx.insert(members).values(row).run();
-    reconcileConversations(tx, clock, localHostId(tx), input.householdId);
+    appendNativeChange(tx, hostId, input.householdId, replicaAdapters.member, row);
+    reconcileConversations(tx, clock, hostId, input.householdId);
     return row.id;
   }, { behavior: "immediate" });
 }
@@ -149,10 +154,12 @@ export function createDevice(
 export function revokeDevice(db: Pick<StoreDb, "transaction">, clock: Clock, deviceId: string): boolean {
   return db.transaction((tx) => {
     const update = revision(clock);
-    return tx.update(devices).set({
+    const revoked = tx.update(devices).set({
       ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1`,
     }).where(and(eq(devices.id, deviceId), isNull(devices.revokedAt), isNull(devices.deletedAt)))
-      .returning({ id: devices.id }).get() !== undefined;
+      .returning({ id: devices.id }).get();
+    if (revoked) tx.delete(devicePushRegistrations).where(eq(devicePushRegistrations.deviceId, deviceId)).run();
+    return revoked !== undefined;
   }, { behavior: "immediate" });
 }
 
@@ -162,14 +169,55 @@ export function removeMember(db: StoreDb, clock: Clock, householdId: string, mem
     if (!member || member.householdId !== householdId) {
       return false;
     }
+    const hostId = localHostId(tx);
+    if (member.originHostId !== hostId) {
+      throw new AccessDeniedError();
+    }
     const update = revision(clock);
-    tx.update(members).set({ ...update, deletedAt: update.updatedAt, rev: sql`${members.rev} + 1` })
-      .where(eq(members.id, memberId)).run();
-    tx.update(devices).set({ ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1` })
-      .where(and(eq(devices.memberId, memberId), isNull(devices.revokedAt), isNull(devices.deletedAt))).run();
-    reconcileConversations(tx, clock, localHostId(tx), householdId);
+    const removed = tx.update(members).set({ ...update, deletedAt: update.updatedAt, rev: sql`${members.rev} + 1` })
+      .where(eq(members.id, memberId)).returning().get()!;
+    appendNativeChange(tx, hostId, householdId, replicaAdapters.member, removed);
+    const revoked = tx.update(devices).set({ ...update, revokedAt: update.updatedAt, rev: sql`${devices.rev} + 1` })
+      .where(and(eq(devices.memberId, memberId), isNull(devices.revokedAt), isNull(devices.deletedAt)))
+      .returning({ id: devices.id }).all();
+    for (const { id } of revoked) {
+      tx.delete(devicePushRegistrations).where(eq(devicePushRegistrations.deviceId, id)).run();
+    }
+    reconcileConversations(tx, clock, hostId, householdId);
     return true;
   }, { behavior: "immediate" });
+}
+
+export function isCurrentDeviceActor(db: Pick<StoreDb, "select">, actor: Actor): boolean {
+  return db.select({ id: devices.id }).from(devices)
+    .innerJoin(members, eq(devices.memberId, members.id))
+    .innerJoin(hosts, and(eq(devices.hostId, hosts.id), eq(hosts.householdId, members.householdId)))
+    .innerJoin(households, eq(members.householdId, households.id))
+    .where(and(
+      eq(devices.id, actor.deviceId), eq(devices.hostId, actor.hostId), eq(members.id, actor.memberId),
+      eq(members.householdId, actor.householdId), isNull(devices.revokedAt), isNull(devices.deletedAt),
+      isNull(members.deletedAt), isNull(hosts.deletedAt), isNull(households.deletedAt),
+    )).get() !== undefined;
+}
+
+function activeDeviceActors(db: Pick<StoreDb, "select">) {
+  return db.select({
+    memberId: members.id,
+    deviceId: devices.id,
+    hostId: devices.hostId,
+    householdId: members.householdId,
+  }).from(deviceCredentials)
+    .innerJoin(devices, and(eq(deviceCredentials.deviceId, devices.id), isNull(devices.revokedAt), isNull(devices.deletedAt)))
+    .innerJoin(members, and(eq(devices.memberId, members.id), isNull(members.deletedAt)))
+    .innerJoin(hosts, and(eq(devices.hostId, hosts.id), eq(hosts.householdId, members.householdId), isNull(hosts.deletedAt)))
+    .innerJoin(households, and(eq(members.householdId, households.id), isNull(households.deletedAt)));
+}
+
+export function isActiveDeviceActor(db: Pick<StoreDb, "select">, actor: Actor): boolean {
+  return getHostMeta(db, "host_id") === actor.hostId && activeDeviceActors(db).where(and(
+    eq(devices.id, actor.deviceId), eq(devices.hostId, actor.hostId),
+    eq(members.id, actor.memberId), eq(members.householdId, actor.householdId),
+  )).get() !== undefined;
 }
 
 export function resolveDeviceToken(db: StoreDb, clock: Clock, token: string): Actor | undefined {
@@ -181,21 +229,9 @@ export function resolveDeviceToken(db: StoreDb, clock: Clock, token: string): Ac
     if (!hostId) {
       return undefined;
     }
-    const actor = tx.select({
-      memberId: members.id,
-      deviceId: devices.id,
-      hostId: devices.hostId,
-      householdId: members.householdId,
-    }).from(deviceCredentials)
-      .innerJoin(devices, eq(deviceCredentials.deviceId, devices.id))
-      .innerJoin(members, eq(devices.memberId, members.id))
-      .innerJoin(hosts, and(eq(devices.hostId, hosts.id), eq(hosts.householdId, members.householdId)))
-      .innerJoin(households, eq(members.householdId, households.id))
-      .where(and(
-        eq(deviceCredentials.tokenHash, tokenHash(token)), eq(devices.hostId, hostId),
-        isNull(devices.revokedAt), isNull(devices.deletedAt), isNull(members.deletedAt),
-        isNull(hosts.deletedAt), isNull(households.deletedAt),
-      )).get();
+    const actor = activeDeviceActors(tx).where(and(
+      eq(deviceCredentials.tokenHash, tokenHash(token)), eq(devices.hostId, hostId),
+    )).get();
     if (!actor) {
       return undefined;
     }

@@ -7,6 +7,7 @@ export const turns = sqliteTable("turns", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id").notNull().references(() => conversations.id),
   triggerMessageId: text("trigger_message_id").notNull().references(() => messages.id),
+  publicationEpoch: text("publication_epoch"),
   requestId: text("request_id").unique(),
   status: text("status", { enum: ["queued", "generating", "completed", "stopped", "superseded", "failed"] }).notNull(),
   replyMessageId: text("reply_message_id").references(() => messages.id),

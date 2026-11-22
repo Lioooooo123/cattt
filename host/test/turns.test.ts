@@ -128,9 +128,9 @@ test("A、B 各自单聊生成 accepted/delta/done，持久猫回复与幂等原
 
 test("群聊 B 取代 A 首 token 前的轮次，新历史同时含两人的署名，迟到块无效", async () => {
   const f = await setup(true, { historyLimit: 2 });
-  const first = await f.send(f.group.id, f.a.token, "a", "甲说");
+  const first = await f.send(f.group.id, f.a.token, "a", "团子，甲说");
   await until(() => f.replier.calls.length === 1);
-  const second = await f.send(f.group.id, f.b.token, "b", "乙说");
+  const second = await f.send(f.group.id, f.b.token, "b", "团子，乙说");
   await until(() => f.replier.calls.length === 2);
   expect((await f.terminal(first.turn)).status).toBe("superseded");
   const oldStream = await (await f.request(first.turn.stream_url)).text();
@@ -148,11 +148,11 @@ test("群聊 B 取代 A 首 token 前的轮次，新历史同时含两人的署�
 
 test("已有首 token 不被取代，同一会话串行而不同单聊可并行", async () => {
   const f = await setup();
-  const first = await f.send(f.group.id, f.a.token);
+  const first = await f.send(f.group.id, f.a.token, crypto.randomUUID(), "团子，你在吗？");
   await until(() => f.replier.calls.length === 1);
   f.replier.calls[0]!.chunks.push("已开口");
   await until(() => getTurnRow(f.host.store.db, first.turn.id)!.firstTokenAt !== null);
-  const second = await f.send(f.group.id, f.b.token);
+  const second = await f.send(f.group.id, f.b.token, crypto.randomUUID(), "团子，你想聊吗？");
   expect(getTurnRow(f.host.store.db, first.turn.id)!.status).toBe("generating");
   const dm = await f.send(f.directB.id, f.b.token);
   await until(() => f.replier.calls.length === 2);

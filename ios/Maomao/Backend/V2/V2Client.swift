@@ -50,8 +50,64 @@ struct V2Client {
         if let after { query.append(URLQueryItem(name: "after", value: after)) }
         return try await json(V2.MessagesPage.self, request("GET", "conversations/\(id)/messages", query: query))
     }
-    func send(conversation: String, key: String, text: String) async throws -> V2.Sent {
-        try await json(V2.Sent.self, request("POST", "conversations/\(conversation)/messages", body: ["client_message_id": key, "text": text]))
+    func send(conversation: String, key: String, text: String) async throws -> V2.SendResult {
+        let req = try request("POST", "conversations/\(conversation)/messages", body: ["client_message_id": key, "text": text])
+        return try await sendResult(req, conversation: conversation, key: key, receipt: nil, homeHostID: nil)
+    }
+    func querySend(conversation: String, key: String, receipt: V2.PendingSend, homeHostID: String) async throws -> V2.SendResult {
+        let req = try receiptRequest(receipt, conversation: conversation, key: key)
+        return try await sendResult(req, conversation: conversation, key: key, receipt: receipt, homeHostID: homeHostID)
+    }
+    private func receiptRequest(_ receipt: V2.PendingSend, conversation: String, key: String) throws -> URLRequest {
+        let path = "conversations/\(conversation)/message-requests/\(receipt.requestID)"
+        guard receipt.clientMessageID == key, receipt.url == "/v2/" + path,
+              conversation.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil,
+              receipt.requestID.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
+            throw V2.APIError.invalidRequest
+        }
+        // Build the URL with the same paired HTTPS origin, bearer and pinned session.
+        return try request("GET", path)
+    }
+    private func sendResult(_ request: URLRequest, conversation: String, key: String,
+                            receipt: V2.PendingSend?, homeHostID: String?) async throws -> V2.SendResult {
+        struct Envelope: Decodable {
+            let status: String
+            let requestID: String
+            let clientMessageID: String
+            let publisherHostID: String?
+            let error: V2.ErrorEnvelope.Detail?
+            enum CodingKeys: String, CodingKey {
+                case status, error, requestID = "request_id", clientMessageID = "client_message_id"
+                case publisherHostID = "publisher_host_id"
+            }
+        }
+        let (data, response) = try await session.data(for: request)
+        try validate(response, data: data)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode
+        let decoder = V2.decoder
+        if receipt == nil, statusCode == 200 || statusCode == 201,
+           let direct = try? decoder.decode(V2.Sent.self, from: data) {
+            return .accepted(direct)
+        }
+        let envelope = try decoder.decode(Envelope.self, from: data)
+        guard envelope.clientMessageID == key, receipt == nil || envelope.requestID == receipt?.requestID else {
+            throw V2.APIError.invalidRequest
+        }
+        switch (statusCode, envelope.status) {
+        case (202, "pending"):
+            let pending = try decoder.decode(V2.PendingSend.self, from: data)
+            _ = try receiptRequest(pending, conversation: conversation, key: key)
+            return .pending(pending)
+        case (200, "accepted"):
+            guard receipt != nil, let publisher = envelope.publisherHostID else { throw V2.APIError.invalidRequest }
+            let sent = try decoder.decode(V2.Sent.self, from: data)
+            return .accepted(.init(message: sent.message, turn: publisher == homeHostID ? sent.turn : nil))
+        case (200, "rejected"):
+            guard envelope.error?.code == "group_send_rejected" else { throw V2.APIError.invalidRequest }
+            return .rejected("group_send_rejected")
+        default:
+            throw URLError(.badServerResponse)
+        }
     }
     func turn(conversation: String, id: String) async throws -> V2.Turn {
         try await json(V2.Turn.self, request("GET", "conversations/\(conversation)/turns/\(id)"))
@@ -71,7 +127,9 @@ struct V2Client {
         try request("POST", "conversations/\(conversation)/messages/\(message)/reply", body: ["request_id": requestID])
     }
     func unpair() async throws {
-        let (data, response) = try await session.data(for: request("POST", "device/unpair", body: [:]))
+        var request = try request("POST", "device/unpair", body: [:])
+        request.timeoutInterval = 4
+        let (data, response) = try await session.data(for: request)
         try validate(response, data: data)
     }
     func streamRequest(path: String, lastEventID: String?) throws -> URLRequest {
@@ -85,8 +143,11 @@ struct V2Client {
         return req
     }
     func stream(path: String, lastEventID: String?, receive: @escaping (V2SSE.Event) async throws -> Bool) async throws {
-        let req = try streamRequest(path: path, lastEventID: lastEventID)
-        let (bytes, response) = try await session.bytes(for: req)
+        try await stream(try streamRequest(path: path, lastEventID: lastEventID), receive: receive)
+    }
+
+    func stream(_ request: URLRequest, receive: @escaping (V2SSE.Event) async throws -> Bool) async throws {
+        let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             var data = Data()
             for try await byte in bytes { data.append(byte) }

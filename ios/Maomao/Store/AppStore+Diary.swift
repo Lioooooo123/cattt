@@ -1,17 +1,15 @@
 import SwiftUI
-import CryptoKit
 
 extension AppStore {
     private var diaryStorage: DiaryStorage {
-        // 开发 token 暂代账号身份；只用摘要做文件名，不写明文凭据。
-        let identity = backend.storageIdentity
-        let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
-        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return DiaryStorage(url: root.appendingPathComponent("DiaryRecords/" + digest + ".json"))
+        DiaryStorage.legacy(identity: backend.storageIdentity)
     }
 
     var diaryArchive: DiaryArchive { DiaryArchive(changeCursor: diaryChangeCursor, syncEpoch: diarySyncEpoch, entries: entries) }
-    var diaryToday: String { DiaryDay.key(for: currentDate()) }
+    var diaryToday: String {
+        let now = currentDate()
+        return v2Chat?.catDiary.today(at: now) ?? DiaryDay.key(for: now)
+    }
     var diaryDay: String { selectedDiaryDay ?? diaryToday }
     var diaryEarlierDays: [String] {
         let selected = diaryDay
@@ -83,7 +81,7 @@ extension AppStore {
     func selectDiaryDay(_ day: String?) {
         selectedDiaryDay = day == diaryToday ? nil : day
         diaryFilter = .all
-        if mailboxOpen { markCatDiariesRead(on: diaryDay) }
+        if mailboxOpen && v2Chat == nil { markCatDiariesRead(on: diaryDay) }
     }
 
     func markCatDiariesRead(on day: String) {

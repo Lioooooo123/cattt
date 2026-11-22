@@ -3,7 +3,15 @@ import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } fro
 
 export { deviceCredentials, devices, households, hosts, memberInvites, members, pairingCodes } from "./identity.ts";
 export { conversations, messages, participants } from "./conversations.ts";
+export { diaryEntries } from "./diary.ts";
+export { boundaries, knowledgeSourceWithdrawals, memories, memoryBlocks } from "./knowledge.ts";
+export { chatReplyKnowledge, memoryExtractionDependencies, pendingMemoryExtractions } from "./memory-extraction.ts";
+export { memberChangeProjections } from "./member-changes.ts";
+export { memberResourceReceipts } from "./member-resources.ts";
 export { turns } from "./turns.ts";
+export { peers } from "./peers.ts";
+export { changeLog, peerCursors, replicationState, retiredPeerGenerations } from "./replication.ts";
+export { fileBlobs, fileDescriptions, files, fileUploads } from "./files.ts";
 
 export const chatEvents = sqliteTable("chat_events", {
   streamId: text("stream_id").notNull(),
@@ -50,3 +58,19 @@ export const jobs = sqliteTable("jobs", {
   index("jobs_claim").on(table.queue, table.status, table.runAt),
   check("jobs_status", sql`${table.status} IN ('queued', 'running', 'done', 'dead')`),
 ]);
+
+export { decisions, runs, ticketInputs, tickets, triggers } from "./tickets.ts";
+export { runSteps, workerReports } from "./ticket-worker.ts";
+export { mailboxLetters, mailboxReads, publicationReceipts, pushOutbox, ticketPublications } from "./publications.ts";
+export { inferenceCandidates, inferenceDailyReceipts, proactivePermissions } from "./inference.ts";
+
+export { peerInbox, peerOutbox } from "./peer-behavior.ts";
+export { relayGrants, relayPublications } from "./relay.ts";
+
+export * from "./publication.ts";
+export * from "./group-sends.ts";
+export * from "./pg-import.ts";
+export * from "./push.ts";
+export { modelCalls } from "./model-calls.ts";
+export * from "./world.ts";
+export * from "./cat-facts.ts";

@@ -63,8 +63,8 @@ test("两监听提供同一对话契约：两单聊一群聊、作者幂等、40
         const send = () => request(`/v2/conversations/${groupId}/messages`, tokens[i]!, "POST", { client_message_id: key, text: `  ${i}  ` });
         const posted = await send();
         expect(posted.status).toBe(201);
-        const result = await posted.json() as { message: Message; turn: Turn };
-        expect(result.turn).toMatchObject({ status: "queued", trigger_message_id: result.message.id });
+        const result = await posted.json() as { message: Message; turn: Turn | null };
+        expect(result.turn).toBeNull();
         expect(result.message.author).toEqual({ kind: "member", member_id: memberIds[i]! });
         expect(result.message.text).toBe(String(i));
         expect(Object.keys(result.message).sort()).toEqual([
@@ -101,7 +101,7 @@ test("两监听提供同一对话契约：两单聊一群聊、作者幂等、40
       body: JSON.stringify({ client_message_id: "remote", text: "不要双写" }),
     });
     expect(wrongHost.status).toBe(409);
-    expect(await wrongHost.json()).toEqual({ error: { code: "not_publisher" } });
+    expect(await wrongHost.json()).toEqual({ error: { code: "publication_lease_pending" } });
     host.store.db.update(conversations).set({ publisherHostId: host.hostId }).where(eq(conversations.id, groupId)).run();
     const invite = await (await admin("/host/invites", "POST")).json() as { code: string };
     const accepted = await fetch(https + "/v2/invites/accept", {

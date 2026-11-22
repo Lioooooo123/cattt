@@ -113,7 +113,12 @@ test("远端宿主设备的凭证即使在本地也拒绝，家庭归属不一�
   expect(resolveDeviceToken(db, clock, remote.token)).toBeUndefined();
   expect(db.select().from(devices).where(eq(devices.id, remote.deviceId)).get()!.lastSeenAt).toBeNull();
   const foreignHostId = uuidv7(clock);
-  ensureHousehold(db, clock, foreignHostId, { householdName: "另一个家", hostName: "陌生 Mac" });
+  const household = db.select().from(households).where(eq(households.id, householdId)).get()!;
+  const foreignHouseholdId = uuidv7(clock);
+  db.insert(households).values({ ...household, id: foreignHouseholdId, originHostId: foreignHostId, name: "另一个家" }).run();
+  db.insert(hosts).values({
+    ...local, id: foreignHostId, originHostId: foreignHostId, householdId: foreignHouseholdId, displayName: "陌生 Mac",
+  }).run();
   expect(() => createMember(db, clock, {
     householdId, homeHostId: foreignHostId, displayName: "错配",
   })).toThrow();

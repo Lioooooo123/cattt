@@ -6,7 +6,13 @@ import SwiftUI
 /// 页首照参考图一：一行圆角方块按钮（左搜索、右关闭），两行衬线大标题（一轻一重），一颗信息片。
 /// 原来左边那颗团子头像去掉了 —— 头像现在住在院子右上角，不重复。
 struct DiaryPaperHeader: View {
+    var sharedCount: Int?
+    var displayedDay: String?
+    var currentDay: String?
     @EnvironmentObject private var store: AppStore
+
+    private var day: String { displayedDay ?? store.diaryDay }
+    private var today: String { currentDay ?? store.diaryToday }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -25,32 +31,40 @@ struct DiaryPaperHeader: View {
                 .accessibilityLabel("关闭日记")
             }
 
+            diaryHeading
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Metrics.gutterDiary)
+        .padding(.top, 4)
+        .padding(.bottom, 14)
+    }
+
+    private var diaryHeading: some View {
+        VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(DiaryDay.label(store.diaryDay))
+                Text(DiaryDay.label(day))
                     .font(Typo.serif(22))
                     .tracking(track(0.02, 22))
                     .foregroundStyle(Palette.ink)
-                Text(store.diaryDay == store.diaryToday ? "今天" : "日记")
+                Text(sharedCount != nil ? "共享日记" : (day == today ? "今天" : "日记"))
                     .font(Typo.serif(34, bold: true))
                     .tracking(track(0.02, 34))
                     .foregroundStyle(Palette.ink)
             }
 
             infoPill
-            Button(store.diarySyncLabel) { store.syncDiary() }
-                .font(Typo.sans(12))
-                .foregroundStyle(Palette.ink3)
-                .buttonStyle(.plain)
-                .disabled(!store.backend.isRemote)
+            if sharedCount == nil {
+                Button(store.diarySyncLabel) { store.syncDiary() }
+                    .font(Typo.sans(12))
+                    .foregroundStyle(Palette.ink3)
+                    .buttonStyle(.plain)
+                    .disabled(!store.backend.isRemote)
+            }
 
-            if store.diaryDay != store.diaryToday {
+            if day != today {
                 TextLink(text: "回到今天", size: 13) { store.selectDiaryDay(nil) }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Metrics.gutterDiary)
-        .padding(.top, 4)
-        .padding(.bottom, 14)
     }
 
     /// 参考图一「27 May」那颗：白底小胶囊，一个小图标一段字。
@@ -59,7 +73,7 @@ struct DiaryPaperHeader: View {
             IconTile(size: 24, fill: Palette.inset, circular: true) {
                 Icons.clock(size: IconSize.sm, color: Palette.ink2)
             }
-            Text("\(store.shownEntries.count) 条")
+            Text("\((sharedCount ?? store.shownEntries.count)) 条")
                 .font(Typo.sans(12.5))
                 .tabularNumbers()
                 .foregroundStyle(Palette.ink)
@@ -85,9 +99,6 @@ struct DiaryPaperView: View {
         }
     }
 
-    // MARK: - 筛选
-
-    /// 参考图一「Mountains / Forests / Tours」那排：白底胶囊，小图标 + 字，横向滚，真能筛。
     private var filterRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {

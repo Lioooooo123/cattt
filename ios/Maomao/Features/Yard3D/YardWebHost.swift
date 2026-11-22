@@ -39,6 +39,7 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
     private(set) var identity = YardProbeIdentity(runID: "", pageID: "")
     private(set) var snapshot: [String: Any]?
     var homeIntent: [String: Any]?
+    var sharedWorld: [String: Any]?
     var homeConfiguration: [String: [String: Any]] = [:]
     var initialSnapshot: [String: Any]?
     private var query: [String: String] = [:]
@@ -58,7 +59,7 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
         coverKey = "\(slot)-\(weather)-\(place)"
     }
     func captureCover(exportName: String? = nil) {
-        guard surfaceReady, !stopped else { return }
+        guard surfaceReady, !stopped, sharedWorld == nil else { return }
         let page = identity.pageID, key = coverKey
         let configuration = WKSnapshotConfiguration()
         configuration.snapshotWidth = 240
@@ -104,8 +105,10 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
         let camera = snapshot?["camera"] as? [String: Any]
         updateCoverContext(slot: query["time"] ?? "day", weather: query["weather"] ?? "clear",
                            place: camera?["place"] as? String ?? snapshot?["goal"] as? String ?? "house")
-        coverImage = UIImage(contentsOfFile: Self.coverDirectory.appendingPathComponent(coverKey + ".jpg").path)
-            ?? UIImage(named: "yard-start-" + coverKey)
+        coverImage = sharedWorld == nil
+            ? (UIImage(contentsOfFile: Self.coverDirectory.appendingPathComponent(coverKey + ".jpg").path)
+                ?? UIImage(named: "yard-start-" + coverKey))
+            : nil
         backdrop = YardBackdrop.forSlot(query["time"])
         applyBackdrop()
         stopped = false
@@ -181,7 +184,7 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
     }
 
     func stop() {
-        stopped = true; ready = false; surfaceReady = false
+        stopped = true; ready = false; surfaceReady = false; failure = nil; coverImage = nil
         // 不等待失去响应的 JS。页面卸载会释放 GL；正常结束另行发送 dispose。
         identity.pageID = UUID().uuidString
         webView.stopLoading()
@@ -216,8 +219,11 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
                 var command: [String: Any] = ["type": "initialize", "active": active]
                 visualGate.sentActive(active)
                 command["configuration"] = ["viewport", "controls", "previewMotion", "facts"].compactMap { homeConfiguration[$0] }
-                if restoring, let snapshot { command["snapshot"] = snapshot }
-                if let homeIntent { command["intent"] = homeIntent }
+                if let sharedWorld { command["sharedWorld"] = sharedWorld }
+                else {
+                    if restoring, let snapshot { command["snapshot"] = snapshot }
+                    if let homeIntent { command["intent"] = homeIntent }
+                }
                 do { try await send(command) }
                 catch { if !stopped && expected == identity.pageID { emit("error", ["message": "网页初始化失败：\(error)"]) } }
             }

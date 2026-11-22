@@ -26,14 +26,14 @@ export function promptInput(kind: "direct" | "group" = "direct"): Parameters<Rep
   return { conversation: { id: "conversation", kind, owner_member_id: kind === "direct" ? "a" : null, participant_member_ids: kind === "direct" ? ["a"] : ["a", "b"], publisher_host_id: "host", created_at: 100, last_message: trigger }, history: [trigger], trigger, signal: new AbortController().signal };
 }
 
-test("模型配置沿用来源、聊天槽位和思考参数；unset/echo 才选开发回复，mock 覆盖来源", async () => {
-  expect(configFromEnv({}).model?.MODEL_PROVIDER).toBe("echo");
+test("模型配置沿用来源、聊天槽位和思考参数；仅显式 echo 选择开发回复，mock 覆盖来源", async () => {
+  expect(configFromEnv({}).model?.MODEL_PROVIDER).toBe("deepseek");
   expect(configFromEnv({ MODEL_PROVIDER: "echo", CHAT_PROVIDER: "deepseek" }).model?.MODEL_PROVIDER).toBe("echo");
   for (const value of [undefined, "echo", "mock", "openai-compatible", "deepseek"]) {
     const ctx = { config: { dataDir: "unused", model: modelConfigFromEnv({ MODEL_PROVIDER: value }) } } as HostContext;
     const replier = configuredReplier(ctx);
-    expect(replier instanceof DevelopmentEchoReplier).toBe(value === undefined || value === "echo");
-    expect(replier instanceof ChatReplier).toBe(value !== undefined && value !== "echo");
+    expect(replier instanceof DevelopmentEchoReplier).toBe(value === "echo");
+    expect(replier instanceof ChatReplier).toBe(value !== "echo");
   }
   const config = modelConfigFromEnv({ MODEL_PROVIDER: "openai-compatible", OPENAI_COMPAT_MODEL: "local", CHAT_PROVIDER: "deepseek", CHAT_MODEL: "chat-model", CHAT_THINKING: "enabled" });
   expect(chatSpec(config)).toEqual({ provider: "deepseek", model: "chat-model" });
@@ -103,16 +103,16 @@ test("ChatReplier 只发布正文，模型空响应留给 runner，错误包装�
   const client: ModelClient = { provider: "mock", modelId: "mock", async *stream() {
     yield { type: "reasoning-delta", delta: "内部推理" }; yield { type: "text-delta", delta: "喵" }; yield { type: "finish", finishReason: "stop" };
   } };
-  expect(await collect(new ChatReplier(client, () => "甲").reply(promptInput()))).toEqual(["喵"]);
+  expect(await collect(new ChatReplier(client, (input) => buildChatPrompt(input, () => "甲")).reply(promptInput()))).toEqual(["喵"]);
   const empty: ModelClient = { ...client, async *stream() { yield { type: "finish", finishReason: "stop" }; } };
-  expect(await collect(new ChatReplier(empty, () => "甲").reply(promptInput()))).toEqual([]);
+  expect(await collect(new ChatReplier(empty, (input) => buildChatPrompt(input, () => "甲")).reply(promptInput()))).toEqual([]);
   const failed: ModelClient = { ...client, async *stream() { throw new ModelHttpError(402); } };
-  await expect(collect(new ChatReplier(failed, () => "甲").reply(promptInput()))).rejects.toMatchObject({ code: "model_quota" });
+  await expect(collect(new ChatReplier(failed, (input) => buildChatPrompt(input, () => "甲")).reply(promptInput()))).rejects.toMatchObject({ code: "model_quota" });
   const missing: ModelClient = { ...client, async *stream() {} };
-  await expect(collect(new ChatReplier(missing, () => "甲").reply(promptInput()))).rejects.toBeInstanceOf(ModelReplyError);
+  await expect(collect(new ChatReplier(missing, (input) => buildChatPrompt(input, () => "甲")).reply(promptInput()))).rejects.toBeInstanceOf(ModelReplyError);
   const mock = createMockModel(1000);
   const abort = new AbortController();
-  const pending = collect(new ChatReplier(mock, () => "甲").reply({ ...promptInput(), signal: abort.signal }));
+  const pending = collect(new ChatReplier(mock, (input) => buildChatPrompt(input, () => "甲")).reply({ ...promptInput(), signal: abort.signal }));
   abort.abort(new Error("cancelled"));
   await expect(pending).rejects.toThrow("cancelled");
 });

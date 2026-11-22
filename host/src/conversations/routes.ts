@@ -1,16 +1,23 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import type { GroupSends } from "../group-sends/index.ts";
 import { requireActor } from "../identity/middleware.ts";
 import type { IdentityEnv } from "../identity/middleware.ts";
 import type { HostContext } from "../runtime/index.ts";
+import { PublicationLeaseError } from "../publication/types.ts";
 import { ChatEvents } from "../chat-events/index.ts";
+import { MEMORY_EXTRACTION_QUEUE } from "../store/memory-extraction.ts";
+import { captureYardChatTurn } from "../turns/yard-chat.ts";
 import { cancelTurn, getTurn, retryTurn } from "../store/turns.ts";
 import {
   ConversationNotFoundError, getConversation, IdempotencyConflictError, InvalidChatRequestError,
   listConversations, NotPublisherError, readMessages, sendMessage,
 } from "../store/conversations.ts";
 
-export function conversationRoutes(ctx: HostContext, stream: (request: Request, turnId: string, cursor: string | null) => Response) {
+export function conversationRoutes(
+  ctx: HostContext, stream: (request: Request, turnId: string, cursor: string | null) => Response,
+  groupSends?: GroupSends,
+) {
   const app = new Hono<IdentityEnv>();
   const auth = requireActor(ctx);
   const invalid = { error: { code: "invalid_request" } };
@@ -18,6 +25,9 @@ export function conversationRoutes(ctx: HostContext, stream: (request: Request, 
   app.onError((error, c) => {
     if (error instanceof ConversationNotFoundError) {
       return c.json({ error: { code: "not_found" } }, 404);
+    }
+    if (error instanceof PublicationLeaseError) {
+      return c.json({ error: { code: error.code } }, 409);
     }
     if (error instanceof NotPublisherError) {
       return c.json({ error: { code: "not_publisher" } }, 409);
@@ -59,10 +69,26 @@ export function conversationRoutes(ctx: HostContext, stream: (request: Request, 
     if (!body.success) {
       return c.json(invalid, 400);
     }
-    const result = events.write((db, append) => sendMessage(db, ctx.clock, c.get("actor"), id.data, {
-      clientMessageId: body.data.client_message_id, text: body.data.text,
-    }, append));
+    const input = { clientMessageId: body.data.client_message_id, text: body.data.text };
+    if (groupSends) {
+      const result = groupSends.send(ctx, c.get("actor"), id.data, input);
+      if (result.status === 201) captureYardChatTurn(ctx, c.get("actor"), result.body.turn, result.body.message);
+      return c.json(result.body, result.status);
+    }
+    const result = events.write((db, append) => sendMessage(db, ctx.clock, c.get("actor"), id.data, input, append, ctx.publication, undefined, ctx.config));
+    if (result.created) {
+      captureYardChatTurn(ctx, c.get("actor"), result.body.turn, result.body.message);
+      ctx.bus.publish("jobs:wake", { queue: MEMORY_EXTRACTION_QUEUE });
+      ctx.bus.publish("inference:wake", { sourceMessageId: result.body.message.id });
+    }
     return c.json(result.body, result.created ? 201 : 200);
+  });
+  app.get("/conversations/:id/message-requests/:requestId", auth, (c) => {
+    const ids = z.object({ id: z.uuid(), requestId: z.uuidv7() }).safeParse(c.req.param());
+    if (!ids.success) return c.json(invalid, 400);
+    if (!groupSends) return c.json({ error: { code: "not_found" } }, 404);
+    const result = groupSends.read(ctx, c.get("actor"), ids.data.id, ids.data.requestId);
+    return c.json(result.body, result.status);
   });
   app.get("/conversations/:id/turns/:turnId", auth, (c) => {
     const ids = z.object({ id: z.uuid(), turnId: z.uuid() }).safeParse(c.req.param());
@@ -89,7 +115,7 @@ export function conversationRoutes(ctx: HostContext, stream: (request: Request, 
     if (!body.success) {
       return c.json(invalid, 400);
     }
-    const turn = events.write((db, append) => cancelTurn(db, ctx.clock, c.get("actor"), ids.data.id, ids.data.turnId, body.data.visible_length, append));
+    const turn = events.write((db, append) => cancelTurn(db, ctx.clock, c.get("actor"), ids.data.id, ids.data.turnId, body.data.visible_length, append, ctx.publication, ctx.config.groupPublicationAuthority));
     ctx.bus.publish("turn:wake", { turnId: turn.id });
     return c.json(turn);
   });
@@ -103,7 +129,8 @@ export function conversationRoutes(ctx: HostContext, stream: (request: Request, 
     if (!body.success) {
       return c.json(invalid, 400);
     }
-    const result = events.write((db, append) => retryTurn(db, ctx.clock, c.get("actor"), ids.data.id, ids.data.messageId, body.data.request_id, append));
+    const result = events.write((db, append) => retryTurn(db, ctx.clock, c.get("actor"), ids.data.id, ids.data.messageId, body.data.request_id, append, ctx.publication, ctx.config.groupPublicationAuthority));
+    if (result.created) captureYardChatTurn(ctx, c.get("actor"), result.turn, ids.data.messageId);
     return c.json(result.turn, result.created ? 201 : 200);
   });
   app.all("/conversations/*", auth, (c) => c.json({ error: { code: "not_found" } }, 404));

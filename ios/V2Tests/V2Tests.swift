@@ -221,14 +221,19 @@ final class V2Tests: XCTestCase {
         let suite = "V2Tests." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let outbox = V2Outbox(identity: "a", defaults: defaults)
-        XCTAssertTrue(outbox.entries.isEmpty)
-        let first = outbox.enqueue(conversation: "group", text: "你好")
-        let restarted = V2Outbox(identity: "a", defaults: defaults)
-        XCTAssertEqual(restarted.entries, [first])
-        XCTAssertEqual(restarted.entries.first?.id, first.id)
-        XCTAssertTrue(V2Outbox(identity: "b", defaults: defaults).entries.isEmpty)
-        restarted.acknowledge(first.id)
-        XCTAssertTrue(V2Outbox(identity: "a", defaults: defaults).entries.isEmpty)
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let member = V2.Member(id: "a", householdId: "h", displayName: "Han", homeHostId: "host")
+        let identity = V2.PairResult(deviceId: "device", deviceToken: "test", member: member, household: .init(id: "h", name: "家"))
+        let legacy = V2Outbox.Entry(id: "old-key", conversationID: "group", text: "旧消息")
+        defaults.set(try V2.encoder.encode([legacy]), forKey: "v2.outbox.device")
+        let outbox = V2Outbox(identity: identity, directory: directory, defaults: defaults)
+        XCTAssertEqual(outbox.entries, [legacy])
+        XCTAssertNil(defaults.data(forKey: "v2.outbox.device"))
+        let first = try outbox.enqueue(conversation: "group", text: "你好")
+        let restarted = V2Outbox(identity: identity, directory: directory, defaults: defaults)
+        XCTAssertEqual(restarted.entries, [legacy, first])
+        try restarted.acknowledge(first.id)
+        XCTAssertEqual(V2Outbox(identity: identity, directory: directory, defaults: defaults).entries, [legacy])
     }
 }

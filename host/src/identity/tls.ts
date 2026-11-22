@@ -5,8 +5,8 @@ import { isIP } from "node:net";
 import { hostname, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import {
-  BasicConstraintsExtension, cryptoProvider, ExtendedKeyUsageExtension, KeyUsageFlags,
-  KeyUsagesExtension, SubjectAlternativeNameExtension, X509Certificate, X509CertificateGenerator,
+  AuthorityKeyIdentifierExtension, BasicConstraintsExtension, cryptoProvider, ExtendedKeyUsageExtension, KeyUsageFlags,
+  KeyUsagesExtension, SubjectAlternativeNameExtension, SubjectKeyIdentifierExtension, X509Certificate, X509CertificateGenerator,
 } from "@peculiar/x509";
 import { clockDate } from "../clock/index.ts";
 import type { Clock } from "../clock/index.ts";
@@ -146,6 +146,45 @@ export async function initializeLan(dataDir: string, clock: Clock, options: LanT
     adminToken, fingerprint, fingerprintShort, hosts, refresh,
     serverOptions: () => ({ key: key!, cert: `${cert!}\n${caPem}` }),
   };
+}
+
+export async function generatePeerCertificates(clock: Clock, dnsName: string) {
+  const rootKeys = await keyPair();
+  const leafKeys = await keyPair();
+  const caKeys = rootKeys as unknown as CryptoKeyPair;
+  const leafPublic = leafKeys.publicKey as unknown as CryptoKey;
+  const ca = await X509CertificateGenerator.createSelfSigned({
+    serialNumber: randomBytes(16).toString("hex"),
+    name: `CN=CA.${dnsName}`,
+    keys: caKeys,
+    signingAlgorithm: algorithm,
+    notBefore: clockDate(clock, -DAY_MS),
+    notAfter: clockDate(clock, 730 * DAY_MS),
+    extensions: [
+      new BasicConstraintsExtension(true, 0, true),
+      new KeyUsagesExtension(KeyUsageFlags.keyCertSign | KeyUsageFlags.cRLSign, true),
+      await SubjectKeyIdentifierExtension.create(caKeys.publicKey),
+    ],
+  });
+  const leaf = await X509CertificateGenerator.create({
+    serialNumber: randomBytes(16).toString("hex"),
+    subject: `CN=${dnsName}`,
+    issuer: ca.subject,
+    publicKey: leafPublic,
+    signingKey: caKeys.privateKey,
+    signingAlgorithm: algorithm,
+    notBefore: clockDate(clock, -300_000),
+    notAfter: clockDate(clock, 365 * DAY_MS),
+    extensions: [
+      new BasicConstraintsExtension(false, undefined, true),
+      new KeyUsagesExtension(KeyUsageFlags.digitalSignature, true),
+      new ExtendedKeyUsageExtension(["1.3.6.1.5.5.7.3.1", "1.3.6.1.5.5.7.3.2"]),
+      new SubjectAlternativeNameExtension([{ type: "dns", value: dnsName }]),
+      await SubjectKeyIdentifierExtension.create(leafPublic),
+      await AuthorityKeyIdentifierExtension.create(caKeys.publicKey),
+    ],
+  });
+  return { key: await exportKey(leafKeys.privateKey), cert: leaf.toString("pem"), caCertificate: ca.toString("pem") };
 }
 
 export type LanIdentity = Awaited<ReturnType<typeof initializeLan>>;

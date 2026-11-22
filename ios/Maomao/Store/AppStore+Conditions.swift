@@ -80,6 +80,14 @@ extension AppStore {
 
     /// 每帧调用；真正的重算每秒一次。
     func advanceConditions(_ dt: Double) {
+        if v2World != nil {
+            conditionsClock += dt
+            if conditionsClock >= 1 {
+                conditionsClock = 0
+                syncHomeFacts()
+            }
+            return
+        }
         if pouring > 0 { pouring = max(0, pouring - dt / 1.4) }
         // 雨慢慢下起来、慢慢停：天气自己变是一分钟，用户手动切是三秒。逐帧推，三秒也不跳格。
         let targetRain = weather == .rain ? 1.0 : 0.0
@@ -155,11 +163,15 @@ extension AppStore {
 
     /// 状态变化立即同步；每秒再核对跨日与恢复，不随渲染帧重复计算日期和去重键。
     func syncHomeFacts() {
-        world.yard3D?.facts(full: bowlFull, mail: hasMail)
+        world.yard3D?.facts(full: bowlFull, mail: v2Work?.hasUnreadMail ?? hasMail)
     }
 
     /// 点碗（或碗旁的水壶）：一天倒一次就满，再点只是水面晃一下。
     func fillBowl() {
+        if let v2World {
+            if v2World.canSubmit { _ = world.fillSharedBowl() }
+            return
+        }
         guard pouring == 0 else { return }
         interactedThisSession = true
         if filledToday {

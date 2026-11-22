@@ -1,13 +1,16 @@
 import { ChatEvents } from "../chat-events/index.ts";
 import { uuidv7 } from "../ids/index.ts";
 import type { Component, HostContext } from "../runtime/index.ts";
-import { acquireLease, LeaseLostError, releaseLease, renewLease } from "../store/leases.ts";
+import { acquireLease, assertLeaseHeld, LeaseLostError, releaseLease, renewLease } from "../store/leases.ts";
 import { active } from "../store/turn-writes.ts";
-import { appendDelta, claimTurn, finishTurn, getTurnRow, heartbeatTurn, queuedTurns, recoverTurns, turnInput } from "../store/turns.ts";
+import { appendDelta, assertTurnPublication, claimTurn, finishTurn, getTurnRow, heartbeatTurn, queuedTurns, recoverTurns, turnInput } from "../store/turns.ts";
 import type { TurnFence } from "../store/turns.ts";
+import type { StoreDb } from "../store/index.ts";
+import { PublicationLeaseError } from "../publication/types.ts";
 import { ConversationNotFoundError } from "../store/conversations.ts";
+import { takeYardChatTurn } from "./yard-chat.ts";
 import { configuredReplier } from "./chat-replier.ts";
-import type { Replier } from "./types.ts";
+import type { Replier, ReplyPublicationGuard } from "./types.ts";
 import { ModelReplyError } from "../llm/errors.ts";
 
 interface RunnerOptions {
@@ -59,7 +62,7 @@ export class TurnRunner implements Component {
     this.ctx = ctx;
     this.stopping = false;
     this.holder = `${ctx.hostId}:${uuidv7(ctx.clock)}`;
-    new ChatEvents(ctx).write((db, append) => recoverTurns(db, ctx.clock, this.options.staleMs, true, append));
+    new ChatEvents(ctx).write((db, append) => recoverTurns(db, ctx.clock, this.options.staleMs, true, append, ctx.publication, ctx.config.groupPublicationAuthority));
     this.unsubscribe = [ctx.bus.subscribe("chat:event", () => this.wake()), ctx.bus.subscribe("turn:wake", () => this.wake())];
     this.timer = setInterval(() => this.wake(), this.options.pollMs);
     this.wake();
@@ -86,7 +89,7 @@ export class TurnRunner implements Component {
   private scan(): void {
     const ctx = this.ctx!;
     const events = new ChatEvents(ctx);
-    events.write((db, append) => recoverTurns(db, ctx.clock, this.options.staleMs, false, append));
+    events.write((db, append) => recoverTurns(db, ctx.clock, this.options.staleMs, false, append, ctx.publication, ctx.config.groupPublicationAuthority));
     for (const task of this.running.values()) {
       const row = getTurnRow(ctx.store.db, task.id);
       if (!row || !active(row) || row.cancelReason !== null) {
@@ -103,7 +106,7 @@ export class TurnRunner implements Component {
         continue;
       }
       fence.epoch = lease.epoch;
-      if (!claimTurn(ctx.store.db, ctx.clock, row.id, fence)) {
+      if (!claimTurn(ctx.store.db, ctx.clock, row.id, fence, ctx.publication, ctx.config.groupPublicationAuthority)) {
         releaseLease(ctx.store.db, ctx.clock, fence.name, fence.holder, fence.epoch);
         continue;
       }
@@ -121,50 +124,111 @@ export class TurnRunner implements Component {
     const events = new ChatEvents(ctx);
     let failure = "interrupted";
     let iterator: AsyncIterator<string> | undefined;
+    let guard: ReplyPublicationGuard | undefined;
     const budget = setTimeout(() => { failure = "budget_exceeded"; abort.abort(new Error(failure)); }, this.options.budgetMs);
     const heartbeat = setInterval(() => {
       try {
         if (!renewLease(ctx.store.db, ctx.clock, fence.name, fence.holder, fence.epoch, this.options.leaseTtlMs)) {
           abort.abort(new LeaseLostError(fence.name, fence.holder, fence.epoch));
-        } else if (!heartbeatTurn(ctx.store.db, ctx.clock, id, fence)) {
+        } else if (!heartbeatTurn(ctx.store.db, ctx.clock, id, fence, ctx.publication, ctx.config.groupPublicationAuthority)) {
           abort.abort(new Error("turn_changed"));
         }
       } catch (error) {
         abort.abort(error);
       }
     }, this.options.heartbeatMs);
+    const turn = getTurnRow(ctx.store.db, id)!;
+    const yardTurn = takeYardChatTurn(ctx, id);
+    const assertPublisher = (db: Pick<StoreDb, "select">) => {
+      assertTurnPublication(db, ctx.clock, turn, ctx.publication, ctx.config.groupPublicationAuthority);
+    };
     try {
       abort.signal.throwIfAborted();
-      const input = turnInput(ctx.store.db, id, this.options.historyLimit);
-      if (input.conversation.publisher_host_id !== ctx.hostId) {
-        throw new ConversationNotFoundError();
-      }
-      iterator = this.replier!.reply({ ...input, signal: abort.signal })[Symbol.asyncIterator]();
-      for (;;) {
-        abort.signal.throwIfAborted();
-        const next = await nextWithAbort(Promise.resolve(iterator.next()), abort.signal);
-        abort.signal.throwIfAborted();
-        if (next.done) {
-          break;
+      const finish = (status: "completed" | "stopped" | "failed") => events.write((db, append) => {
+        assertPublisher(db);
+        guard?.check(db);
+        return finishTurn(db, ctx.clock, id, { status, errorCode: "empty_reply", fence, knowledgeEvidence: guard?.knowledgeEvidence }, append, ctx.publication, ctx.config.groupPublicationAuthority);
+      });
+      let sourceRevision: number | undefined;
+      for (let attempt = 0; ; attempt++) {
+        guard = undefined;
+        assertPublisher(ctx.store.db);
+        const input = turnInput(ctx.store.db, id, this.options.historyLimit);
+        sourceRevision ??= input.ticketSource.revision;
+        if (input.conversation.publisher_host_id !== ctx.hostId || input.ticketSource.revision !== sourceRevision) {
+          throw new ConversationNotFoundError();
         }
-        if (typeof next.value !== "string") {
-          throw new TypeError("Replier 必须返回文本块");
-        }
-        const applied = events.write((db, append) => appendDelta(db, ctx.clock, id, next.value, fence, append));
-        if (!applied) {
-          events.write((db, append) => finishTurn(db, ctx.clock, id, { status: "stopped", fence }, append));
+        iterator = this.replier!.reply({
+          ...input, turnId: id, yardTurn, signal: abort.signal,
+          ticketSource: { ...input.ticketSource, retryActor: yardTurn?.sourceId === input.trigger.id ? yardTurn.actor : undefined },
+          assertCurrentTurn(db) {
+            abort.signal.throwIfAborted();
+            assertLeaseHeld(db, ctx.clock, fence.name, fence.holder, fence.epoch);
+            const current = getTurnRow(db, id);
+            if (current?.status !== "generating" || current.cancelReason !== null
+              || current.triggerMessageId !== turn.triggerMessageId) throw new ConversationNotFoundError();
+            assertPublisher(db);
+            guard?.check(db);
+          },
+          assertPublication: () => assertPublisher(ctx.store.db), beforePublish: (check) => { guard = check; },
+        })[Symbol.asyncIterator]();
+        try {
+          for (;;) {
+            abort.signal.throwIfAborted();
+            const next = await nextWithAbort(Promise.resolve(iterator.next()), abort.signal);
+            abort.signal.throwIfAborted();
+            if (next.done) {
+              break;
+            }
+            if (typeof next.value !== "string") {
+              throw new TypeError("Replier 必须返回文本块");
+            }
+            const applied = events.write((db, append) => {
+              assertPublisher(db);
+              guard?.check(db);
+              return appendDelta(db, ctx.clock, id, next.value, fence, append, ctx.publication, ctx.config.groupPublicationAuthority);
+            });
+            if (!applied) {
+              finish("stopped");
+              return;
+            }
+          }
+          const row = getTurnRow(ctx.store.db, id)!;
+          finish(row.draftText.length ? "completed" : "failed");
           return;
+        } catch (error) {
+          const row = getTurnRow(ctx.store.db, id);
+          // A concurrent extraction can replace a fact while the first model call is in flight.
+          if (!(error instanceof ConversationNotFoundError) || !guard || attempt !== 0 || abort.signal.aborted
+            || !row || !active(row) || row.firstTokenAt !== null || row.cancelReason !== null) {
+            throw error;
+          }
+          void iterator.return?.().catch(() => {});
         }
       }
-      const row = getTurnRow(ctx.store.db, id)!;
-      events.write((db, append) => finishTurn(db, ctx.clock, id, {
-        status: row.draftText.length ? "completed" : "failed", errorCode: "empty_reply", fence,
-      }, append));
     } catch (error) {
-      if (!(error instanceof LeaseLostError) && !(abort.signal.reason instanceof LeaseLostError)) {
-        events.write((db, append) => finishTurn(db, ctx.clock, id, {
-          status: "failed", errorCode: error instanceof ConversationNotFoundError ? "conversation_unavailable" : abort.signal.aborted ? failure : error instanceof ModelReplyError ? error.code : "replier_error", fence,
-        }, append));
+      if (!(error instanceof LeaseLostError) && !(abort.signal.reason instanceof LeaseLostError)
+        && !(error instanceof PublicationLeaseError) && !(abort.signal.reason instanceof PublicationLeaseError)) {
+        events.write((db, append) => {
+          const current = getTurnRow(db, id);
+          if (!current || !active(current)) return;
+          // Cancellation can preserve the visible prefix. Recheck its inputs before that write as well.
+          let unavailable = error instanceof ConversationNotFoundError;
+          try {
+            assertPublisher(db);
+            guard?.check(db);
+          } catch (guardError) {
+            if (guardError instanceof PublicationLeaseError) return;
+            if (!(guardError instanceof ConversationNotFoundError)) { throw guardError; }
+            unavailable = true;
+          }
+          return finishTurn(db, ctx.clock, id, {
+            status: "failed",
+            errorCode: unavailable ? "conversation_unavailable"
+              : abort.signal.aborted ? failure : error instanceof ModelReplyError ? error.code : "replier_error",
+            fence, knowledgeEvidence: guard?.knowledgeEvidence,
+          }, append, ctx.publication, ctx.config.groupPublicationAuthority);
+        });
       }
     } finally {
       clearTimeout(budget);

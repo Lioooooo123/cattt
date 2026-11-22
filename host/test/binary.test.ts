@@ -3,17 +3,20 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { openStore } from "../src/store/index.ts";
+import { listWorkerReports } from "../src/store/ticket-worker.ts";
 
-test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天完成并响应 SIGTERM", async () => {
+test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天、隔离计算和 SIGTERM", async () => {
   const directory = mkdtempSync(join(tmpdir(), "cattt-binary-"));
   const binary = join(directory, "cattt-host");
-  const root = fileURLToPath(new URL("..", import.meta.url));
+  const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
   let child: ReturnType<typeof Bun.spawn> | undefined;
   let exitTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     const build = Bun.spawn([
-      process.execPath, "build", "--compile", "src/main.ts", "--outfile", binary,
-    ], { cwd: root, stdout: "pipe", stderr: "pipe" });
+      process.execPath, "build", "--compile", entry,
+      fileURLToPath(new URL("../src/ticket-workers/compute-worker.ts", import.meta.url)), "--outfile", binary,
+    ], { cwd: directory, stdout: "pipe", stderr: "pipe" });
     const [buildCode, stdout, stderr] = await Promise.all([
       build.exited,
       new Response(build.stdout).text(),
@@ -31,14 +34,17 @@ test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天完成并响应
     const lanReservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
     const lanPort = lanReservation.port;
     await lanReservation.stop(true);
+    const peerReservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+    const peerPort = peerReservation.port;
+    await peerReservation.stop(true);
     expect(existsSync(join(directory, "drizzle"))).toBe(false);
     const running = Bun.spawn([binary], {
       cwd: directory,
       env: {
-        ...process.env,
         CATTT_DATA_DIR: join(directory, "data"),
         CATTT_PORT: String(port),
         CATTT_LAN_HTTPS_PORT: String(lanPort),
+        CATTT_PEER_HTTPS_PORT: String(peerPort),
         MODEL_PROVIDER: "mock",
         MOCK_DELAY_MS: "0",
       },
@@ -78,6 +84,10 @@ test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天完成并响应
       expect(response.ok).toBe(true);
       return response.json();
     };
+    const peer = await json("/host/peer-identity", admin);
+    expect(peer).toMatchObject({
+      host_id: (health as { host_id: string }).host_id, protocol_version: 8, address: { port: peerPort },
+    });
     const member = await json("/host/members", admin, { display_name: "甲" });
     const pairing = await json("/host/pairing-codes", admin, { member_id: member.member.id });
     const paired = await json("/v2/pair", "", { code: pairing.code, device_name: "手机" });
@@ -85,6 +95,27 @@ test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天完成并响应
     const sent = await json(`/v2/conversations/${list.conversations[1].id}/messages`, paired.device_token, { client_message_id: "compiled", text: "你好" });
     const stream = await fetch(`https://127.0.0.1:${lanPort}${sent.turn.stream_url}`, { tls: { ca }, signal: AbortSignal.timeout(5000), headers: { Authorization: `Bearer ${paired.device_token}` } });
     expect(await stream.text()).toContain('"status":"completed"');
+    const errand = await json("/v2/tickets", paired.device_token, {
+      kind: "start", goal: "整理待确认问题", conversation_id: list.conversations[1].id,
+      source_message_id: sent.message.id, source_revision: 1,
+    });
+    const db = openStore(join(directory, "data", "cattt.db"));
+    try {
+      const hostId = (health as { host_id: string }).host_id;
+      for (let attempt = 0; attempt < 50 && listWorkerReports(db.db, hostId).length === 0; attempt++) {
+        await Bun.sleep(20);
+      }
+      const reports = listWorkerReports(db.db, hostId);
+      expect(reports.map(({ result }) => result.status)).toEqual(["waiting"]);
+      expect(reports).toMatchObject([{
+        ticketId: errand.ticket_id, conversationId: list.conversations[1].id,
+        result: { status: "waiting" },
+      }]);
+      const status = await json(`/v2/tickets/${errand.ticket_id}`, paired.device_token);
+      expect(status.ticket.stage).toBe("waiting");
+    } finally {
+      db.close();
+    }
     child.kill("SIGTERM");
     const exitCode = await Promise.race([
       child.exited,

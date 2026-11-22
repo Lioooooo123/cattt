@@ -5,7 +5,7 @@ import Foundation
 /// 依据 docs/方案/性格系统优化-方案-2026-09-12.md 第 2.1 节。院子和聊天都从这张表取值，不互相传参数。
 
 /// 猫的气质预设。决定它主不主动、话多不多、多久才跟你熟。
-enum Temperament: String, CaseIterable, Identifiable {
+enum Temperament: String, Codable, CaseIterable, Identifiable {
     case slow, close, quiet, curious
 
     var id: String { rawValue }

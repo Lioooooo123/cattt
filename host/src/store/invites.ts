@@ -5,17 +5,26 @@ import { uuidv7 } from "../ids/index.ts";
 import { AccessDeniedError } from "../identity/access.ts";
 import { DEFAULT_MAX_MEMBERS } from "../runtime/config.ts";
 import { failedCode, generateCode, hashCode, liveCode, normalizeCode } from "./codes.ts";
+import { findGroup } from "./conversation-lifecycle.ts";
 import { getHostMeta } from "./host-meta.ts";
 import { createDevice, createMember, getHousehold, getMember, MemberLimitError } from "./identity.ts";
 import type { StoreDb } from "./index.ts";
+import { getPeerCursor } from "./replication.ts";
 import { hosts, memberInvites, members } from "./schema/identity.ts";
 
 export const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export class MemberBootstrapError extends Error {
   constructor() {
-    super("已有成员，后续成员必须通过邀请加入");
+    super("只有家庭创建宿主能引导首成员，后续成员须通过邀请加入");
     this.name = "MemberBootstrapError";
+  }
+}
+
+export class MemberSyncPendingError extends Error {
+  constructor() {
+    super("等待家庭创建宿主的成员和群聊同步完成");
+    this.name = "MemberSyncPendingError";
   }
 }
 
@@ -54,6 +63,14 @@ function activeMembers(db: Pick<StoreDb, "select">, householdId: string): number
   )).get()!.count;
 }
 
+function requireJoinedHouseholdReady(db: Pick<StoreDb, "select">, householdId: string, hostId: string) {
+  const family = getHousehold(db, householdId)!;
+  if (family.originHostId !== hostId && (!getPeerCursor(db, family.originHostId)
+    || findGroup(db, householdId)?.deletedAt !== null || activeMembers(db, householdId) === 0)) {
+    throw new MemberSyncPendingError();
+  }
+}
+
 function assertUnreservedSlot(db: Pick<StoreDb, "select">, householdId: string, now: number, max: number) {
   const pending = db.select({ count: count() }).from(memberInvites).where(and(
     eq(memberInvites.householdId, householdId), liveCode(memberInvites, now),
@@ -72,7 +89,8 @@ export function bootstrapMember(
   const max = limit(input.maxMembers);
   return db.transaction((tx) => {
     const host = localHost(tx, input.householdId);
-    if (activeMembers(tx, input.householdId) !== 0) {
+    const household = getHousehold(tx, input.householdId);
+    if (household?.originHostId !== host.id || activeMembers(tx, input.householdId) !== 0) {
       throw new MemberBootstrapError();
     }
     assertUnreservedSlot(tx, input.householdId, wallMs(clock), max);
@@ -93,7 +111,8 @@ export function issueMemberInvite(
   }
   const max = limit(input.maxMembers);
   return db.transaction((tx) => {
-    localHost(tx, input.householdId);
+    const host = localHost(tx, input.householdId);
+    requireJoinedHouseholdReady(tx, input.householdId, host.id);
     if (input.invitedByMemberId !== undefined) {
       const inviter = getMember(tx, input.invitedByMemberId);
       if (inviter?.householdId !== input.householdId) {
@@ -138,6 +157,7 @@ export function acceptMemberInvite(
       return undefined;
     }
     const host = localHost(tx, invite.householdId);
+    requireJoinedHouseholdReady(tx, invite.householdId, host.id);
     const memberId = createMember(tx, clock, {
       householdId: invite.householdId, displayName: input.displayName.trim(), homeHostId: host.id, maxMembers: max,
     });
@@ -170,4 +190,12 @@ export function revokeMemberInvite(
     tx.update(memberInvites).set({ revokedAt: wallMs(clock) }).where(eq(memberInvites.id, invite.id)).run();
     return true;
   }, { behavior: "immediate" });
+}
+
+export function listOpenMemberInvites(db: Pick<StoreDb, "select">, clock: Clock, householdId: string) {
+  return db.select({
+    id: memberInvites.id, display_name: memberInvites.displayName, expires_at: memberInvites.expiresAt,
+  }).from(memberInvites).where(and(
+    eq(memberInvites.householdId, householdId), liveCode(memberInvites, wallMs(clock)),
+  )).orderBy(memberInvites.id).all();
 }

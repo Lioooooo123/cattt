@@ -1,17 +1,31 @@
 import { and, asc, desc, eq, gt, gte, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { Clock } from "../clock/index.ts";
+import type { PublicationProof } from "../publication/types.ts";
 import { parseHlc } from "../clock/index.ts";
 import type { Conversation, Message, MessagePage } from "../conversations/types.ts";
 import { canSeeConversation } from "../identity/access.ts";
+import type { PublicationWindow } from "../publication/window.ts";
+import { callsCat } from "../inference/rules.ts";
+import type { HostConfig } from "../runtime/index.ts";
+import { admitInference } from "./inference-intake.ts";
+import { publicationEpoch } from "./publication-authority.ts";
 import type { Actor } from "../identity/index.ts";
 import { businessRow, revision } from "./business.ts";
 import { getHostMeta } from "./host-meta.ts";
+import { appendNativeChange } from "./replication.ts";
+import type { ReplicationTx } from "./replication-adapter.ts";
+import { publicationCredential, publicationProof, requireSharedPublisher } from "./publication.ts";
+import { saveReplyKnowledge } from "./knowledge-use.ts";
+import type { RecallEvidence } from "./knowledge-use.ts";
+import { projectMessageReplica } from "./knowledge-replicas.ts";
+import { replicaAdapters } from "./replica-records.ts";
 import type { StoreDb } from "./index.ts";
+import { enqueueMessageExtraction } from "./memory-extraction.ts";
 import { conversations, messages, participants } from "./schema/conversations.ts";
 import { members } from "./schema/identity.ts";
 import { turns } from "./schema/turns.ts";
 import { createTurn, initialTurn } from "./turn-writes.ts";
-import type { Append } from "./turn-writes.ts";
+import type { Append, TurnRow } from "./turn-writes.ts";
 
 export class ConversationNotFoundError extends Error {}
 export class NotPublisherError extends Error {}
@@ -70,28 +84,40 @@ function dto(row: MessageRow): Message {
 
 export { dto as messageDto };
 
-function visible(db: Reader, actor: Actor, id: string) {
+function readParticipantIds(db: Reader, id: string, householdId: string): string[] {
+  return db.select({ id: participants.memberId }).from(participants)
+    .innerJoin(members, eq(participants.memberId, members.id)).where(and(
+      eq(participants.conversationId, id), isNull(participants.deletedAt), isNull(members.deletedAt),
+      eq(members.householdId, householdId),
+    )).orderBy(asc(participants.memberId)).all().map((row) => row.id);
+}
+
+export function readConversationScope(db: Reader, id: string) {
   const conversation = db.select().from(conversations).where(and(eq(conversations.id, id), isNull(conversations.deletedAt))).get();
+  return conversation && { ...conversation, participantMemberIds: readParticipantIds(db, id, conversation.householdId) };
+}
+
+export function visibleConversation(db: Reader, actor: Actor, id: string) {
+  const conversation = readConversationScope(db, id);
   if (!conversation) {
     throw new ConversationNotFoundError();
   }
-  const participantMemberIds = db.select({ id: participants.memberId }).from(participants)
-    .innerJoin(members, eq(participants.memberId, members.id)).where(and(
-      eq(participants.conversationId, id), isNull(participants.deletedAt), isNull(members.deletedAt),
-      eq(members.householdId, conversation.householdId),
-    )).orderBy(asc(participants.memberId)).all().map((row) => row.id);
   const owner = conversation.ownerMemberId ? db.select().from(members).where(and(
     eq(members.id, conversation.ownerMemberId), isNull(members.deletedAt),
   )).get() : undefined;
-  const resource = { ...conversation, participantMemberIds };
-  if (!canSeeConversation(actor, resource) || (conversation.kind === "direct"
+  if (!canSeeConversation(actor, conversation) || (conversation.kind === "direct"
     && (!owner || owner.householdId !== conversation.householdId))) {
     throw new ConversationNotFoundError();
   }
-  return { ...resource, publisherHostId: owner?.homeHostId ?? conversation.publisherHostId };
+  const publisherHostId = conversation.kind === "group"
+    ? publicationProof(db, conversation.householdId)?.holderHostId ?? conversation.publisherHostId
+    : owner!.homeHostId;
+  return { ...conversation, publisherHostId };
 }
 
-function conversationDto(db: Reader, row: ReturnType<typeof visible>): Conversation {
+export { visibleConversation as assertConversationAccess };
+
+function conversationDto(db: Reader, row: ReturnType<typeof visibleConversation>): Conversation {
   const last = db.select().from(messages).where(and(
     eq(messages.conversationId, row.id), isNull(messages.deletedAt),
   )).orderBy(desc(messages.hlc), desc(messages.id)).limit(1).get();
@@ -103,27 +129,57 @@ function conversationDto(db: Reader, row: ReturnType<typeof visible>): Conversat
 }
 
 export function getConversation(db: Pick<StoreDb, "transaction">, actor: Actor, id: string): Conversation {
-  return db.transaction((tx) => conversationDto(tx, visible(tx, actor, id)));
+  return db.transaction((tx) => conversationDto(tx, visibleConversation(tx, actor, id)));
+}
+
+export function canReadConversation(db: Reader, actor: Actor, id: string): boolean {
+  try {
+    visibleConversation(db, actor, id);
+    return true;
+  } catch (error) {
+    if (error instanceof ConversationNotFoundError) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/** 设备只可操作可见会话里自己发出的消息，包括已撤回知识用途的原话。 */
+export function getOwnedConversationMessage(db: Reader, actor: Actor, conversationId: string, messageId: string) {
+  if (!canReadConversation(db, actor, conversationId)) {
+    return undefined;
+  }
+  return db.select().from(messages).where(and(
+    eq(messages.conversationId, conversationId), eq(messages.id, messageId),
+    eq(messages.authorMemberId, actor.memberId), isNull(messages.deletedAt), eq(messages.status, "complete"),
+  )).get();
+}
+
+function readableConversations(db: Reader, actor: Actor) {
+  const rows = db.select({ id: conversations.id }).from(conversations).where(and(
+    eq(conversations.householdId, actor.householdId), isNull(conversations.deletedAt),
+    or(eq(conversations.kind, "group"), eq(conversations.ownerMemberId, actor.memberId)),
+  )).all();
+  return rows.flatMap(({ id }) => {
+    try {
+      return [visibleConversation(db, actor, id)];
+    } catch (error) {
+      if (!(error instanceof ConversationNotFoundError)) {
+        throw error;
+      }
+      return [];
+    }
+  });
+}
+
+export function listReadableConversationIds(db: Reader, actor: Actor): string[] {
+  return readableConversations(db, actor).map(({ id }) => id);
 }
 
 export function listConversations(db: Pick<StoreDb, "transaction">, actor: Actor): Conversation[] {
-  return db.transaction((tx) => {
-    const rows = tx.select().from(conversations).where(and(
-      eq(conversations.householdId, actor.householdId), isNull(conversations.deletedAt),
-      or(eq(conversations.kind, "group"), eq(conversations.ownerMemberId, actor.memberId)),
-    )).all();
-    const result: Conversation[] = [];
-    for (const row of rows) {
-      try {
-        result.push(conversationDto(tx, visible(tx, actor, row.id)));
-      } catch (error) {
-        if (!(error instanceof ConversationNotFoundError)) {
-          throw error;
-        }
-      }
-    }
-    return result.sort((a, b) => (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === "group" ? -1 : 1));
-  });
+  return db.transaction((tx) => readableConversations(tx, actor)
+    .map((row) => conversationDto(tx, row))
+    .sort((a, b) => (a.kind === b.kind ? a.id.localeCompare(b.id) : a.kind === "group" ? -1 : 1)));
 }
 
 export function readMessages(
@@ -131,7 +187,7 @@ export function readMessages(
   input: { before?: string; after?: string; limit?: number } = {},
 ): MessagePage {
   return db.transaction((tx) => {
-    visible(tx, actor, conversationId);
+    visibleConversation(tx, actor, conversationId);
     const limit = input.limit ?? 50;
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
       throw new InvalidChatRequestError("分页大小须为 1 至 100");
@@ -156,40 +212,120 @@ export function readMessages(
   });
 }
 
+/** 轮次与 Router 共用持久消息写入。调用方在同一事务核对发布权限。 */
+export function appendCatMessage(
+  db: ReplicationTx, clock: Clock,
+  input: Pick<MessageRow, "conversationId" | "text" | "replyToMessageId" | "turnId" | "status"> & { hostId: string; publicationEpoch?: number | null; knowledgeEvidence?: RecallEvidence[] },
+): MessageRow {
+  const { hostId, knowledgeEvidence, ...message } = input;
+  const row = db.insert(messages).values({
+    ...businessRow(clock, hostId), ...message, authorMemberId: null, modality: "text", clientMessageId: null,
+  }).returning().get()!;
+  const conversation = db.update(conversations).set({ ...revision(clock), rev: sql`${conversations.rev} + 1` })
+    .where(eq(conversations.id, input.conversationId)).returning().get()!;
+  saveReplyKnowledge(db, row.id, knowledgeEvidence ?? []);
+  appendNativeChange(db, hostId, conversation.householdId, replicaAdapters.message, projectMessageReplica(db, row));
+  return row;
+}
+
+export interface MemberMessageInput {
+  conversationId: string;
+  memberId: string;
+  clientMessageId: string;
+  text: string;
+}
+
+export type GroupReplyPolicy = (
+  tx: ReplicationTx, clock: Clock, message: MessageRow, proof: PublicationProof, append?: Append, credential?: string,
+) => TurnRow | undefined;
+
+export const defaultGroupReply: GroupReplyPolicy = (tx, clock, message, proof, append, credential) =>
+  createTurn(tx, clock, message.conversationId, message.id, null, append, credential ?? publicationCredential(proof));
+
+export const quietGroupReply: GroupReplyPolicy = (tx, clock, message, proof, append, credential) =>
+  callsCat(message.text) ? defaultGroupReply(tx, clock, message, proof, append, credential) : undefined;
+
+type SendPolicy = Pick<HostConfig, "askOutcomeRule" | "groupPublicationAuthority">;
+
+export function findMemberMessage(db: Reader, input: Omit<MemberMessageInput, "text">) {
+  return db.select().from(messages).where(and(
+    eq(messages.conversationId, input.conversationId), eq(messages.authorMemberId, input.memberId),
+    eq(messages.clientMessageId, input.clientMessageId),
+  )).get();
+}
+
+export function memberMessageResponse(db: Reader, row: MessageRow) {
+  const original = row.turnId ? db.select().from(turns).where(eq(turns.id, row.turnId)).get() : undefined;
+  return { message: dto(row), turn: original ? initialTurn(original) : null };
+}
+
+// Both device and peer admission must verify the sender and publication proof in this transaction.
+export function publishMemberMessage(
+  tx: ReplicationTx, clock: Clock, hostId: string, householdId: string, input: MemberMessageInput,
+  append?: Append, proof?: PublicationProof, groupReply: GroupReplyPolicy = quietGroupReply, policy?: SendPolicy,
+) {
+  const { memberId, ...content } = input;
+  const row = tx.insert(messages).values({
+    ...businessRow(clock, hostId), ...content, authorMemberId: memberId, modality: "text",
+    status: "complete", replyToMessageId: null, turnId: null, publicationEpoch: proof?.epoch ?? null,
+  }).returning().get()!;
+  appendNativeChange(tx, hostId, householdId, replicaAdapters.message, projectMessageReplica(tx, row));
+  const scope = readConversationScope(tx, row.conversationId)!;
+  const syntheticEpoch = proof && policy?.groupPublicationAuthority?.currentEpoch(tx, {
+    hostId, householdId, conversationId: row.conversationId, now: clock.wallMs(),
+  });
+  const epoch = proof ? policy?.groupPublicationAuthority
+    ? syntheticEpoch && `leased:${syntheticEpoch}` : publicationCredential(proof) : "direct";
+  if (!epoch) throw new NotPublisherError();
+  const turn = proof
+    ? groupReply(tx, clock, row, proof, append, epoch)
+    : createTurn(tx, clock, input.conversationId, row.id, null, append);
+  if (turn) {
+    tx.update(messages).set({ turnId: turn.id }).where(eq(messages.id, row.id)).run();
+  }
+  tx.update(conversations).set({ ...revision(clock), rev: sql`${conversations.rev} + 1` })
+    .where(eq(conversations.id, row.conversationId)).run();
+  enqueueMessageExtraction(tx, clock, {
+    householdId, conversationId: row.conversationId, sourceMemberId: memberId,
+    sourceMessageId: row.id, sourceRevision: row.rev,
+  });
+  admitInference(tx, row, scope, epoch, policy?.askOutcomeRule);
+  return { message: dto({ ...row, turnId: turn?.id ?? null }), turn: turn ? initialTurn(turn) : null };
+}
+
 export function sendMessage(
   db: Pick<StoreDb, "transaction">, clock: Clock, actor: Actor, conversationId: string,
   input: { clientMessageId: string; text: string },
-  append?: Append,
+  append?: Append, window?: PublicationWindow, groupReply?: GroupReplyPolicy, policy?: SendPolicy,
 ) {
   const text = input.text.trim();
   if (input.clientMessageId.length < 1 || input.clientMessageId.length > 100 || text.length < 1 || text.length > 4000) {
     throw new InvalidChatRequestError("消息格式无效");
   }
   return db.transaction((tx) => {
-    const conversation = visible(tx, actor, conversationId);
+    const conversation = visibleConversation(tx, actor, conversationId);
     const hostId = getHostMeta(tx, "host_id");
-    if (!hostId || conversation.publisherHostId !== hostId) {
+    if (!hostId || (conversation.kind === "direct" && conversation.publisherHostId !== hostId)) {
       throw new NotPublisherError();
     }
-    const existing = tx.select().from(messages).where(and(
-      eq(messages.conversationId, conversationId), eq(messages.authorMemberId, actor.memberId),
-      eq(messages.clientMessageId, input.clientMessageId),
-    )).get();
+    const write = { conversationId, memberId: actor.memberId, clientMessageId: input.clientMessageId, text };
+    const existing = findMemberMessage(tx, write);
     if (existing) {
+      if (existing.deletedAt !== null) throw new ConversationNotFoundError();
       if (existing.text !== text) {
         throw new IdempotencyConflictError();
       }
-      const original = existing.turnId ? tx.select().from(turns).where(eq(turns.id, existing.turnId)).get() : undefined;
-      return { created: false, body: { message: dto(existing), turn: original ? initialTurn(original) : null } };
+      return { created: false, body: memberMessageResponse(tx, existing) };
     }
-    const row = tx.insert(messages).values({
-      ...businessRow(clock, hostId), conversationId, authorMemberId: actor.memberId, text, modality: "text",
-      status: "complete", clientMessageId: input.clientMessageId, replyToMessageId: null, turnId: null,
-    }).returning().get()!;
-    const turn = createTurn(tx, clock, conversationId, row.id, null, append);
-    tx.update(messages).set({ turnId: turn.id }).where(eq(messages.id, row.id)).run();
-    tx.update(conversations).set({ ...revision(clock), rev: sql`${conversations.rev} + 1` })
-      .where(eq(conversations.id, conversationId)).run();
-    return { created: true, body: { message: dto({ ...row, turnId: turn.id }), turn: initialTurn(turn) } };
+    const proof = conversation.kind !== "group" ? undefined
+      : policy?.groupPublicationAuthority
+        ? publicationEpoch(tx, clock, conversation, policy.groupPublicationAuthority)
+          ? publicationProof(tx, conversation.householdId) : undefined
+        : requireSharedPublisher(tx, conversation.householdId, window);
+    if (conversation.kind === "group" && !proof) throw new NotPublisherError();
+    return {
+      created: true,
+      body: publishMemberMessage(tx, clock, hostId, conversation.householdId, write, append, proof, groupReply, policy),
+    };
   }, { behavior: "immediate" });
 }

@@ -5,9 +5,16 @@ export interface ModelRequest {
   maxOutputTokens?: number;
   extraBody?: Record<string, unknown>;
   signal?: AbortSignal;
+  guard?: () => void;
+}
+export interface ModelUsage {
+  inputTokens: number | null;
+  outputTokens: number;
+  reasoningTokens: number | null;
+  cacheReadTokens: number | null;
 }
 export type ModelEvent = { type: "text-delta" | "reasoning-delta"; delta: string }
-  | { type: "finish"; finishReason: "stop" | "length" | "content-filter" | "error" | "other" };
+  | { type: "finish"; finishReason: "stop" | "length" | "content-filter" | "error" | "other"; usage?: ModelUsage };
 export interface ModelClient {
   readonly provider: string;
   readonly modelId: string;

@@ -1,12 +1,15 @@
 import type { HostContext } from "../runtime/index.ts";
+import { getHostMeta } from "../store/host-meta.ts";
 import { active } from "../store/turn-writes.ts";
 import { readTurnFeed, terminalEvent } from "../store/turns.ts";
 
 export async function* streamTurn(ctx: HostContext, id: string, cursor: string | null, signal: AbortSignal): AsyncGenerator<{ cursor: string; kind: string; data: unknown }, string> {
+  const generation = getHostMeta(ctx.store.db, "phone_sync_generation");
+  const streamHost = generation ? `${ctx.hostId}.${generation}` : ctx.hostId;
   let last = 0;
   let snapshot = false;
   if (cursor !== null) {
-    const prefix = `${ctx.hostId}.`;
+    const prefix = `${streamHost}.`;
     const suffix = cursor.slice(prefix.length);
     if (cursor.startsWith(prefix) && /^[1-9]\d*$/.test(suffix) && Number.isSafeInteger(Number(suffix))) {
       last = Number(suffix);
@@ -32,7 +35,7 @@ export async function* streamTurn(ctx: HostContext, id: string, cursor: string |
       const feed = readTurnFeed(ctx.store.db, ctx.clock, id, last);
       if (snapshot || !feed.replayable || (initial && cursor !== null && !active(feed.row) && last === feed.row.eventSeq)) {
         last = feed.row.eventSeq;
-        const checkpoint = `${ctx.hostId}.${last}`;
+        const checkpoint = `${streamHost}.${last}`;
         if (snapshotSeq !== last) {
           yield { cursor: checkpoint, kind: "snapshot", data: { text: feed.text } };
           snapshotSeq = last;
@@ -48,7 +51,7 @@ export async function* streamTurn(ctx: HostContext, id: string, cursor: string |
             return "aborted";
           }
           last = event.seq;
-          yield { ...event, cursor: `${ctx.hostId}.${last}` };
+          yield { ...event, cursor: `${streamHost}.${last}` };
           if (event.terminal) {
             return "end";
           }

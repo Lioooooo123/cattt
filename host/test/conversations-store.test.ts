@@ -1,3 +1,4 @@
+import { PublicationLeaseError } from "../src/publication/types.ts";
 import { afterEach, expect, test } from "bun:test";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { encodeHlc, ManualClock } from "../src/clock/index.ts";
@@ -84,7 +85,7 @@ test("署名由 Actor 决定，幂等键按作者与会话隔离，冲突与外�
   const input = { clientMessageId: "one", text: "  你好  " };
   const first = sendMessage(db, clock, a.actor, group.id, input);
   expect(first.created).toBe(true);
-  expect(first.body.turn).toMatchObject({ status: "queued", trigger_message_id: first.body.message.id });
+  expect(first.body.turn).toBeNull();
   expect(first.body.message.author).toEqual({ kind: "member", member_id: a.actor.memberId });
   expect(first.body.message.text).toBe("你好");
   expect(sendMessage(db, clock, a.actor, group.id, { ...input, text: "你好" })).toEqual({ ...first, created: false });
@@ -156,6 +157,7 @@ test("空历史、坏游标、坏正文与非发布宿主有明确行为，猫�
   expect(getConversation(db, a.actor, direct.id).publisher_host_id).toBe(remote.id);
   expect(() => sendMessage(db, clock, a.actor, direct.id, { text: "远端", clientMessageId: "remote" })).toThrow(NotPublisherError);
   db.update(conversations).set({ publisherHostId: remote.id }).where(eq(conversations.id, group.id)).run();
-  expect(() => sendMessage(db, clock, a.actor, group.id, { text: "你好", clientMessageId: "x" })).toThrow(NotPublisherError);
+  expect(sendMessage(db, clock, a.actor, group.id, { text: "你好", clientMessageId: "x" }).created).toBe(false);
+  expect(() => sendMessage(db, clock, a.actor, group.id, { text: "新消息", clientMessageId: "new" })).toThrow(PublicationLeaseError);
   expect(db.select().from(messages).where(isNull(messages.deletedAt)).all()).toHaveLength(2);
 });

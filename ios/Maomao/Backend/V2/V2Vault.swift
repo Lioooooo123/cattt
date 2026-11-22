@@ -6,18 +6,19 @@ struct V2Connection: Codable {
     let port: Int
     let fingerprint: String
     let identity: V2.PairResult
-    func client(host: String) -> V2Client {
-        var url = URLComponents()
-        url.scheme = "https"; url.host = host; url.port = port
-        return V2Client(baseURL: url.url!, token: identity.deviceToken, session: PairTransport.session(fingerprint: fingerprint))
-    }
     func select() async throws -> V2Client {
+        try await Self.select(hosts: hosts, port: port, fingerprint: fingerprint, token: identity.deviceToken)
+    }
+    static func select(hosts: [String], port: Int, fingerprint: String, token: String = "") async throws -> V2Client {
+        let session = PairTransport.session(fingerprint: fingerprint)
         for host in hosts {
             try Task.checkCancellation()
-            let client = client(host: host)
-            var request = try client.request("GET", "healthz")
+            var url = URLComponents()
+            url.scheme = "https"; url.host = host; url.port = port
+            let client = V2Client(baseURL: url.url!, token: token, session: session)
+            var request = try V2Client(baseURL: client.baseURL, token: "", session: session).request("GET", "healthz")
             request.timeoutInterval = 4
-            if let (_, response) = try? await client.session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200 { return client }
+            if let (_, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200 { return client }
         }
         throw PairingError.unavailable
     }
@@ -53,55 +54,61 @@ extension V2Connection {
 }
 
 enum V2Vault {
-    private static let key: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "com.maomao.v2-device", kSecAttrAccount as String: "host"]
+    private static func key(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "com.maomao.v2-device", kSecAttrAccount as String: account]
+    }
+
     static func load() -> V2Connection? {
-        var query = key
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, let connection = try? JSONDecoder().decode(V2Connection.self, from: data),
+        guard let connection = read(V2Connection.self, account: "host"),
               PairFingerprint.valid(connection.fingerprint), !connection.hosts.isEmpty,
               connection.hosts.allSatisfy(PairInvitation.validHost), (1...65535).contains(connection.port) else { return nil }
         return connection
     }
+
     static func save(_ connection: V2Connection?) throws {
-        guard let connection else {
-            let status = SecItemDelete(key as CFDictionary)
+        try write(connection, account: "host")
+    }
+
+    static var retirements: [V2Connection] {
+        read([V2Connection].self, account: "retirements") ?? []
+    }
+
+    static func retire(_ connection: V2Connection) throws {
+        var pending = retirements
+        if pending.contains(where: { $0.identity.deviceId == connection.identity.deviceId }) { return }
+        pending.append(connection)
+        try write(pending, account: "retirements")
+    }
+
+    static func finishRetiring(_ deviceID: String) throws {
+        let rest = retirements.filter { $0.identity.deviceId != deviceID }
+        try write(rest.isEmpty ? nil : rest, account: "retirements")
+    }
+
+    private static func read<Value: Decodable>(_ type: Value.Type, account: String) -> Value? {
+        var query = key(account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    private static func write<Value: Encodable>(_ value: Value?, account: String) throws {
+        let query = key(account)
+        guard let value else {
+            let status = SecItemDelete(query as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw PairingError.storage }
             return
         }
-        let update: [String: Any] = [kSecValueData as String: try JSONEncoder().encode(connection),
+        let update: [String: Any] = [kSecValueData as String: try JSONEncoder().encode(value),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
-        var status = SecItemUpdate(key as CFDictionary, update as CFDictionary)
-        if status == errSecItemNotFound { status = SecItemAdd(key.merging(update) { _, b in b } as CFDictionary, nil) }
+        var status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if status == errSecItemNotFound { status = SecItemAdd(query.merging(update) { _, b in b } as CFDictionary, nil) }
         guard status == errSecSuccess else { throw PairingError.storage }
     }
-}
-
-@MainActor
-final class V2Outbox {
-    struct Entry: Codable, Identifiable, Equatable {
-        let id: String
-        let conversationID: String
-        let text: String
-    }
-    private let defaults: UserDefaults
-    private let storageKey: String
-    private(set) var entries: [Entry]
-    init(identity: String, defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        storageKey = "v2.outbox." + identity
-        entries = defaults.data(forKey: storageKey).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
-    }
-    @discardableResult func enqueue(conversation: String, text: String) -> Entry {
-        let entry = Entry(id: UUID().uuidString, conversationID: conversation, text: text)
-        entries.append(entry); persist()
-        return entry
-    }
-    func acknowledge(_ id: String) { entries.removeAll { $0.id == id }; persist() }
-    private func persist() { defaults.set(try? JSONEncoder().encode(entries), forKey: storageKey) }
 }
 
 @MainActor

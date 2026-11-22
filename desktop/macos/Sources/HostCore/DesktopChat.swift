@@ -19,9 +19,10 @@ public enum DeviceCredentialError: Error, LocalizedError {
 }
 
 public struct KeychainDeviceCredentialStore: DeviceCredentialStore {
-    private let service = "app.cattt.host.desktop-device-token"
+    private let service: String
 
-    public init() {}
+    public init() { service = "app.cattt.host.desktop-device-token" }
+    init(service: String) { self.service = service }
 
     public static func account(for dataDirectory: URL) -> String {
         let path = dataDirectory.standardizedFileURL.resolvingSymlinksInPath().path

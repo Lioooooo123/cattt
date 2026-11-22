@@ -35,6 +35,9 @@ struct V2ChatEntryView: View {
                 }.padding(20)
             }
             .navigationTitle("聊会儿").navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Palette.bg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("回院子") { store.screen = .home } }
             }
@@ -42,10 +45,19 @@ struct V2ChatEntryView: View {
                 if let selected { V2ConversationView(chat: chat, conversation: selected) }
             }
             .task { await chat.load() }
+            .onChange(of: chat.notificationConversationID, initial: true) { selectNotificationConversation() }
+            .onChange(of: chat.conversations.map(\.id)) { selectNotificationConversation() }
         }
         .tint(Palette.ink)
         .preferredColorScheme(.light)
     }
+    private func selectNotificationConversation() {
+        guard let id = chat.notificationConversationID,
+              let conversation = chat.conversations.first(where: { $0.id == id }) else { return }
+        selected = conversation
+        chat.notificationConversationID = nil
+    }
+
     private func subtitle(_ conversation: V2.Conversation) -> String {
         guard let message = conversation.lastMessage else { return "还没说过话，来坐一会儿吧" }
         return "\(chat.sender(message.author))：\(message.text)"
@@ -55,7 +67,16 @@ struct V2ChatEntryView: View {
 private struct V2ConversationView: View {
     @ObservedObject var chat: V2ChatStore
     let conversation: V2.Conversation
+    @State private var ticketSelection: V2TicketEditor.Selection?
+    @State private var relayError: String?
+    @State private var relayConfirmation: RelayConfirmation?
     @State private var draft = ""
+    @State private var usageMessage: V2.Message?
+    @State private var attachmentConversation: V2.Conversation?
+    private var outboxRows: [V2Outbox.Entry] { chat.visibleOutbox(conversation.id) }
+    private var notificationMessage: String? {
+        chat.messages[conversation.id]?.first(where: { $0.id == chat.notificationMessageID })?.id
+    }
     var body: some View {
         ZStack {
             PageBackground().ignoresSafeArea()
@@ -69,7 +90,7 @@ private struct V2ConversationView: View {
                                 if let anchor { proxy.scrollTo(anchor, anchor: .top) }
                             } }.font(Typo.sans(14)).frame(maxWidth: .infinity).padding(8)
                         }
-                        if (chat.messages[conversation.id] ?? []).isEmpty {
+                        if (chat.messages[conversation.id] ?? []).isEmpty && outboxRows.isEmpty {
                             Text("这里还安安静静的。想说什么都可以。")
                                 .font(Typo.sans(15)).foregroundStyle(Palette.ink2)
                                 .frame(maxWidth: .infinity).padding(.vertical, 40)
@@ -81,7 +102,16 @@ private struct V2ConversationView: View {
                                         if chat.canReply(message) {
                                             Button("请团子重答") { Task { await chat.reply(to: message) } }
                                         }
+                                        if let source = source(for: message) {
+                                            Button("原话的使用") { usageMessage = message }
+                                            ticketActions(for: message, source: source)
+                                        }
                                     }
+                                if let proof = source(for: message),
+                                   message.canOfferRelay(memberID: chat.connection.identity.member.id,
+                                                         conversationID: conversation.id, kind: conversation.kind) {
+                                    relayControls(message: message, source: proof, work: chat.work)
+                                }
                                 if message.status == "stopped" {
                                     Text("已停止").font(Typo.sans(12)).foregroundStyle(Palette.ink2)
                                 }
@@ -93,14 +123,11 @@ private struct V2ConversationView: View {
                                 }
                             }.id(message.id)
                         }
-                        ForEach(chat.pending.filter { $0.conversationID == conversation.id }) { entry in
+                        ForEach(outboxRows, id: \.displayID) { entry in
                             VStack(alignment: .trailing, spacing: 6) {
                                 bubble(entry.text, sender: "我", mine: true)
-                                if let failure = chat.failures[entry.id] {
-                                    Text(failure).font(Typo.sans(12)).foregroundStyle(Palette.ink2)
-                                    Button("发送失败，点此重试") { Task { await chat.transmit(entry) } }.font(Typo.sans(13))
-                                } else { Text("正在发送…").font(Typo.sans(12)).foregroundStyle(Palette.ink2) }
-                            }.frame(maxWidth: .infinity, alignment: .trailing).id(entry.id)
+                                deliveryStatus(entry)
+                            }.frame(maxWidth: .infinity, alignment: .trailing).id(entry.displayID)
                         }
                         if let active = chat.activeTurns[conversation.id] {
                             VStack(alignment: .leading, spacing: 8) {
@@ -134,29 +161,151 @@ private struct V2ConversationView: View {
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: chat.messages[conversation.id]?.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-                .onChange(of: chat.pending.count) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                .onChange(of: notificationMessage, initial: true) {
+                    guard let id = notificationMessage else { return }
+                    proxy.scrollTo(id, anchor: .center)
+                    chat.notificationMessageID = nil
+                }
+                .onChange(of: outboxRows.last?.displayID) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 .onChange(of: chat.activeTurns[conversation.id]?.stream.text) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
-                if let error = chat.error { Text(error).font(Typo.sans(12)).foregroundStyle(Palette.ink2) }
+                if let error = relayError ?? chat.error { Text(error).font(Typo.sans(12)).foregroundStyle(Palette.ink2) }
                 HStack(alignment: .bottom, spacing: 12) {
                     TextField("说点什么…", text: $draft, axis: .vertical)
-                        .font(Typo.sans(16)).lineLimit(1...5).padding(12)
+                        .font(Typo.sans(16)).foregroundStyle(Palette.ink).lineLimit(1...5).padding(12)
                         .background(Palette.card, in: RoundedRectangle(cornerRadius: Metrics.radiusControl))
                         .accessibilityIdentifier("v2Composer")
                     PrimaryButton(height: 44, horizontalPadding: 16, enabled: canSend, shadow: false) {
                         let text = draft; draft = ""
-                        Task { await chat.send(text, conversation: conversation.id) }
+                        Task {
+                            if !(await chat.send(text, conversation: conversation.id)), draft.isEmpty { draft = text }
+                        }
                     } label: { Text("发送").font(Typo.sans(14)) }
                 }
             }.padding(.horizontal, 16).padding(.vertical, 10).background(Palette.bg)
         }
         .navigationTitle(conversation.title).navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Palette.bg, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if let message = chat.messages[conversation.id]?.last(where: { source(for: $0) != nil }),
+                   let proof = source(for: message) {
+                    Menu("用最近的原话创建", systemImage: "clock") {
+                        ticketActions(for: message, source: proof)
+                    }
+                    .labelStyle(.iconOnly)
+                }
+                Button("附件", systemImage: "paperclip") { attachmentConversation = conversation }
+                    .labelStyle(.iconOnly)
+            }
+        }
+        .sheet(item: $attachmentConversation) { conversation in
+            V2ConversationAttachments(conversation: conversation, connection: chat.connection, changes: chat.changes, memberNames: chat.members)
+        }
+        .sheet(item: $ticketSelection) { selection in
+            V2TicketEditor(selection: selection, work: chat.work)
+        }
+        .sheet(item: $usageMessage) { message in
+            V2MessageUsageView(resources: chat.resources, catDiary: chat.catDiary, message: message)
+        }
+        .confirmationDialog(relayConfirmation?.title ?? "转告", isPresented: Binding(
+            get: { relayConfirmation != nil }, set: { if !$0 { relayConfirmation = nil } }
+        ), titleVisibility: .visible, presenting: relayConfirmation) { intent in
+            Button(intent.withdrawing ? "确认撤回" : "确认转告", role: intent.withdrawing ? .destructive : nil) {
+                performRelay(intent, work: chat.work)
+            }
+        } message: { intent in
+            Text(intent.withdrawing
+                 ? "团子会停止使用这句原话。已送达的消息仍留在对方聊天里。"
+                 : "团子会用你的名字，在伴侣和团子的单聊里转告。\n\n" + intent.text)
+        }
         .task { await chat.poll(conversation.id) }
+        .task { await chat.work.refreshPendingRelays(in: conversation.id) }
     }
-    private var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.count <= 4000 }
+
+    private struct RelayConfirmation {
+        let source: V2.WorkSource
+        let text: String
+        var withdrawing = false
+        var title: String { withdrawing ? "撤回这句原话的转告授权？" : "请团子署名转告？" }
+    }
+
+    @ViewBuilder
+    private func ticketActions(for message: V2.Message, source: V2.WorkSource) -> some View {
+        Button("创建约定") { ticketSelection = .schedule(source, original: message.text) }
+        Button("创建托付") { ticketSelection = .start(source, original: message.text) }
+    }
+
+    private func source(for message: V2.Message) -> V2.WorkSource? {
+        message.workSource(memberID: chat.connection.identity.member.id, conversationID: conversation.id)
+    }
+
+    @ViewBuilder
+    private func relayControls(message: V2.Message, source: V2.WorkSource, work: V2WorkStore) -> some View {
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+            if let entry = work.relays[source.messageID] {
+                let receipt = entry.receipt
+                let showUrgent = entry.intent == .send && receipt?.urgent == true
+                Text((showUrgent ? "紧急转告 · " : "") + entry.label).foregroundStyle(Palette.ink2)
+                if entry.intent == .send {
+                    if receipt?.state.isPending == true {
+                        Button("查看状态") { performRelay(.init(source: entry.source, text: message.text), work: work) }
+                    } else if receipt == nil {
+                        Button("重试转告") { relayConfirmation = .init(source: entry.source, text: message.text) }
+                    }
+                    if entry.rejection == nil || receipt != nil {
+                        Button("撤回授权") { relayConfirmation = .init(source: entry.source, text: message.text, withdrawing: true) }
+                    }
+                } else if entry.intent == .withdraw {
+                    Button("重试撤回") { relayConfirmation = .init(source: entry.source, text: message.text, withdrawing: true) }
+                }
+            } else {
+                Button("请团子转告") { relayConfirmation = .init(source: source, text: message.text) }
+            }
+        }
+        .font(Typo.sans(13)).tint(Palette.accent)
+        .disabled(work.relayBusy.contains(source.messageID))
+    }
+
+    private func performRelay(_ intent: RelayConfirmation, work: V2WorkStore) {
+        Task {
+            relayError = nil
+            do {
+                if intent.withdrawing { try await work.withdrawRelay(intent.source) }
+                else { try await work.requestRelay(intent.source) }
+            } catch { relayError = V2WorkStore.errorText(error) }
+        }
+    }
+
+    private var canSend: Bool {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.isEmpty && text.utf16.count <= 4000
+    }
+    @ViewBuilder private func deliveryStatus(_ entry: V2Outbox.Entry) -> some View {
+        if entry.accepted == nil {
+            Text(deliveryTitle(entry)).font(Typo.sans(12)).foregroundStyle(Palette.ink2)
+            if let failure = chat.failures[entry.id] {
+                Text(failure).font(Typo.sans(12)).foregroundStyle(Palette.ink2)
+            }
+            if entry.wasRejected || (entry.rejection == nil && chat.failures[entry.id] != nil) {
+                Button(entry.wasRejected ? "重新发送" : "重试") { Task { await chat.retry(entry) } }
+                    .font(Typo.sans(13)).disabled(chat.sending.contains(entry.id))
+            }
+        }
+    }
+    private func deliveryTitle(_ entry: V2Outbox.Entry) -> String {
+        if entry.wasRejected { return "这条消息未获接收" }
+        if let code = entry.rejection { return V2.APIError(code: code).localizedDescription }
+        if let receipt = entry.receipt { return receipt.reason.title }
+        if chat.sending.contains(entry.id) { return "正在发送…" }
+        return entry.submissionStarted == false ? "尚未发送" : "暂时未能确认发送"
+    }
     @ViewBuilder private func retryButton(_ active: V2ChatStore.ActiveTurn) -> some View {
         if let message = chat.messages[conversation.id]?.first(where: { $0.id == active.turn.triggerMessageId }) {
             Button("重答") { Task { await chat.reply(to: message) } }.font(Typo.sans(13)).disabled(chat.replying.contains(conversation.id))

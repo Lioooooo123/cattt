@@ -11,7 +11,9 @@ export function openStore(path: string) {
     if (path !== ":memory:") {
       raw.exec("PRAGMA journal_mode = WAL");
     }
-    raw.exec("PRAGMA synchronous = NORMAL");
+    // A transfer may leave the machine immediately after its commit. The old
+    // publisher must stay fenced even after a power loss.
+    raw.exec("PRAGMA synchronous = FULL");
     raw.exec("PRAGMA foreign_keys = ON");
 
     const db = drizzle(raw, { schema });

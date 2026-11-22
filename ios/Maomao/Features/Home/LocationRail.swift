@@ -67,5 +67,13 @@ struct LocationRail: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(hasCat ? "\(location.name)，团子在这里" : location.name)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .contextMenu {
+            if let bridge = store.v2World, bridge.canSubmit {
+                Button("请团子来这里") { bridge.request(destination: YardIntent.places[index], activity: nil) }
+                if bridge.companionSeat == YardIntent.places[index] {
+                    Button("陪我坐一会儿") { bridge.request(destination: YardIntent.places[index], activity: "sit") }
+                }
+            }
+        }
     }
 }

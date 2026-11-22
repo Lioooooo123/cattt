@@ -34,12 +34,12 @@ export function turnEvent(db: TurnDb, clock: Clock, id: string, event: Omit<Appe
   db.update(turns).set({ eventSeq: seq }).where(eq(turns.id, id)).run();
 }
 
-export function createTurn(db: TurnDb, clock: Clock, conversationId: string, triggerMessageId: string, requestId: string | null, append?: Append) {
+export function createTurn(db: TurnDb, clock: Clock, conversationId: string, triggerMessageId: string, requestId: string | null, append?: Append, publicationEpoch?: string) {
   const now = clock.wallMs();
   const row = db.insert(turns).values({
     id: uuidv7(clock), conversationId, triggerMessageId, requestId, status: "queued", replyMessageId: null,
     errorCode: null, cancelReason: null, visibleLength: null, firstTokenAt: null, heartbeatAt: now,
-    createdAt: now, finishedAt: null, draftText: "", eventSeq: 0, supersededByTurnId: null,
+    publicationEpoch: publicationEpoch ?? null, createdAt: now, finishedAt: null, draftText: "", eventSeq: 0, supersededByTurnId: null,
   }).returning().get()!;
   const pending = db.select().from(turns).where(and(
     eq(turns.conversationId, conversationId), inArray(turns.status, ["queued", "generating"]), isNull(turns.firstTokenAt),

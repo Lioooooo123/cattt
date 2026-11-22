@@ -2,13 +2,16 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { HostContext } from "../runtime/index.ts";
 import { normalizeCode } from "../store/codes.ts";
-import { MemberLimitError, removeMember } from "../store/identity.ts";
-import { acceptMemberInvite, bootstrapMember, issueMemberInvite, MemberBootstrapError, revokeMemberInvite } from "../store/invites.ts";
+import { getHousehold, listMembers, MemberLimitError, removeMember } from "../store/identity.ts";
+import {
+  acceptMemberInvite, bootstrapMember, issueMemberInvite, listOpenMemberInvites,
+  MemberBootstrapError, MemberSyncPendingError, revokeMemberInvite,
+} from "../store/invites.ts";
 import { AccessDeniedError } from "./access.ts";
 import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
-import { memberRecord } from "./dto.ts";
+import { memberProfile, memberRecord } from "./dto.ts";
 
 const name = z.string().trim().min(1).max(100);
 const badRequest = { error: { code: "invalid_request" } };
@@ -26,6 +29,9 @@ export function memberInviteRoutes(
     }
     if (error instanceof MemberBootstrapError) {
       return c.json({ error: { code: "members_already_initialized" } }, 409);
+    }
+    if (error instanceof MemberSyncPendingError) {
+      return c.json({ error: { code: "peer_sync_pending" } }, 409);
     }
     if (error instanceof AccessDeniedError) {
       return c.json({ error: { code: "forbidden" } }, 403);
@@ -55,6 +61,19 @@ export function memberInviteRoutes(
     app.use("/invites", requireActor(ctx));
     app.use("/invites/:id", requireActor(ctx));
   } else {
+    app.get("/members", (c) => {
+      const household = getHousehold(ctx.store.db, ctx.householdId);
+      if (!household) return c.json({ error: { code: "not_found" } }, 404);
+      return c.json({
+        host_id: ctx.hostId,
+        household: { id: household.id, name: household.name, origin_host_id: household.originHostId },
+        members: listMembers(ctx.store.db, household.id).map(memberProfile),
+        max_members: ctx.config.maxMembers,
+      });
+    });
+    app.get("/invites", (c) => c.json({
+      invites: listOpenMemberInvites(ctx.store.db, ctx.clock, ctx.householdId),
+    }));
     app.post("/members", async (c) => {
       const parsed = z.object({ display_name: name }).strict().safeParse(await c.req.json().catch(() => null));
       if (!parsed.success) {

@@ -31,21 +31,7 @@ struct DiaryEntryRow: View {
 
     /// 团子自己写的那一条：暖纸色（"团子写的东西"的既定语义），左上一枚小爪印，可以"聊聊"。
     private var catCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Icons.paw(size: 13, color: Palette.paperInk)
-                Text("团子的一天")
-                    .font(Typo.sans(10.5))
-                    .tracking(track(0.06, 10.5))
-                    .foregroundStyle(Palette.paperInk)
-            }
-
-            Text(entry.text)
-                .font(Typo.sans(14.5))
-                .lineHeight(1.75, size: 14.5)
-                .foregroundStyle(Palette.ink)
-                .fixedSize(horizontal: false, vertical: true)
-
+        CatDiaryPaperCard(title: "团子的一天", text: entry.text) {
             HStack {
                 Text("团子")
                     .font(Typo.sans(10.5))
@@ -59,18 +45,6 @@ struct DiaryEntryRow: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 13)
-        .padding(.bottom, 11)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.paper, in: RoundedRectangle(cornerRadius: Metrics.radiusLg, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Metrics.radiusLg, style: .continuous)
-                .stroke(Palette.paperRule, lineWidth: 1)
-        )
-        .softShadow()
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("团子的一天，" + entry.text)
     }
 
     // MARK: - 碎片卡
@@ -245,5 +219,43 @@ private struct DiagonalStripes: View {
                 offset += period
             }
         }
+    }
+}
+
+struct CatDiaryPaperCard<Footer: View>: View {
+    let title: String
+    let text: String
+    @ViewBuilder let footer: () -> Footer
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Icons.paw(size: 13, color: Palette.paperInk)
+                Text(title)
+                    .font(Typo.sans(10.5))
+                    .tracking(track(0.06, 10.5))
+                    .foregroundStyle(Palette.paperInk)
+            }
+
+            Text(text)
+                .font(Typo.sans(14.5))
+                .lineHeight(1.75, size: 14.5)
+                .foregroundStyle(Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
+            footer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 13)
+        .padding(.bottom, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Palette.paper, in: RoundedRectangle(cornerRadius: Metrics.radiusLg, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Metrics.radiusLg, style: .continuous)
+                .stroke(Palette.paperRule, lineWidth: 1)
+        )
+        .softShadow()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title + "，" + text)
     }
 }

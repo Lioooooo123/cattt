@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { Component, HostContext } from "../runtime/index.ts";
-import { claimJob, completeJob, enqueueJob, failJob } from "../store/jobs.ts";
+import { claimJob, completeJob, deferJob, enqueueJob, failJob, renewJob } from "../store/jobs.ts";
 import type { EnqueueJob, Job } from "../store/jobs.ts";
 
 export interface JobContext extends HostContext {
@@ -8,20 +8,26 @@ export interface JobContext extends HostContext {
   signal: AbortSignal;
 }
 
+export type JobResult = void | { deferUntil: number };
+
 export interface QueueOptions<T> {
   schema: z.ZodType<T>;
-  handler(payload: T, ctx: JobContext): void | Promise<void>;
+  handler(payload: T, ctx: JobContext): JobResult | Promise<JobResult>;
+  onExhausted?(payload: T, ctx: JobContext): void | Promise<void>;
   concurrency: number;
   timeoutMs?: number;
+  leaseMs?: number;
   maxAttempts?: number;
   backoff?: (attempts: number) => number;
 }
 
 interface Queue {
   schema: z.ZodType;
-  handler(payload: unknown, ctx: JobContext): void | Promise<void>;
+  handler(payload: unknown, ctx: JobContext): JobResult | Promise<JobResult>;
+  onExhausted?(payload: unknown, ctx: JobContext): void | Promise<void>;
   concurrency: number;
   timeoutMs: number;
+  leaseMs: number;
   maxAttempts: number;
   backoff: (attempts: number) => number;
 }
@@ -64,6 +70,11 @@ export class JobRunner implements Component {
       throw new Error("队列须在启动前注册且不可重复");
     }
     const timeoutMs = options.timeoutMs ?? (queue === "errand" ? 660_000 : 300_000);
+    const leaseMs = options.leaseMs ?? timeoutMs;
+    positiveInteger(leaseMs);
+    if (leaseMs > timeoutMs) {
+      throw new RangeError("认领租期不能超过执行超时");
+    }
     const maxAttempts = options.maxAttempts ?? 3;
     positiveInteger(options.concurrency);
     positiveInteger(timeoutMs);
@@ -71,8 +82,10 @@ export class JobRunner implements Component {
     this.queues.set(queue, {
       schema: options.schema,
       handler: (payload, ctx) => options.handler(payload as T, ctx),
+      onExhausted: options.onExhausted && ((payload, ctx) => options.onExhausted!(payload as T, ctx)),
       concurrency: options.concurrency,
       timeoutMs,
+      leaseMs,
       maxAttempts,
       backoff: options.backoff ?? ((attempts) => Math.min(1000 * 2 ** (attempts - 1), 60_000)),
     });
@@ -161,7 +174,9 @@ export class JobRunner implements Component {
     }
     try {
       while (session.accepting && work.size < registration.concurrency) {
-        const job = claimJob(session.ctx.store.db, session.ctx.clock, queue, registration.timeoutMs);
+        const job = claimJob(
+          session.ctx.store.db, session.ctx.clock, queue, registration.leaseMs, registration.onExhausted !== undefined,
+        );
         if (!job) {
           break;
         }
@@ -201,25 +216,44 @@ export class JobRunner implements Component {
       }, queue.timeoutMs);
     });
     session.cancel.add(cancel);
+    const jobContext = { ...ctx, job, signal: controller.signal };
+    const exhausted = job.attempts > job.maxAttempts;
+    const heartbeat = queue.leaseMs < queue.timeoutMs ? setInterval(() => {
+      try {
+        if (!renewJob(ctx.store.db, ctx.clock, job, queue.leaseMs)) {
+          cancel();
+        }
+      } catch (error) {
+        this.report(session, error);
+        cancel();
+      }
+    }, Math.max(1, Math.floor(queue.leaseMs / 3))) : undefined;
     const result = Promise.resolve()
-      .then(() => queue.handler(payload, { ...ctx, job, signal: controller.signal }))
-      .then(() => ({ kind: "done" as const }), (error: unknown) => ({ kind: "failed" as const, error }));
+      .then(() => exhausted ? queue.onExhausted?.(payload, jobContext) : queue.handler(payload, jobContext))
+      .then((value) => ({ kind: "done" as const, value }), (error: unknown) => ({ kind: "failed" as const, error }));
     try {
       const outcome = await Promise.race([result, interrupted]);
       if (!session.writable || outcome.kind === "timeout" || outcome.kind === "cancelled") {
         return;
       }
       if (outcome.kind === "done") {
-        completeJob(ctx.store.db, ctx.clock, job);
+        if (outcome.value) {
+          deferJob(ctx.store.db, ctx.clock, job, outcome.value.deferUntil);
+        } else {
+          completeJob(ctx.store.db, ctx.clock, job);
+        }
       } else if (outcome.kind === "failed") {
         const delay = queue.backoff(job.attempts);
         if (!Number.isSafeInteger(delay) || delay < 0) {
           throw new RangeError("重试退避必须是非负整数毫秒");
         }
-        failJob(ctx.store.db, ctx.clock, job, outcome.error, ctx.clock.wallMs() + delay);
+        // 需要收尾的队列让最后一次普通失败进入有凭证的收尾处理。
+        failJob(ctx.store.db, ctx.clock, job, outcome.error, ctx.clock.wallMs() + delay, exhausted,
+          queue.onExhausted !== undefined);
       }
     } finally {
       clearTimeout(timer);
+      clearInterval(heartbeat);
       session.cancel.delete(cancel);
     }
   }

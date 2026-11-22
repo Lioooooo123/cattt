@@ -162,6 +162,20 @@ async function boot() {
   }
   const sendSnapshot = (type = 'snapshot') => post({ type, snapshot: snapshot() });
 
+  let sharedProjection = false;
+  function projectShared(message: Record<string, unknown>) {
+    if (!behavior) throw new Error('首页行为未启用');
+    walking = false;
+    behavior.projectShared(message.intent as HomeIntent);
+    behavior.setWater(message.full === true);
+    world.setHomeFacts(message.full === true, mailboxHasMail);
+    atmosphere.hourOverride = null;
+    atmosphere.choose(slotValue(message.slot), message.weather === 'rain' ? 'rain' : 'clear', true);
+    sharedProjection = true;
+    lastHomeState = '';
+  }
+  let mailboxHasMail = false;
+
   function syncRunning(reason: string) {
     const shouldRun = initialized && appActive && !document.hidden && contextOK && !disposed;
     if (shouldRun === running) return;
@@ -191,7 +205,7 @@ async function boot() {
     // 桌面章节的离屏追赶会传送猫；手机浏览镜头不应触发这个机制。
     if (!composition) walker.update(follow.camera, dt);
     cat!.update(dt * motionRate);
-    behavior?.update();
+    if (!sharedProjection) behavior?.update();
     if (composition && !firstFrame) {
       cat!.root.updateMatrixWorld(true);
       cat!.root.traverse(object => { const mesh = object as THREE.SkinnedMesh; if (mesh.isSkinnedMesh) mesh.skeleton.update(); });
@@ -357,15 +371,21 @@ async function boot() {
           if (!['viewport', 'controls', 'previewMotion', 'facts'].includes(String(config.type))) throw new Error('初始化配置无效');
           window.__app!.command(JSON.stringify({ ...config, ...identity }));
         }
-        if (message.snapshot) restore(message.snapshot as Snapshot);
-        if (behavior && message.intent && (!restored || (message.intent as HomeIntent).id !== behavior.intent.id)) behavior.accept(message.intent as HomeIntent);
+        if (message.sharedWorld) projectShared(message.sharedWorld as Record<string, unknown>);
+        else {
+          if (message.snapshot) restore(message.snapshot as Snapshot);
+          if (behavior && message.intent && (!restored || (message.intent as HomeIntent).id !== behavior.intent.id)) behavior.accept(message.intent as HomeIntent);
+        }
         appActive = message.active === true; initialized = true; syncRunning('initialize'); break;
       case 'active': appActive = message.on === true; syncRunning('native'); break;
       case 'snapshot': sendSnapshot(); return JSON.stringify(snapshot());
       case 'report': return JSON.stringify(report());
       case 'dispose': dispose(); break;
-      case 'facts': behavior?.setWater(message.full === true); world.setHomeFacts(message.full === true, message.mail === true); break;
-      case 'intent': if (!behavior) throw new Error('首页行为未启用'); walking = false; behavior.accept(message as unknown as HomeIntent); break;
+      case 'facts': mailboxHasMail = message.mail === true; behavior?.setWater(message.full === true); world.setHomeFacts(message.full === true, mailboxHasMail); break;
+      case 'sharedWorld': projectShared(message); break;
+      case 'intent':
+        if (!behavior) throw new Error('首页行为未启用');
+        walking = false; sharedProjection = false; behavior.accept(message as unknown as HomeIntent); break;
       case 'poke': cat!.earFlick(); cat!.lookAt(follow.camera.position); break;
       case 'atmosphere': atmosphere.hourOverride = typeof message.hour === 'number' ? message.hour : null; atmosphere.choose(slotValue(message.slot), message.weather === 'rain' ? 'rain' : 'clear', message.instant === true); break;
       case 'goTo': walking = false; walker.goTo(placeValue(message.place)); break;

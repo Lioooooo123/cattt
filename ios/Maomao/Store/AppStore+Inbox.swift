@@ -3,6 +3,10 @@ import SwiftUI
 extension AppStore {
     /// 不重连聊天、不改 pending turn；生成中先记下刷新请求，done 后再拉。
     func refreshInbox() {
+        if let work = v2Work {
+            Task { await work.refresh() }
+            return
+        }
         guard backend.isRemote, !backend.token.isEmpty else { return }
         syncDiary()
         guard !isWaiting, !isStreaming else { inboxRefreshPending = true; return }
@@ -58,7 +62,7 @@ extension AppStore {
     }
 
     func readLetter(_ letter: APIMailboxLetter) {
-        guard letter.readAt == nil else { return }
+        guard v2Chat == nil, letter.readAt == nil else { return }
         let client = api
         Task { @MainActor [weak self] in
             do {

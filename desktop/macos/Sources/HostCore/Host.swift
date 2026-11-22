@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Darwin
 import Security
@@ -7,14 +8,21 @@ public struct HostError: Error, CustomStringConvertible {
     public init(_ message: String) { description = message }
 }
 
-private final class HostTrustDelegate: NSObject, URLSessionDelegate {
+final class HostTrustDelegate: NSObject, URLSessionDelegate {
     private let anchor: SecCertificate
+    let fingerprint: String
 
     init?(_ pem: String) {
         let base64 = pem.split(whereSeparator: \.isNewline).filter { !$0.hasPrefix("-----") }.joined()
         guard let bytes = Data(base64Encoded: base64),
               let anchor = SecCertificateCreateWithData(nil, bytes as CFData) else { return nil }
         self.anchor = anchor
+        fingerprint = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,

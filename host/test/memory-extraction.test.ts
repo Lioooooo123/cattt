@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createExtractModel } from "../src/llm/index.ts";
-import { extractSpec, modelConfigFromEnv } from "../src/llm/config.ts";
+import { DEFAULT_LOCAL_EXTRACT_MODEL, extractSpec, modelConfigFromEnv, slotSpec, thinkingOptions } from "../src/llm/config.ts";
 import type { ModelClient, ModelRequest } from "../src/llm/types.ts";
 import { extractMemoryForMessage, MemoryExtractionInputError } from "../src/memory/extraction.ts";
 import type { ExtractionInput, ExtractionMessage } from "../src/memory/extraction.ts";
@@ -74,6 +74,27 @@ test("extract 默认本机，显式配置独立于 chat；mock 提供结构化�
   await expect(extractMemoryForMessage(input(), createExtractModel(mock))).resolves.toMatchObject({
     status: "extracted", confirmed: [], pending: [],
   });
+});
+
+test("显式启用本机抽取才补默认模型，保留槽位与共用模型优先级", () => {
+  for (const env of [{ MODEL_PROVIDER: "openai-compatible" }, { EXTRACT_PROVIDER: "openai-compatible" },
+    { MODEL_PROVIDER: "deepseek", EXTRACT_PROVIDER: "openai-compatible" }]) {
+    const config = modelConfigFromEnv(env);
+    expect(extractSpec(config)).toEqual({ provider: "openai-compatible", model: DEFAULT_LOCAL_EXTRACT_MODEL });
+    expect(slotSpec(config, "extract").baseURL).toBe("http://127.0.0.1:11434/v1");
+    expect(thinkingOptions("openai-compatible", config, config.EXTRACT_THINKING)).toEqual({ reasoning_effort: "none" });
+    expect(extractSpec(modelConfigFromEnv({ ...env, OPENAI_COMPAT_MODEL: "shared" })).model).toBe("shared");
+    expect(extractSpec(modelConfigFromEnv({ ...env, OPENAI_COMPAT_MODEL: "shared", EXTRACT_MODEL: "explicit" })).model).toBe("explicit");
+  }
+  for (const env of [{}, { MODEL_PROVIDER: "deepseek", MAOMAO_DEEPSEEK_API_KEY: "test" },
+    { MODEL_PROVIDER: "echo" }, { OPENAI_COMPAT_BASE_URL: "http://127.0.0.1:11434/v1" },
+    { MODEL_PROVIDER: "openai-compatible", EXTRACT_BASE_URL: "https://example.com/v1" }]) {
+    expect(extractSpec(modelConfigFromEnv(env)).model).toBeUndefined();
+  }
+  const local = modelConfigFromEnv({ MODEL_PROVIDER: "openai-compatible" });
+  expect(slotSpec(local, "chat").model).toBeUndefined();
+  expect(extractSpec(modelConfigFromEnv({ MODEL_PROVIDER: "openai-compatible", EXTRACT_PROVIDER: "deepseek" })).model).toBe("deepseek-flash");
+  expect(() => modelConfigFromEnv({ MODEL_PROVIDER: "openai-compatible", EXTRACT_MODEL: "" })).toThrow("EXTRACT_MODEL");
 });
 
 test("学习关闭、来源停用、未完成和团子消息在模型调用前跳过", async () => {

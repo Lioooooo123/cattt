@@ -4,6 +4,7 @@ const source = z.enum(["openai-compatible", "deepseek"]);
 const thinking = z.enum(["enabled", "disabled"]);
 const modelName = z.string().trim().min(1).max(255);
 const LOCAL_URL = "http://127.0.0.1:11434/v1";
+export const DEFAULT_LOCAL_EXTRACT_MODEL = "qwen3:8b";
 const DEEPSEEK_URL = "https://api.deepseek.com";
 const endpoint = z.url().refine((value) => {
   const url = URL.parse(value);
@@ -81,7 +82,9 @@ export function slotSpec(config: ModelConfig, slot: SlotName): SlotSpec {
     ? config.MAOMAO_EXTRACT_API_KEY ?? (baseURL === shared ? config.MAOMAO_OPENAI_COMPAT_API_KEY : undefined)
     : config.MAOMAO_OPENAI_COMPAT_API_KEY;
   const defaultModel = global === "echo" && slot !== "extract" && !override ? undefined : config.OPENAI_COMPAT_MODEL;
-  return { provider, model: model ?? defaultModel, thinking, baseURL, apiKey };
+  const localExtractDefault = slot === "extract" && isLoopback(baseURL)
+    && (global === "openai-compatible" || override === "openai-compatible") ? DEFAULT_LOCAL_EXTRACT_MODEL : undefined;
+  return { provider, model: model ?? defaultModel ?? localExtractDefault, thinking, baseURL, apiKey };
 }
 
 export function isConfigured(spec: SlotSpec): boolean {

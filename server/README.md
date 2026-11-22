@@ -17,14 +17,14 @@
 pnpm --dir server model:setup --json
 pnpm --dir server model:setup -- --yes --env-file "$HOME/Library/Application Support/Cattt/env"
 # 明确覆盖推荐，供低配烟测使用
-pnpm --dir server model:setup --yes --model qwen2.5:0.5b
+pnpm --dir server model:setup --yes --model qwen3:4b
 ```
 
 pnpm 11 会把 `--env-file` 识别为 Node 自身参数，因此带此选项时须用上面的 `--` 分隔，脚本也接受不带分隔符的直接调用。
 
 先自行安装并启动 [Ollama](https://ollama.com/download)。脚本复用 `server/.env` 与进程环境中的 `OPENAI_COMPAT_BASE_URL`（默认 `http://127.0.0.1:11434/v1`），去掉 `/v1` 后访问 Ollama 原生 `/api/tags`、`/api/pull`；非 Ollama 兼容服务不支持自动安装。下载逐条显示进度，随后发送固定的中文陪伴问题与工具探针，不读取私人数据。通过要求中文非空回答和一次名称、参数完全正确的工具调用；分别报告两次请求与总耗时。失败非零退出，只建议下一小档，不自动重试或换模型。
 
-档位唯一来源为 [`MODEL_TIERS`](src/runtime/hardware.ts)：Apple Silicon 统一内存或 NVIDIA 最大单卡显存全额计算（不叠加多卡），纯 CPU 内存降一档。可打印同源表：`pnpm --dir server exec tsx -e 'import { MODEL_TIERS } from "./src/runtime/hardware.ts"; console.table(MODEL_TIERS)'`。这是 Qwen2.5 Instruct 初始容量推荐，不是实机性能排名；尚未在真实 Mac 上按团子中文陪伴质量、工具正确率和延迟完成档位基准，单题烟测也不等于完整陪伴质量验收。
+档位唯一来源为 [`MODEL_TIERS`](src/runtime/hardware.ts)：Apple Silicon 统一内存或 NVIDIA 最大单卡显存全额计算（不叠加多卡），纯 CPU 内存降一档。可打印同源表：`pnpm --dir server exec tsx -e 'import { MODEL_TIERS } from "./src/runtime/hardware.ts"; console.table(MODEL_TIERS)'`。16 GB Mac 推荐 `qwen3:8b`，8 GB 推荐 `qwen3:4b`（记忆准确性降级）；24 GB / 48 GB 档位分别为 `qwen3:14b` / `qwen3:32b`，只是容量推荐，未经本轮质量评测。记忆默认选型依据见[决策](../docs/决策/2026-11-23-默认本机记忆模型.md)，单题烟测不等于完整陪伴质量验收。Qwen3 抽取保留 `EXTRACT_THINKING=disabled`、`OPENAI_COMPAT_THINKING_PARAM=reasoning_effort`。
 
 默认不写任何文件。仅在烟测成功且明确传 `--env-file` 时，原地更新 `MODEL_PROVIDER`、`OPENAI_COMPAT_MODEL`，保留其他行和注释，权限设为 0600；父目录须存在。宿主预留路径是 `~/Library/Application Support/Cattt/env`，菜单集成尚未完成。已有槽位级 `*_MODEL` / `*_PROVIDER` 设置仍会覆盖全局选择，需自行核对；脚本不改这些设置，也不自动重启服务。
 

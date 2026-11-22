@@ -10,18 +10,18 @@ const hardware = (totalMemGB: number, appleSilicon = true): Hardware => ({
 });
 
 describe('硬件推荐', () => {
-  it.each([[16, true, 'qwen2.5:7b'], [8, true, 'qwen2.5:3b'], [16, false, 'qwen2.5:3b'], [64, true, 'qwen2.5:32b'], [64, false, 'qwen2.5:14b'], [4, true, undefined], [8, false, undefined]] as const)('%s GB / Apple=%s', (memory, apple, model) => {
+  it.each([[16, true, 'qwen3:8b'], [8, true, 'qwen3:4b'], [12, true, 'qwen3:4b'], [16, false, 'qwen3:4b'], [64, true, 'qwen3:32b'], [64, false, 'qwen3:14b'], [4, true, undefined], [8, false, undefined]] as const)('%s GB / Apple=%s', (memory, apple, model) => {
     const result = recommendModel(hardware(memory, apple));
     expect(result.kind === 'local' ? result.model : undefined).toBe(model);
   });
   it('逐档边界使用同一张表', () => {
     for (const tier of MODEL_TIERS) expect(recommendModel(hardware(tier.minMemGB))).toMatchObject({ model: tier.model });
-    expect(smallerModel('qwen2.5:7b')).toBe('qwen2.5:3b');
+    expect(smallerModel('qwen3:8b')).toBe('qwen3:4b');
     expect(smallerModel('custom')).toBeUndefined();
   });
   it('NVIDIA 按显存而非主存', () => {
-    expect(recommendModel({ ...hardware(64, false), gpu: { model: 'NVIDIA', vramGB: 12 } })).toMatchObject({ model: 'qwen2.5:7b' });
-    expect(recommendModel({ ...hardware(4, false), gpu: { model: 'NVIDIA', vramGB: 24 } })).toMatchObject({ model: 'qwen2.5:14b' });
+    expect(recommendModel({ ...hardware(64, false), gpu: { model: 'NVIDIA', vramGB: 12 } })).toMatchObject({ model: 'qwen3:4b' });
+    expect(recommendModel({ ...hardware(4, false), gpu: { model: 'NVIDIA', vramGB: 24 } })).toMatchObject({ model: 'qwen3:14b' });
   });
 });
 

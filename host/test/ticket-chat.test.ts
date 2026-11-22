@@ -75,7 +75,7 @@ async function fixture(run: (f: Awaited<ReturnType<typeof setup>>) => Promise<vo
       } }], usage });
     } });
     stops.unshift(() => model.stop(true));
-    const config = modelConfigFromEnv({ MODEL_PROVIDER: "openai-compatible", CHAT_PROVIDER: "openai-compatible",
+    const config = modelConfigFromEnv({ MODEL_PROVIDER: "deepseek", CHAT_PROVIDER: "openai-compatible",
       WORKER_PROVIDER: "openai-compatible", CHAT_MODEL: "chat-fixture", WORKER_MODEL: "worker-fixture",
       OPENAI_COMPAT_BASE_URL: new URL("/v1", model.url).href, MODEL_LOCAL_CONCURRENCY: "2" });
     async function launch(name: string) {

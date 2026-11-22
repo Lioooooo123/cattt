@@ -71,7 +71,7 @@ test("共享院子聊天经双 SQLite、HTTPS、mTLS 和测试 3D 执行器，�
       ?? actionReply(toolCall(`call-${++calls}`, name, name === "move_cat" ? { destination_id: "pond" } : {}));
   } });
   const config = modelConfigFromEnv({
-    MODEL_PROVIDER: "openai-compatible", CHAT_MODEL: "deepseek-v4-yard-fixture",
+    MODEL_PROVIDER: "deepseek", CHAT_PROVIDER: "openai-compatible", CHAT_MODEL: "deepseek-v4-yard-fixture",
     OPENAI_COMPAT_BASE_URL: new URL("/v1", model.url).href,
   });
 

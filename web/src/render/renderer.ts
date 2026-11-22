@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { AdaptiveScaleGovernor, type ScaleDecision } from './adaptive-scale';
+import { prepareScene } from './prepare';
 
 // 帧率不够时降渲染分辨率，下限 0.75（方案第 6、8 节）
 const MIN_SCALE = 0.75;
@@ -111,6 +112,10 @@ export class Renderer {
       this.composer.addPass(this.finish);
     }
     this.resize();
+  }
+
+  async prepare(scene: THREE.Scene, camera: THREE.Camera) {
+    await prepareScene(this.gl, scene, camera, this.composer?.readBuffer ?? this.gl.getRenderTarget());
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, time = 0) {

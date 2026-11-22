@@ -27,9 +27,29 @@ private final class YardMessageProxy: NSObject, WKScriptMessageHandler {
 }
 
 @MainActor
+private final class YardMountedWebView: WKWebView {
+    var onPresentation: ((Bool) -> Void)?
+    private var presented = false
+
+    override func didMoveToWindow() { super.didMoveToWindow(); updatePresentation() }
+    override func layoutSubviews() { super.layoutSubviews(); updatePresentation() }
+
+    private func updatePresentation() {
+        let value = window != nil && bounds.width > 0 && bounds.height > 0
+        guard value != presented else { return }
+        presented = value
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            onPresentation?(presented)
+        }
+    }
+}
+
+@MainActor
 final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate {
     static let scheme = "maomao"
     let webView: WKWebView
+    var onPresentation: ((Bool) -> Void)?
     let messages = PassthroughSubject<[String: Any], Never>()
     @Published private(set) var ready = false
     @Published private(set) var surfaceReady = false
@@ -84,8 +104,9 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(YardSchemeHandler(), forURLScheme: Self.scheme)
         configuration.allowsInlineMediaPlayback = true
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = YardMountedWebView(frame: .zero, configuration: configuration)
         super.init()
+        (webView as? YardMountedWebView)?.onPresentation = { [weak self] in self?.onPresentation?($0) }
         proxy.owner = self
         configuration.userContentController.add(proxy, name: "maomao")
         webView.navigationDelegate = self
@@ -166,7 +187,9 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
             guard !stopped, page == identity.pageID, revision == lifecycleRevision else { return }
             // iOS 可以先冻结内容进程，再送达 native 的暂停命令。后台超时只记事实，
             // 前台重发 active 后若仍无响应才算失败；不能把正常系统挂起误报成损坏。
-            if value { emit("error", ["message": "恢复前台同步失败：\(error)"]) }
+            if case YardProbeError.timeout = error, !surfaceReady {
+                emit("lifecycleDeferred", ["message": "等待首帧；由启动存活检查判断是否失去响应"])
+            } else if value { emit("error", ["message": "恢复前台同步失败：\(error)"]) }
             else { emit("lifecycleDeferred", ["message": "后台内容进程暂不可响应；前台重发"]) }
         }
     }
@@ -225,7 +248,12 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
                     if let homeIntent { command["intent"] = homeIntent }
                 }
                 do { try await send(command) }
-                catch { if !stopped && expected == identity.pageID { emit("error", ["message": "网页初始化失败：\(error)"]) } }
+                catch {
+                    guard !stopped && expected == identity.pageID else { return }
+                    if case YardProbeError.timeout = error {
+                        emit("lifecycleDeferred", ["message": "等待初始化回执；由启动存活检查判断是否失去响应"])
+                    } else { emit("error", ["message": "网页初始化失败：\(error)"]) }
+                }
             }
         }
     }

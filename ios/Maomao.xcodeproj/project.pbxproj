@@ -18,6 +18,7 @@ AF640567EE8FC4739444C274 = {isa = PBXBuildFile; fileRef = 3823F37E26EFECEBBA9405
 8524C89E6A1558E67E86C68C = {isa = PBXBuildFile; fileRef = 70348D0450AC8D98C656AD0C; };
 F9ED12D6A310816950B29790 = {isa = PBXBuildFile; fileRef = 07049CDF8D65F36BBC6E84AB; };
 77EEB75417DC519A340A73C1 = {isa = PBXBuildFile; fileRef = F88522A3C6ACE447B66B5D7B; };
+23FEFBD13B0A3FCD1D60EFE9 = {isa = PBXBuildFile; fileRef = 57D665B76A064789E305BF75; };
 		F09D42F9E7E77D33AA855ABB /* MaomaoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EB8551F861F4AF3CC085244 /* MaomaoApp.swift */; };
 		E778BEAA207CC8A8B11361D2 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9740FBDFEAB1CBBE29CF2E18 /* RootView.swift */; };
 		8C110EF04255CC160596AE74 /* AgreementAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBB27A9DAAA00C7B0D0C80D /* AgreementAPI.swift */; };
@@ -203,6 +204,7 @@ B13CA99B428DA5978CEB4D38 = {isa = PBXFileReference; lastKnownFileType = sourceco
 70348D0450AC8D98C656AD0C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/V2SendReceiptTests.swift; sourceTree = SOURCE_ROOT; };
 07049CDF8D65F36BBC6E84AB = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/V2Tests.swift; sourceTree = SOURCE_ROOT; };
 F88522A3C6ACE447B66B5D7B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/V2WorldTests.swift; sourceTree = SOURCE_ROOT; };
+57D665B76A064789E305BF75 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = V2Tests/YardLifecycleTests.swift; sourceTree = SOURCE_ROOT; };
 		F5BF48AA40CAD7891EB709FC /* Maomao.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Maomao.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6EB8551F861F4AF3CC085244 /* MaomaoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaomaoApp.swift; sourceTree = "<group>"; };
 		9740FBDFEAB1CBBE29CF2E18 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -401,6 +403,7 @@ B13CA99B428DA5978CEB4D38,
 70348D0450AC8D98C656AD0C,
 07049CDF8D65F36BBC6E84AB,
 F88522A3C6ACE447B66B5D7B,
+57D665B76A064789E305BF75,
 				B9340614599AB78F485950C7 /* Maomao */,
 				1BADDC1D73C1A20F347483E1 /* Products */,
 			);
@@ -864,7 +867,7 @@ DFEE19449146DDDB4DD78AD1,
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-8F11E0AE1293B031D2165BF2 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FB2802C82D3E23C0C5941D9E,BC3602BA4022D55DF349FBA3,F425303B0C66FE0DE3F294E4,34E03676F398F6DEB6FBBD8A,20EF363AEFD4FCF0C7F51984,F85AC361984021793BBD20FD,AF640567EE8FC4739444C274,97F3895E73E39E225A0D6E3C,8524C89E6A1558E67E86C68C,F9ED12D6A310816950B29790,77EEB75417DC519A340A73C1,); runOnlyForDeploymentPostprocessing = 0; };
+8F11E0AE1293B031D2165BF2 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FB2802C82D3E23C0C5941D9E,BC3602BA4022D55DF349FBA3,F425303B0C66FE0DE3F294E4,34E03676F398F6DEB6FBBD8A,20EF363AEFD4FCF0C7F51984,F85AC361984021793BBD20FD,AF640567EE8FC4739444C274,97F3895E73E39E225A0D6E3C,8524C89E6A1558E67E86C68C,F9ED12D6A310816950B29790,77EEB75417DC519A340A73C1,23FEFBD13B0A3FCD1D60EFE9,); runOnlyForDeploymentPostprocessing = 0; };
 		F2AB5FB218DA8B84623F4557 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;

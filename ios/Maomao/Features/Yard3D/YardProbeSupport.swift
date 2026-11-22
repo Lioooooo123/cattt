@@ -49,7 +49,7 @@ struct YardVisualGate {
     func allowsCommands(ready: Bool) -> Bool { ready && !isVisible }
 
     func allowsLifecycle(ready: Bool, active: Bool) -> Bool {
-        ready && (!isVisible || (active && commandedActive == false))
+        ready && (!isVisible || (commandedActive != nil && commandedActive != active))
     }
 
     func needsWatchdogFailure(active: Bool) -> Bool { active && isVisible }
@@ -81,6 +81,19 @@ struct YardVisualGate {
         isVisible = false
         if recoverableFailure { failure = nil; recoverableFailure = false }
         return true
+    }
+}
+
+struct YardStartupWatchdog {
+    private var lastProgress: TimeInterval?
+    let window: TimeInterval
+
+    init(window: TimeInterval = 10) { self.window = window }
+    mutating func progress(at now: TimeInterval) { lastProgress = max(lastProgress ?? now, now) }
+    mutating func cancel() { lastProgress = nil }
+    func expired(at now: TimeInterval) -> Bool {
+        guard let lastProgress else { return false }
+        return now - lastProgress >= window
     }
 }
 

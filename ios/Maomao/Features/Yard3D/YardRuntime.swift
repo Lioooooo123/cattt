@@ -19,15 +19,19 @@ final class YardRuntime {
     private var sharedWater: Bool?
     private var mailboxHasMail = false
     private var pageReuseID = UUID()
-    private var active = false
+    private(set) var active = false
+    private var requestedActive = false
+    private var presented = false
     private var lastFacts = ""
     #if DEBUG
     private(set) var factsChecks = 0
+    var visibilityContext: [String: Any] = [:]
     #endif
     private var lastAtmosphere = ""
     private var coverTask: Task<Void, Never>?
     private var coverContext = ""
     private var watchdog: Task<Void, Never>?
+    private var startupWatchdog = YardStartupWatchdog()
     private static let snapshotKey = "maomao.yard3d.snapshot.v1"
 
     static var savedGoal: String? {
@@ -37,6 +41,11 @@ final class YardRuntime {
     }
     init() {
         subscription = web.messages.sink { [weak self] in self?.receive($0) }
+        web.onPresentation = { [weak self] value in
+            guard let self else { return }
+            presented = value
+            updateActivity()
+        }
     }
     func start(intent: YardIntent.Request, slot: String, weather: String) {
         guard !started, !shared || web.sharedWorld != nil else { return }
@@ -85,8 +94,22 @@ final class YardRuntime {
     }
 
     func setActive(_ value: Bool) {
+        requestedActive = value
+        updateActivity()
+    }
+    private func updateActivity() {
+        let value = requestedActive && presented
+        #if DEBUG
+        receive(visibilityContext.merging(["type": "lifecycleTrace", "reason": "nativeActive", "active": value, "requestedActive": requestedActive,
+                 "window": web.webView.window != nil, "width": web.webView.bounds.width,
+                 "height": web.webView.bounds.height, "alpha": web.webView.alpha]) { _, new in new })
+        #endif
+        guard active != value else { return }
         active = value
-        Task { await web.setActive(value); if value { flush(); if !web.surfaceReady { armWatchdog() } } }
+        watchdog?.cancel()
+        startupWatchdog.cancel()
+        if value { armWatchdog() }
+        Task { await web.setActive(value); if active { flush() } }
     }
     func intent(_ value: YardIntent.Request) {
         if !shared { web.homeIntent = value.json }
@@ -145,18 +168,19 @@ final class YardRuntime {
     }
     private func receive(_ message: [String: Any]) {
         let type = message["type"] as? String
-        if let type, ["cat", "tap", "firstFrame", "visualReady", "restored", "processTerminated", "contextLost", "error", "unavailable", "paused", "resumed"].contains(type) {
+        if let type, ["startupProgress", "startupTiming", "lifecycleTrace", "cat", "tap", "firstFrame", "visualReady", "restored", "processTerminated", "contextLost", "error", "unavailable", "paused", "resumed"].contains(type) {
             var event = message.filter { !["report", "snapshot", "runId"].contains($0.key) }
             event["uptime"] = ProcessInfo.processInfo.systemUptime
             events.append(event); if events.count > 200 { events.removeFirst() }
         }
         #if DEBUG
-        if type == "error" || type == "unavailable",
+        if type == "startupTiming" || type == "firstFrame" || type == "visualReady" || type == "error" || type == "unavailable",
            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             // 重开后仍能复盘最近一次失败；只保存技术事件，不包含聊天或用户内容。
             let record: [String: Any] = ["events": events, "ready": web.ready, "surfaceReady": web.surfaceReady, "active": active]
             if let data = try? JSONSerialization.data(withJSONObject: record, options: .prettyPrinted) {
-                try? data.write(to: directory.appendingPathComponent("yard-last-failure.json"), options: .atomic)
+                let name = type == "error" || type == "unavailable" ? "yard-last-failure.json" : "yard-startup.json"
+                try? data.write(to: directory.appendingPathComponent(name), options: .atomic)
             }
         }
         #endif
@@ -168,6 +192,8 @@ final class YardRuntime {
             UserDefaults.standard.set(data, forKey: Self.snapshotKey)
         }
         switch type {
+        case "ready", "startupProgress":
+            if active { startupWatchdog.progress(at: ProcessInfo.processInfo.systemUptime) }
         case "cat":
             onState?(message)
             if let state = message["snapshot"] as? [String: Any], let slot = state["shownSlot"] as? String,
@@ -182,8 +208,9 @@ final class YardRuntime {
                 onTap?(target, CGPoint(x: x, y: y))
             }
         case "firstFrame", "restored":
+            if active { startupWatchdog.progress(at: ProcessInfo.processInfo.systemUptime) }
             lastFacts = ""; lastAtmosphere = ""; flush()
-        case "visualReady": watchdog?.cancel(); flush(); scheduleCover()
+        case "visualReady": watchdog?.cancel(); startupWatchdog.cancel(); flush(); scheduleCover()
         case "processTerminated", "contextLost":
             if shared { queue.removeAll { ["intent", "sharedWorld"].contains($0["type"] as? String ?? "") } }
             onUnavailable?("小院正在恢复"); armWatchdog()
@@ -200,10 +227,18 @@ final class YardRuntime {
     }
     private func armWatchdog() {
         watchdog?.cancel()
+        startupWatchdog.cancel()
+        guard active, started, !web.surfaceReady else { return }
+        startupWatchdog.progress(at: ProcessInfo.processInfo.systemUptime)
         watchdog = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
-            guard !Task.isCancelled, let self, web.needsWatchdogFailure(active: active) else { return }
-            onUnavailable?("小院暂时无法打开，可以重试"); web.markUnavailable("小院暂时无法打开，可以重试")
+            while !Task.isCancelled {
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+                guard let self, web.needsWatchdogFailure(active: active) else { return }
+                if startupWatchdog.expired(at: ProcessInfo.processInfo.systemUptime) {
+                    onUnavailable?("小院暂时无法打开，可以重试"); web.markUnavailable("小院暂时无法打开，可以重试")
+                    return
+                }
+            }
         }
     }
     func retry() { web.retry(); armWatchdog() }

@@ -187,7 +187,9 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
             guard !stopped, page == identity.pageID, revision == lifecycleRevision else { return }
             // iOS 可以先冻结内容进程，再送达 native 的暂停命令。后台超时只记事实，
             // 前台重发 active 后若仍无响应才算失败；不能把正常系统挂起误报成损坏。
-            if value { emit("error", ["message": "恢复前台同步失败：\(error)"]) }
+            if case YardProbeError.timeout = error, !surfaceReady {
+                emit("lifecycleDeferred", ["message": "等待首帧；由启动存活检查判断是否失去响应"])
+            } else if value { emit("error", ["message": "恢复前台同步失败：\(error)"]) }
             else { emit("lifecycleDeferred", ["message": "后台内容进程暂不可响应；前台重发"]) }
         }
     }
@@ -246,7 +248,12 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
                     if let homeIntent { command["intent"] = homeIntent }
                 }
                 do { try await send(command) }
-                catch { if !stopped && expected == identity.pageID { emit("error", ["message": "网页初始化失败：\(error)"]) } }
+                catch {
+                    guard !stopped && expected == identity.pageID else { return }
+                    if case YardProbeError.timeout = error {
+                        emit("lifecycleDeferred", ["message": "等待初始化回执；由启动存活检查判断是否失去响应"])
+                    } else { emit("error", ["message": "网页初始化失败：\(error)"]) }
+                }
             }
         }
     }

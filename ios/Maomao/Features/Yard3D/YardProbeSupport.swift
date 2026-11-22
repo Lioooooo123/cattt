@@ -84,6 +84,19 @@ struct YardVisualGate {
     }
 }
 
+struct YardStartupWatchdog {
+    private var lastProgress: TimeInterval?
+    let window: TimeInterval
+
+    init(window: TimeInterval = 10) { self.window = window }
+    mutating func progress(at now: TimeInterval) { lastProgress = max(lastProgress ?? now, now) }
+    mutating func cancel() { lastProgress = nil }
+    func expired(at now: TimeInterval) -> Bool {
+        guard let lastProgress else { return false }
+        return now - lastProgress >= window
+    }
+}
+
 enum YardProbeArchive {
     /// 抛出失败，不允许调用者在失败路径宣称已保存。
     static func save(_ record: [String: Any], directory: URL, name: String,

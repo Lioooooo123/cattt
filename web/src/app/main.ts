@@ -13,6 +13,7 @@ import { CameraGestures } from './gestures';
 import { projectBox, type ScreenRect, type Insets } from './composition';
 import { HomeBehavior, pickTarget, type HomeIntent } from './home-behavior';
 import { layoutRestorePoint } from './layout-snapshot';
+import { prepareStartup } from './startup';
 
 // 参数由 Debug 实测页限定；与桌面共用资源，独立生命周期。
 const params = new URLSearchParams(location.search);
@@ -74,6 +75,11 @@ async function boot() {
   let initialized = false, appActive = !inApp(), contextOK = true, disposed = false;
   let raf = 0, running = false, previous: number | null = null;
   let rafTicks = 0;
+  let prepared = false, preparing: Promise<void> | undefined;
+  let startupSequence = 0;
+  const startupProgress = (phase: string, duration = 0) => {
+    post({ type: 'startupProgress', phase, duration, sequence: ++startupSequence, elapsed: performance.now() - started });
+  };
   const lifecycleTrace = (reason: string) => {
     if (params.has('review')) post({ type: 'lifecycleTrace', reason, rafTicks, initialized, appActive,
       hidden: document.hidden, visibility: document.visibilityState, running, contextOK, disposed,
@@ -196,13 +202,25 @@ async function boot() {
     } else {
       renderer.resetTiming(); previous = null; pacer.reset(); lastHomeState = "";
       post({ type: 'resumed', reason, snapshot: snapshot() });
-      if (params.get('fault') !== 'no-first-frame') raf = requestAnimationFrame(frame);
+      if (params.get('fault') !== 'no-first-frame') {
+        if (prepared) raf = requestAnimationFrame(frame);
+        else if (!preparing) {
+          preparing = prepareStartup(() => renderer.prepare(world.scene, follow.camera), (phase, duration) => {
+            if (!disposed) startupProgress(phase, duration);
+          }, listeners.signal).then(() => {
+            prepared = true;
+            if (running && !disposed) raf = requestAnimationFrame(frame);
+          }).catch(error => {
+            if (!disposed) post({ type: 'error', message: String(error), stack: error instanceof Error ? error.stack : undefined });
+          });
+        }
+      }
     }
   }
 
   function frame(now: number) {
     rafTicks++;
-    lifecycleTrace('raf');
+    if (!visualReady) lifecycleTrace('raf');
     try { drawFrame(now); }
     catch (error) {
       cancelAnimationFrame(raf); raf = 0;
@@ -213,6 +231,7 @@ async function boot() {
   function drawFrame(now: number) {
     raf = 0;
     if (!running || disposed) return;
+    if (!firstFrame) startupProgress('firstRAF');
     raf = requestAnimationFrame(frame);
     if (!pacer.due(now)) return;
     // 动画大步长仍限幅，性能统计保留完整前台间隔，两者不能混用。
@@ -269,7 +288,10 @@ async function boot() {
     world.setPondPaw(cat!.pondPaw, cat!.state);
     world.setFlowerPaw(cat!.flowerPaw,cat!.state);
     world.setNestLoad(cat!.nestLoad);
+    const worldStarted = performance.now();
+    if (!firstFrame && params.has('review')) post({ type: 'startupTiming', phase: 'worldStarted', elapsed: worldStarted - started });
     world.update(dt, atmosphere, follow.camera, false, follow.reduceMotion);
+    if (!firstFrame && params.has('review')) post({ type: 'startupTiming', phase: 'worldFinished', elapsed: performance.now() - started, duration: performance.now() - worldStarted });
     if (cat!.nesting) cat!.applyNestSupport(world.nestTransform);
     renderer.gl.toneMappingExposure = atmosphere.current.exposure;
     applyCatGlow(cat!, atmosphere.current.catGlow);
@@ -281,10 +303,14 @@ async function boot() {
       }
     }
     renderer.gl.info.reset();
+    const renderStarted = performance.now();
+    if (!firstFrame) startupProgress('renderStarted');
+    if (!firstFrame && params.has('review')) post({ type: 'startupTiming', phase: 'renderStarted', elapsed: renderStarted - started });
     renderer.render(world.scene, follow.camera, now / 1000);
     const finished = performance.now();
     recorder.frame(finished, renderer.scale);
     if (!firstFrame) {
+      if (params.has('review')) post({ type: 'startupTiming', phase: 'renderFinished', elapsed: finished - started, duration: finished - renderStarted });
       firstFrame = true;
       post({ type: 'firstFrame', renderMs: finished - started, snapshot: snapshot() });
       if (restored) post({ type: 'restored', snapshot: snapshot() });

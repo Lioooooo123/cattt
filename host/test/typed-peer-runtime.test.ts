@@ -212,12 +212,24 @@ test("两个独立编译宿主在 mTLS 上同步、断线重启、换世代、�
     expect(localExecution(b)).toEqual(localBefore);
     expect(inspect(b, (db) => db.query("SELECT count(*) AS n FROM messages WHERE turn_id IS NULL").get())).toEqual({ n: 2 });
 
+    const contenders = [a, b];
+    const lastSeat = await Promise.all(contenders.map((run) => http(run, "/host/invites", "POST")));
+    expect(lastSeat.map(({ status }) => status).sort()).toEqual([200, 409]);
+    expect(lastSeat.find(({ status }) => status === 409)?.body).toEqual({ error: { code: "member_limit" } });
+    const winner = lastSeat.findIndex(({ status }) => status === 200);
+    await json(contenders[winner]!, `/host/invites/${lastSeat[winner]!.body.invite_id}`, "DELETE");
+
     const cancelled = await json(b, "/host/invites", "POST", { display_name: "乙" });
     expect(await http(a, "/host/invites", "POST")).toEqual({
       status: 409, body: { error: { code: "member_limit" } },
     });
     await json(b, `/host/invites/${cancelled.invite_id}`, "DELETE");
     const { code } = await json(b, "/host/invites", "POST", { display_name: "乙" });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(await http(b, "/v2/invites/accept", "POST", {
+        code: cancelled.code, display_name: "乙", device_name: "乙手机",
+      })).toEqual({ status: 401, body: { error: { code: "invite_code_invalid" } } });
+    }
     await json(a, `/host/peers/${b.hostId}/sync`, "PUT", { paused: true });
     await a.stop();
     expect(await http(b, "/v2/invites/accept", "POST", {

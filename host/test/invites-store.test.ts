@@ -214,6 +214,33 @@ test("邀请二十四小时边界过期、撤销和烧毁均释放预留名额",
   expect(issueMemberInvite(db, clock, { householdId })).toBeDefined();
 });
 
+test("重试已用、过期、撤销或烧毁的旧邀请不影响有效的新邀请", () => {
+  const { db, clock, householdId } = setup();
+  const accept = (code: string) => acceptMemberInvite(db, clock, {
+    code, displayName: "成员", deviceName: "手机", maxMembers: 3,
+  });
+  const issue = () => issueMemberInvite(db, clock, { householdId, maxMembers: 3 });
+  const used = issue();
+  expect(accept(used.code)).toBeDefined();
+  const expired = issue();
+  clock.advance(INVITE_TTL_MS);
+  const cancelled = issue();
+  expect(revokeMemberInvite(db, clock, { householdId, inviteId: cancelled.inviteId })).toBe(true);
+  const exhausted = issue();
+  let unknown = "00000000";
+  while ([used, expired, cancelled, exhausted].some(({ code }) => normalizeCode(code) === unknown)) {
+    unknown = String(Number(unknown) + 1).padStart(8, "0");
+  }
+  for (let i = 0; i < 5; i++) expect(accept(unknown)).toBeUndefined();
+
+  const replacement = issue();
+  for (const { code } of [used, expired, cancelled, exhausted, cancelled]) {
+    expect(accept(code)).toBeUndefined();
+  }
+  expect(db.select().from(memberInvites).where(eq(memberInvites.id, replacement.inviteId)).get()?.failures).toBe(0);
+  expect(accept(replacement.code)).toBeDefined();
+});
+
 test("规范化与配对共用规则，哈希落库，合法失败对所有活跃邀请计数，格式错误不计数", () => {
   const { db, clock, householdId, store } = setup();
   const first = issueMemberInvite(db, clock, { householdId, displayName: "建议名字" });

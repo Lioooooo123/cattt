@@ -139,9 +139,9 @@ function makeInvite(
   }, { behavior: "immediate" });
 }
 
-function findLiveInvite(db: Pick<StoreDb, "select">, normalized: string, now: number) {
+function findLiveInvite(db: Pick<StoreDb, "select">, codeHash: string, now: number) {
   return db.select().from(memberInvites).where(and(
-    liveCode(memberInvites, now), eq(memberInvites.codeHash, hashCode(normalized)),
+    liveCode(memberInvites, now), eq(memberInvites.codeHash, codeHash),
   )).get();
 }
 
@@ -149,7 +149,7 @@ type ConfirmedSeat = { memberId: string; inviteId: string };
 
 export function memberInviteAdmission(db: Pick<StoreDb, "select">, clock: Clock, code: string) {
   const normalized = normalizeCode(code);
-  const invite = normalized && findLiveInvite(db, normalized, wallMs(clock));
+  const invite = normalized && findLiveInvite(db, hashCode(normalized), wallMs(clock));
   if (!invite) return undefined;
   const host = localHost(db, invite.householdId);
   const localAuthority = getHousehold(db, invite.householdId)!.originHostId === host.id;
@@ -173,11 +173,14 @@ export function acceptMemberInvite(
   requireName(input.displayName);
   requireName(input.deviceName);
   const max = limit(input.maxMembers);
+  const codeHash = hashCode(normalized);
   return db.transaction((tx) => {
     const now = wallMs(clock);
-    const invite = findLiveInvite(tx, normalized, now);
+    const invite = findLiveInvite(tx, codeHash, now);
     if (!invite) {
-      tx.update(memberInvites).set(failedCode(memberInvites)).where(liveCode(memberInvites, now)).run();
+      const knownCode = tx.select({ id: memberInvites.id }).from(memberInvites)
+        .where(eq(memberInvites.codeHash, codeHash)).get();
+      if (!knownCode) tx.update(memberInvites).set(failedCode(memberInvites)).where(liveCode(memberInvites, now)).run();
       return undefined;
     }
     const host = localHost(tx, invite.householdId);

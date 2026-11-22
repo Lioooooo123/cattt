@@ -12,10 +12,10 @@ export interface Hardware {
 }
 
 export const MODEL_TIERS = [
-  { minMemGB: 48, model: 'qwen2.5:32b', sizeGB: 20 },
-  { minMemGB: 24, model: 'qwen2.5:14b', sizeGB: 9 },
-  { minMemGB: 12, model: 'qwen2.5:7b', sizeGB: 4.7 },
-  { minMemGB: 8, model: 'qwen2.5:3b', sizeGB: 1.9 },
+  { minMemGB: 48, model: 'qwen3:32b', sizeGB: 20 },
+  { minMemGB: 24, model: 'qwen3:14b', sizeGB: 9.3 },
+  { minMemGB: 16, model: 'qwen3:8b', sizeGB: 5.2 },
+  { minMemGB: 8, model: 'qwen3:4b', sizeGB: 2.5 },
 ] as const;
 
 function command(file: string, args: string[]) {
@@ -52,7 +52,7 @@ export function recommendModel(hw: Hardware) {
   const tier = index < 0 ? undefined : MODEL_TIERS[index + (accelerated ? 0 : 1)];
   if (!tier) return { kind: 'deepseek' as const, reason: '硬件不够，建议填自己的 DeepSeek key。' };
   return { kind: 'local' as const, model: tier.model, sizeGB: tier.sizeGB,
-    reason: `按${hw.appleSilicon ? 'Apple Silicon 统一内存' : hw.gpu ? 'NVIDIA 显存（按最大单卡，不叠加）' : '内存（无 GPU 加速，降一档）'} ${memory.toFixed(1)} GB 推荐；Qwen2.5 Instruct 支持中文陪伴与工具调用，下载约 ${tier.sizeGB} GB，仍须真答与工具烟测。` };
+    reason: `按${hw.appleSilicon ? 'Apple Silicon 统一内存' : hw.gpu ? 'NVIDIA 显存（按最大单卡，不叠加）' : '内存（无 GPU 加速，降一档）'} ${memory.toFixed(1)} GB 推荐；Qwen3 下载约 ${tier.sizeGB} GB，仍须真答与工具烟测。${tier.model === 'qwen3:4b' ? '4b 为低内存降级选择，记忆提取准确性低于 8b。' : ''}` };
 }
 
 export function smallerModel(model: string) {

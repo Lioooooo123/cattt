@@ -84,7 +84,8 @@ async function withHost(
       groupPublicationAuthority: options.authority,
       ...(options.mode && { askOutcomeRule: { version: 1, mode: options.mode } }),
       model: modelConfigFromEnv({
-        MODEL_PROVIDER: "openai-compatible", OPENAI_COMPAT_BASE_URL: new URL("/v1", endpoint.url).href,
+        MODEL_PROVIDER: "deepseek", CHAT_PROVIDER: "openai-compatible", ROUTER_PROVIDER: "openai-compatible",
+        OPENAI_COMPAT_BASE_URL: new URL("/v1", endpoint.url).href,
         CHAT_MODEL: "chat-fixture", ROUTER_MODEL: "router-fixture", MODEL_LOCAL_CONCURRENCY: "2",
       }),
     }, gateway);

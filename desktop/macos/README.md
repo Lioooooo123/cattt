@@ -60,7 +60,7 @@ open desktop/macos/build/Cattt.app --args --data-dir "$TRIAL_DIR"
 
 双来源与单来源转换、保留覆盖、状态和写入权限由 `ModelConfigurationTests` 覆盖。可选的 `testBundledMixedConfiguration` 会用占位 key 启动实际随附服务，并验证两种保存路径重启后的健康状态；需先重建应用，将 `scripts/model-config-probe.ts` 按服务端相同的 esbuild 参数打包，再设置 `CATTT_HYBRID_CHECK_RESOURCES`（应用 Resources）、`CATTT_HYBRID_MODEL_PROBE`（探针 bundle）与 `CATTT_HYBRID_CHECK_DATA_ROOT`（新的烟测数据父目录）运行该测试。探针直接调用服务端 `modelConfigProblems` 与 `slotSpec`，不发起收费模型请求。端口要求与烟测相同；数据目录路径须足够短，以容纳 PostgreSQL 的 Unix socket。
 
-“设置本地模型…”会先检测硬件，显示 Qwen2.5 推荐标签与下载量，再由用户点击“下载并测试”明确同意。首次没有本地模型名和 DeepSeek key 时自动打开一次（`host-state.json` 的 `modelSetupPrompted`，升级保留）；缺配置或本地服务未启动时菜单标为推荐入口。Ollama 必须自行从 https://ollama.com/download 安装并启动，窗口可重新检测；宿主不会安装或捆绑 Ollama。
+旧版 Node 宿主的“设置本地模型…”会先检测硬件，显示 Qwen3 推荐标签与下载量，再由用户点击“下载并测试”明确同意。16 GB Mac 推荐 `qwen3:8b`，8 GB 推荐 `qwen3:4b`（记忆准确性降级），依据见[默认本机记忆模型](../../docs/决策/2026-11-23-默认本机记忆模型.md)。首次没有本地模型名和 DeepSeek key 时自动打开一次（`host-state.json` 的 `modelSetupPrompted`，升级保留）；缺配置或本地服务未启动时菜单标为推荐入口。Ollama 必须自行从 https://ollama.com/download 安装并启动，窗口可重新检测；宿主不会安装或捆绑 Ollama。Bun 共享版尚未接入此安装窗口，须自行拉取模型并在数据目录的 `env` 配置，见 [host 配置](../../host/README.md#r48-模型运行时)。
 
 打包包含 `Resources/server/model-setup.mjs`，由随附 Node 运行 `--json --env-file <data>/env`，确认下载后才加 `--yes --model <推荐标签>`。子进程继承当前数据目录配置和密钥，PATH 包含 `/usr/sbin:/sbin` 以识别 Apple Silicon。窗口显示下载进度及中文回复／工具调用烟测结果；仅收到“配置已保存”才按上表计算分工、重载配置并重启 API/worker，退出码 0 本身不代表切换成功。取消或关闭运行中的设置窗口会终止子进程并恢复原 env（已下载的数据可由 Ollama 缓存），不会自动换模型；失败可填写 DeepSeek key。下载独立于宿主监督队列，退出应用会先取消设置再停服务。
 

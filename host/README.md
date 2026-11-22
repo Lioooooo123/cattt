@@ -177,7 +177,7 @@ TurnRunner 使用进程内调度加持久恢复扫描，而不叠加 jobs 的重
 
 ## R4 结构化知识与抽取
 
-配置 `EXTRACT_MODEL` 或 `OPENAI_COMPAT_MODEL` 后，`startConfiguredHost` 在同一个 Bun 进程注册抽取队列。默认抽取使用本机 OpenAI 兼容槽位。显式覆盖使用 `EXTRACT_PROVIDER`、`EXTRACT_MODEL` 和 `EXTRACT_THINKING`。原创成员消息、轮次、accepted 和抽取作业同事务保存。只有首发唤醒作业，新配置生效后会扫描已有待办。复制、导入和发送重放沿用各自入口。
+配置 `EXTRACT_MODEL` 或 `OPENAI_COMPAT_MODEL` 后，`startConfiguredHost` 在同一个 Bun 进程注册抽取队列。显式 `MODEL_PROVIDER=openai-compatible` 或 `EXTRACT_PROVIDER=openai-compatible` 且抽取端点为回环地址时，模型名未填则使用 `qwen3:8b`；优先级仍是 `EXTRACT_MODEL` → `OPENAI_COMPAT_MODEL` → 默认名。完全未配置或只有 DeepSeek key 时不会补本机模型名，抽取队列仍跳过；显式 DeepSeek 抽取不受影响。默认名不代表已安装或在线：须先自行启动 Ollama 并执行 `ollama pull qwen3:8b`，宿主启动不探测本机模型端点，也不自动下载。8 GB Mac 应显式设置 `EXTRACT_MODEL=qwen3:4b`（准确性降级）；16 GB+ 的记忆默认选型与评测见[决策](../docs/决策/2026-11-23-默认本机记忆模型.md)。Qwen3 抽取保留 `EXTRACT_THINKING=disabled` 与 `OPENAI_COMPAT_THINKING_PARAM=reasoning_effort`，请求传 `reasoning_effort: none` 关闭思考。显式覆盖使用 `EXTRACT_PROVIDER`、`EXTRACT_MODEL` 和 `EXTRACT_THINKING`。原创成员消息、轮次、accepted 和抽取作业同事务保存。只有首发唤醒作业，新配置生效后会扫描已有待办。复制、导入和发送重放沿用各自入口。
 
 抽取复核原话修订、参与者及回避设置。已确认事实分别保存主体与原话来源，明确的共同事实使用一条 `subjectMemberId: null` 的家庭记录。待确认项单独保存。本人更正会保留旧行墓碑；晚到的旧抽取不能重建更正前的值。抽取作业终态、知识与依赖证明同事务提交。
 

@@ -1,15 +1,26 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { SQLiteBunSession } from "drizzle-orm/bun-sqlite/session";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ManualClock } from "../src/clock/index.ts";
 import { AccessDeniedError } from "../src/identity/access.ts";
 import { uuidv7 } from "../src/ids/index.ts";
 import { hashCode, normalizeCode } from "../src/store/codes.ts";
 import { setHostMeta } from "../src/store/host-meta.ts";
-import { createDevice, createMember, ensureHousehold, listMembers, MemberLimitError, removeMember, resolveDeviceToken } from "../src/store/identity.ts";
+import { createDevice, createMember, ensureHousehold, getHousehold, listMembers, MemberLimitError, removeMember, resolveDeviceToken } from "../src/store/identity.ts";
 import { openStore, writeTransaction } from "../src/store/index.ts";
 import type { Store } from "../src/store/index.ts";
-import { acceptMemberInvite, bootstrapMember, INVITE_TTL_MS, issueMemberInvite, MemberBootstrapError, revokeMemberInvite } from "../src/store/invites.ts";
+import { acceptMemberInvite, bootstrapMember, INVITE_TTL_MS, issueMemberInvite, MemberBootstrapError, prepareJoinedMemberInvite, revokeMemberInvite } from "../src/store/invites.ts";
+import { confirmJoinedMemberSeat, creatorSeatInspections, inspectJoinedMemberSeats, MemberSeatAuthorityPendingError, MemberSeatUnavailableError, recordCreatorSeatInspection, reserveJoinedMemberSeat } from "../src/store/member-seats.ts";
+import { migrations } from "../src/store/migrations.generated.ts";
 import { issuePairingCode, redeemPairingCode } from "../src/store/pairing.ts";
+import { approvePeer, confirmPeer, joinPeerHousehold } from "../src/store/peers.ts";
+import { createPeerSyncService } from "../src/replication/peer-service.ts";
+import { applyReplicaSnapshot } from "../src/store/replication-snapshot.ts";
 import { deviceCredentials, devices, memberInvites, members } from "../src/store/schema/identity.ts";
 
 const stores: Store[] = [];
@@ -29,6 +40,128 @@ afterEach(() => {
   for (const store of stores.splice(0)) {
     store.close();
   }
+});
+
+function joinReplica(a: ReturnType<typeof setup>) {
+  const b = setup();
+  joinPeerHousehold(b.db, b.clock, b.hostId, b.householdId, getHousehold(a.db, a.householdId)!, {
+    hostId: a.hostId, householdId: a.householdId, joinFromHouseholdId: null,
+    addressHost: "127.0.0.1", addressPort: 1, caCertificate: "fixture", fingerprint: "fixture", protocolVersion: 8,
+  });
+  const sync = createPeerSyncService(a.db, a.hostId);
+  const { source, data } = sync.openSnapshot();
+  const { records } = sync.readSnapshotPage({ snapshotId: data.snapshotId, offset: 0, limit: data.recordCount }).data;
+  expect(applyReplicaSnapshot(b.db, source, null, data, records).status).toBe("applied");
+  const peer = approvePeer(a.db, a.clock, {
+    hostId: b.hostId, householdId: a.householdId, joinFromHouseholdId: null,
+    addressHost: "127.0.0.1", addressPort: 1, caCertificate: "fixture", fingerprint: b.hostId, protocolVersion: 9,
+  });
+  confirmPeer(a.db, a.clock, peer, 9, "fixture");
+  return b;
+}
+
+test("加入宿主的完整家庭视图不能代替创建宿主的准入授权", () => {
+  const a = setup();
+  bootstrapMember(a.db, a.clock, { householdId: a.householdId, displayName: "甲" });
+  const b = joinReplica(a);
+  expect(listMembers(b.db, a.householdId)).toHaveLength(1);
+  expect(() => issueMemberInvite(b.db, b.clock, { householdId: a.householdId })).toThrow("等待家庭创建宿主");
+  expect(b.db.select().from(memberInvites).all()).toHaveLength(0);
+  expect(b.db.select().from(deviceCredentials).all()).toHaveLength(0);
+});
+
+test("同一家庭名额可换发给另一台配对 Mac，确认后的名额跟随成员墓碑回收", () => {
+  const a = setup();
+  const householdId = a.householdId;
+  bootstrapMember(a.db, a.clock, { householdId, displayName: "甲" });
+  const b = joinReplica(a);
+  const c = joinReplica(a);
+  const waiting = prepareJoinedMemberInvite(b.db, b.clock, { householdId });
+  const bSeat = { householdId, peerHostId: b.hostId, memberId: waiting.seatMemberId! };
+  reserveJoinedMemberSeat(a.db, a.clock, bSeat, 2);
+  expect(() => confirmJoinedMemberSeat(a.db, a.clock, { ...bSeat, peerHostId: c.hostId }, 2)).toThrow(MemberSeatUnavailableError);
+  expect(() => acceptMemberInvite(b.db, b.clock, {
+    code: waiting.code, displayName: "乙", deviceName: "手机",
+  })).toThrow(MemberSeatAuthorityPendingError);
+  expect(b.db.select().from(deviceCredentials).all()).toHaveLength(0);
+  a.clock.advance(INVITE_TTL_MS);
+  expect(() => confirmJoinedMemberSeat(a.db, a.clock, bSeat, 2)).toThrow(MemberSeatUnavailableError);
+
+  const next = prepareJoinedMemberInvite(c.db, c.clock, { householdId });
+  const cSeat = { householdId, peerHostId: c.hostId, memberId: next.seatMemberId! };
+  reserveJoinedMemberSeat(a.db, a.clock, cSeat, 2);
+  expect(() => confirmJoinedMemberSeat(a.db, a.clock, bSeat, 2)).toThrow(MemberSeatUnavailableError);
+  confirmJoinedMemberSeat(a.db, a.clock, cSeat, 2);
+  const accepted = acceptMemberInvite(c.db, c.clock, {
+    code: next.code, displayName: "乙", deviceName: "手机",
+    confirmedSeat: { memberId: cSeat.memberId, inviteId: next.inviteId },
+  })!;
+  expect(accepted.member.homeHostId).toBe(c.hostId);
+  a.clock.advance(INVITE_TTL_MS);
+  expect(() => issueMemberInvite(a.db, a.clock, { householdId })).toThrow(MemberLimitError);
+  removeMember(c.db, c.clock, householdId, accepted.member.id);
+  const inspected = inspectJoinedMemberSeats(c.db, c.clock, householdId, {
+    creatorHostId: a.hostId, legacy: false, memberIds: [cSeat.memberId],
+  });
+  expect(inspected.retired).toEqual([cSeat.memberId]);
+  recordCreatorSeatInspection(a.db, a.clock, cSeat, { retired: inspected.retired });
+  expect(issueMemberInvite(a.db, a.clock, { householdId })).toBeDefined();
+});
+
+test("0025 升级保留创建宿主的旧链接，撤销加入宿主的旧链接并等待它的成员核对", () => {
+  const clock = new ManualClock("test", 100);
+  const [householdId, a, b, first, partner, localInvite, joinedInvite] = Array.from({ length: 7 }, () => uuidv7(clock));
+  const dir = mkdtempSync(join(tmpdir(), "cattt-seat-migration-"));
+  const code = "0123-4567";
+  const seed = (path: string, host: string) => {
+    const raw = new Database(path, { strict: true });
+    try {
+      const dialect = new SQLiteSyncDialect();
+      dialect.migrate(migrations.slice(0, 26), new SQLiteBunSession(raw, dialect, undefined));
+      raw.run("INSERT INTO host_meta (key, value) VALUES ('host_id', ?)", [host]);
+      const meta = (id: string, origin: string) => [id, origin, "100:0:test", 1, 100, 100, null];
+      raw.run("INSERT INTO households VALUES (?, ?, ?, ?, ?, ?, ?, '家')", meta(householdId!, a!));
+      raw.run("INSERT INTO hosts VALUES (?, ?, ?, ?, ?, ?, ?, ?, '甲 Mac')", [...meta(a!, a!), householdId!]);
+      raw.run("INSERT INTO members VALUES (?, ?, ?, ?, ?, ?, ?, ?, '甲', ?)", [...meta(first!, a!), householdId!, a!]);
+      if (host === a) {
+        raw.run(`INSERT INTO peers (host_id, household_id, address_host, address_port, ca_certificate, fingerprint,
+          protocol_version, approved_at, confirmed_at) VALUES (?, ?, '127.0.0.1', 1, 'fixture', 'fixture', 8, 100, 100)`,
+          [b!, householdId!]);
+      } else {
+        raw.run("INSERT INTO hosts VALUES (?, ?, ?, ?, ?, ?, ?, ?, '乙 Mac')", [...meta(b!, b!), householdId!]);
+        raw.run("INSERT INTO members VALUES (?, ?, ?, ?, ?, ?, ?, ?, '乙', ?)", [...meta(partner!, b!), householdId!, b!]);
+      }
+      raw.run("INSERT INTO member_invites VALUES (?, ?, NULL, ?, NULL, ?, NULL, NULL, 0, 100)",
+        [host === a ? localInvite! : joinedInvite!, householdId!, hashCode(normalizeCode(code)!), INVITE_TTL_MS + 100]);
+    } finally { raw.close(); }
+  };
+  const aPath = join(dir, "a.db");
+  const bPath = join(dir, "b.db");
+  try {
+    seed(aPath, a!);
+    seed(bPath, b!);
+    const creator = openStore(aPath);
+    const joined = openStore(bPath);
+    try {
+      expect(creator.db.select().from(memberInvites).get()?.revokedAt).toBeNull();
+      expect(joined.db.select().from(memberInvites).get()?.revokedAt).not.toBeNull();
+      expect(acceptMemberInvite(joined.db, clock, { code, displayName: "候选", deviceName: "手机" })).toBeUndefined();
+      expect(listMembers(creator.db, householdId!)).toHaveLength(1);
+      expect(creatorSeatInspections(creator.db, clock, householdId!).get(b!)?.legacy).toBe(true);
+      const accept = () => acceptMemberInvite(creator.db, clock, { code, displayName: "候选", deviceName: "手机" });
+      expect(accept).toThrow(MemberSeatAuthorityPendingError);
+      const inspection = inspectJoinedMemberSeats(joined.db, clock, householdId!, {
+        creatorHostId: a!, legacy: true, memberIds: [],
+      });
+      expect(inspection.legacyMemberIds).toEqual([partner!]);
+      recordCreatorSeatInspection(creator.db, clock, { householdId: householdId!, peerHostId: b! }, inspection);
+      expect(accept).toThrow(MemberLimitError);
+      expect(creator.db.select().from(deviceCredentials).all()).toHaveLength(0);
+    } finally {
+      joined.close();
+      creator.close();
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("首成员仅能在零活跃成员时引导，邀请占用空位，墓碑不占名额", () => {

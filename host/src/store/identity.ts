@@ -11,6 +11,7 @@ import { deviceCredentials, devices, households, hosts, members } from "./schema
 import { businessRow, revision } from "./business.ts";
 import { ensureGroup, reconcileConversations } from "./conversation-lifecycle.ts";
 import { appendNativeChange, initializeNativeReplication } from "./replication.ts";
+import type { ReplicationTx } from "./replication-adapter.ts";
 import { replicaAdapters } from "./replica-records.ts";
 
 export class MemberLimitError extends Error {
@@ -88,36 +89,44 @@ export function createMember(
   clock: Clock,
   input: { householdId: string; displayName: string; homeHostId: string; maxMembers?: number },
 ): string {
-  requireName(input.displayName);
   const maxMembers = input.maxMembers ?? DEFAULT_MAX_MEMBERS;
   if (!Number.isSafeInteger(maxMembers) || maxMembers < 1) {
     throw new RangeError("成员上限必须是正整数");
   }
   return db.transaction((tx) => {
-    const home = tx.select().from(hosts).where(and(
-      eq(hosts.id, input.homeHostId), isNull(hosts.deletedAt),
-    )).get();
-    if (!getHousehold(tx, input.householdId) || home?.householdId !== input.householdId) {
-      throw new Error("家庭不存在或 home host 不属于该家庭");
-    }
     const active = tx.select({ count: count() }).from(members).where(and(
       eq(members.householdId, input.householdId), isNull(members.deletedAt),
     )).get()!.count;
     if (active >= maxMembers) {
       throw new MemberLimitError(maxMembers);
     }
-    const hostId = localHostId(tx);
-    const row = {
-      ...businessRow(clock, hostId),
-      householdId: input.householdId,
-      displayName: input.displayName,
-      homeHostId: input.homeHostId,
-    };
-    tx.insert(members).values(row).run();
-    appendNativeChange(tx, hostId, input.householdId, replicaAdapters.member, row);
-    reconcileConversations(tx, clock, hostId, input.householdId);
-    return row.id;
+    return insertAdmittedMember(tx, clock, input);
   }, { behavior: "immediate" });
+}
+
+// Only call inside the same write transaction as the admission check.
+export function insertAdmittedMember(
+  tx: ReplicationTx,
+  clock: Clock,
+  input: { householdId: string; displayName: string; homeHostId: string; memberId?: string },
+): string {
+  requireName(input.displayName);
+  const home = tx.select().from(hosts).where(and(
+    eq(hosts.id, input.homeHostId), isNull(hosts.deletedAt),
+  )).get();
+  if (!getHousehold(tx, input.householdId) || home?.householdId !== input.householdId) {
+    throw new Error("家庭不存在或 home host 不属于该家庭");
+  }
+  const hostId = localHostId(tx);
+  const native = businessRow(clock, hostId);
+  const row = {
+    ...native, id: input.memberId ?? native.id,
+    householdId: input.householdId, displayName: input.displayName, homeHostId: input.homeHostId,
+  };
+  tx.insert(members).values(row).run();
+  appendNativeChange(tx, hostId, input.householdId, replicaAdapters.member, row);
+  reconcileConversations(tx, clock, hostId, input.householdId);
+  return row.id;
 }
 
 function tokenHash(token: string): string {

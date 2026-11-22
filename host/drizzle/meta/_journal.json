@@ -183,6 +183,13 @@
       "when": 1795307693958,
       "tag": "0025_r4_shared_soul_diary",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1795328144014,
+      "tag": "0026_r98_member_seats",
+      "breakpoints": true
     }
   ]
 }

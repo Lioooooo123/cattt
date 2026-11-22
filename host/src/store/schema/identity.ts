@@ -54,4 +54,20 @@ export const memberInvites = sqliteTable("member_invites", {
   revokedAt: integer("revoked_at"),
   failures: integer("failures").notNull(),
   createdAt: integer("created_at").notNull(),
+  seatMemberId: text("seat_member_id"),
+});
+
+// Only the household creator writes these grants. They are not replication records.
+export const memberSeatGrants = sqliteTable("member_seat_grants", {
+  memberId: text("member_id").primaryKey(),
+  householdId: text("household_id").notNull().references(() => households.id),
+  peerHostId: text("peer_host_id").notNull(),
+  expiresAt: integer("expires_at"),
+  confirmedAt: integer("confirmed_at"),
+  releasedAt: integer("released_at"),
+});
+
+export const memberSeatLegacyPeers = sqliteTable("member_seat_legacy_peers", {
+  peerHostId: text("peer_host_id").primaryKey(),
+  householdId: text("household_id").notNull().references(() => households.id),
 });

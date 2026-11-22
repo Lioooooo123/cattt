@@ -1,4 +1,4 @@
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Clock } from "../clock/index.ts";
 import { validateWallMs } from "../clock/hlc.ts";
 import { uuidv7 } from "../ids/index.ts";
@@ -7,12 +7,13 @@ import { DEFAULT_MAX_MEMBERS } from "../runtime/config.ts";
 import { failedCode, generateCode, hashCode, liveCode, normalizeCode } from "./codes.ts";
 import { findGroup } from "./conversation-lifecycle.ts";
 import { getHostMeta } from "./host-meta.ts";
-import { createDevice, createMember, getHousehold, getMember, MemberLimitError } from "./identity.ts";
+import { createDevice, getHousehold, getMember, insertAdmittedMember } from "./identity.ts";
 import type { StoreDb } from "./index.ts";
+import { activeMembers, assertCreatorSeatCapacity, INVITE_TTL_MS, MemberSeatAuthorityPendingError } from "./member-seats.ts";
 import { getPeerCursor } from "./replication.ts";
-import { hosts, memberInvites, members } from "./schema/identity.ts";
+import { hosts, memberInvites } from "./schema/identity.ts";
 
-export const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
+export { INVITE_TTL_MS } from "./member-seats.ts";
 
 export class MemberBootstrapError extends Error {
   constructor() {
@@ -57,26 +58,11 @@ function localHost(db: Pick<StoreDb, "select">, householdId: string) {
   return host;
 }
 
-function activeMembers(db: Pick<StoreDb, "select">, householdId: string): number {
-  return db.select({ count: count() }).from(members).where(and(
-    eq(members.householdId, householdId), isNull(members.deletedAt),
-  )).get()!.count;
-}
-
 function requireJoinedHouseholdReady(db: Pick<StoreDb, "select">, householdId: string, hostId: string) {
   const family = getHousehold(db, householdId)!;
   if (family.originHostId !== hostId && (!getPeerCursor(db, family.originHostId)
     || findGroup(db, householdId)?.deletedAt !== null || activeMembers(db, householdId) === 0)) {
     throw new MemberSyncPendingError();
-  }
-}
-
-function assertUnreservedSlot(db: Pick<StoreDb, "select">, householdId: string, now: number, max: number) {
-  const pending = db.select({ count: count() }).from(memberInvites).where(and(
-    eq(memberInvites.householdId, householdId), liveCode(memberInvites, now),
-  )).get()!.count;
-  if (activeMembers(db, householdId) + pending >= max) {
-    throw new MemberLimitError(max);
   }
 }
 
@@ -93,18 +79,31 @@ export function bootstrapMember(
     if (household?.originHostId !== host.id || activeMembers(tx, input.householdId) !== 0) {
       throw new MemberBootstrapError();
     }
-    assertUnreservedSlot(tx, input.householdId, wallMs(clock), max);
-    const memberId = createMember(tx, clock, {
-      householdId: input.householdId, displayName: input.displayName.trim(), homeHostId: host.id, maxMembers: max,
+    assertCreatorSeatCapacity(tx, input.householdId, wallMs(clock), max, "allocate");
+    const memberId = insertAdmittedMember(tx, clock, {
+      householdId: input.householdId, displayName: input.displayName.trim(), homeHostId: host.id,
     });
     return getMember(tx, memberId)!;
   }, { behavior: "immediate" });
 }
 
-export function issueMemberInvite(
+type IssueInput = { householdId: string; displayName?: string; invitedByMemberId?: string; maxMembers?: number };
+
+export function issueMemberInvite(db: Pick<StoreDb, "transaction">, clock: Clock, input: IssueInput) {
+  return makeInvite(db, clock, input, false);
+}
+
+// Persist the intended home membership before asking the creator for a grant.
+// The route returns the code only after the creator commits the reservation.
+export function prepareJoinedMemberInvite(db: Pick<StoreDb, "transaction">, clock: Clock, input: IssueInput) {
+  return makeInvite(db, clock, input, true);
+}
+
+function makeInvite(
   db: Pick<StoreDb, "transaction">,
   clock: Clock,
-  input: { householdId: string; displayName?: string; invitedByMemberId?: string; maxMembers?: number },
+  input: IssueInput,
+  prepareJoined: boolean,
 ) {
   if (input.displayName !== undefined) {
     requireName(input.displayName);
@@ -113,6 +112,10 @@ export function issueMemberInvite(
   return db.transaction((tx) => {
     const host = localHost(tx, input.householdId);
     requireJoinedHouseholdReady(tx, input.householdId, host.id);
+    const originHostId = getHousehold(tx, input.householdId)!.originHostId;
+    const joined = originHostId !== host.id;
+    if (joined && !prepareJoined) throw new MemberSeatAuthorityPendingError();
+    if (!joined && prepareJoined) throw new AccessDeniedError();
     if (input.invitedByMemberId !== undefined) {
       const inviter = getMember(tx, input.invitedByMemberId);
       if (inviter?.householdId !== input.householdId) {
@@ -120,25 +123,48 @@ export function issueMemberInvite(
       }
     }
     const now = wallMs(clock);
-    assertUnreservedSlot(tx, input.householdId, now, max);
+    if (!joined) assertCreatorSeatCapacity(tx, input.householdId, now, max, "allocate");
     const issued = generateCode((hash) => tx.select({ id: memberInvites.id }).from(memberInvites)
       .where(eq(memberInvites.codeHash, hash)).get() !== undefined);
     const expiresAt = now + INVITE_TTL_MS;
     validateWallMs(expiresAt);
     const inviteId = uuidv7(clock);
+    const seatMemberId = joined ? uuidv7(clock) : null;
     tx.insert(memberInvites).values({
       id: inviteId, householdId: input.householdId, displayName: input.displayName?.trim() ?? null,
       codeHash: issued.codeHash, invitedByMemberId: input.invitedByMemberId ?? null,
-      expiresAt, usedAt: null, revokedAt: null, failures: 0, createdAt: now,
+      expiresAt, usedAt: null, revokedAt: null, failures: 0, createdAt: now, seatMemberId,
     }).run();
-    return { inviteId, code: issued.code, expiresAt };
+    return { inviteId, code: issued.code, expiresAt, seatMemberId };
   }, { behavior: "immediate" });
+}
+
+function findLiveInvite(db: Pick<StoreDb, "select">, normalized: string, now: number) {
+  return db.select().from(memberInvites).where(and(
+    liveCode(memberInvites, now), eq(memberInvites.codeHash, hashCode(normalized)),
+  )).get();
+}
+
+type ConfirmedSeat = { memberId: string; inviteId: string };
+
+export function memberInviteAdmission(db: Pick<StoreDb, "select">, clock: Clock, code: string) {
+  const normalized = normalizeCode(code);
+  const invite = normalized && findLiveInvite(db, normalized, wallMs(clock));
+  if (!invite) return undefined;
+  const host = localHost(db, invite.householdId);
+  const localAuthority = getHousehold(db, invite.householdId)!.originHostId === host.id;
+  if (!localAuthority) requireJoinedHouseholdReady(db, invite.householdId, host.id);
+  const seat = invite.seatMemberId ? { memberId: invite.seatMemberId, inviteId: invite.id } : undefined;
+  return { localAuthority, seat };
 }
 
 export function acceptMemberInvite(
   db: Pick<StoreDb, "transaction">,
   clock: Clock,
-  input: { code: string; displayName: string; deviceName: string; maxMembers?: number },
+  input: {
+    code: string; displayName: string; deviceName: string; maxMembers?: number;
+    confirmedSeat?: ConfirmedSeat;
+  },
 ) {
   const normalized = normalizeCode(input.code);
   if (!normalized) {
@@ -149,21 +175,26 @@ export function acceptMemberInvite(
   const max = limit(input.maxMembers);
   return db.transaction((tx) => {
     const now = wallMs(clock);
-    const invite = tx.select().from(memberInvites).where(and(
-      liveCode(memberInvites, now), eq(memberInvites.codeHash, hashCode(normalized)),
-    )).get();
+    const invite = findLiveInvite(tx, normalized, now);
     if (!invite) {
       tx.update(memberInvites).set(failedCode(memberInvites)).where(liveCode(memberInvites, now)).run();
       return undefined;
     }
     const host = localHost(tx, invite.householdId);
     requireJoinedHouseholdReady(tx, invite.householdId, host.id);
-    const memberId = createMember(tx, clock, {
-      householdId: invite.householdId, displayName: input.displayName.trim(), homeHostId: host.id, maxMembers: max,
+    const household = getHousehold(tx, invite.householdId)!;
+    if (household.originHostId === host.id) {
+      assertCreatorSeatCapacity(tx, invite.householdId, now, max, "use_local");
+    } else if (!invite.seatMemberId || input.confirmedSeat?.memberId !== invite.seatMemberId
+      || input.confirmedSeat.inviteId !== invite.id) {
+      throw new MemberSeatAuthorityPendingError();
+    }
+    const memberId = insertAdmittedMember(tx, clock, {
+      householdId: invite.householdId, displayName: input.displayName.trim(),
+      homeHostId: host.id, memberId: invite.seatMemberId ?? undefined,
     });
     const device = createDevice(tx, clock, { memberId, hostId: host.id, name: input.deviceName.trim() });
     tx.update(memberInvites).set({ usedAt: now }).where(eq(memberInvites.id, invite.id)).run();
-    const household = getHousehold(tx, invite.householdId)!;
     return { ...device, member: getMember(tx, memberId)!, household: { id: household.id, name: household.name } };
   }, { behavior: "immediate" });
 }

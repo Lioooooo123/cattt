@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export { deviceCredentials, devices, households, hosts, memberInvites, members, pairingCodes } from "./identity.ts";
+export {
+  deviceCredentials, devices, households, hosts, memberInvites, members, memberSeatGrants, memberSeatLegacyPeers, pairingCodes,
+} from "./identity.ts";
 export { conversations, messages, participants } from "./conversations.ts";
 export { diaryEntries } from "./diary.ts";
 export { boundaries, knowledgeSourceWithdrawals, memories, memoryBlocks } from "./knowledge.ts";

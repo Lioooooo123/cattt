@@ -2,7 +2,7 @@ import { isIPv4 } from "node:net";
 import { z } from "zod";
 
 export const PEER_VERSION_HEADER = "x-cattt-peer-version";
-export const DEFAULT_PEER_PROTOCOL: PeerProtocol = { version: 8, readOnlyVersions: [] };
+export const DEFAULT_PEER_PROTOCOL: PeerProtocol = { version: 9, readOnlyVersions: [] };
 
 export interface PeerProtocol {
   readonly version: number;
@@ -43,6 +43,7 @@ export const peerOperations = {
   blob: { method: "GET", path: "/peer/blobs/:sha256" },
   inbox: { method: "POST", path: "/peer/inbox" },
   lease: { method: "POST", path: "/peer/lease" },
+  memberSeats: { method: "POST", path: "/peer/member-seats" },
 } as const;
 export type PeerOperation = keyof typeof peerOperations;
 

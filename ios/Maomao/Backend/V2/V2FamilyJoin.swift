@@ -63,6 +63,7 @@ struct V2FamilyJoin {
         case "invite_code_invalid", "http_401": return "邀请已过期、用过或撤销，请在电脑上重新发一份"
         case "member_limit": return "这个家庭的成员名额已满，请在电脑上查看"
         case "peer_sync_pending": return "这台电脑还在同步家庭，请稍后再试"
+        case "member_seat_authority_pending": return "还在等待创建家庭的 Mac 确认名额。请让它上线后再试这份邀请"
         case "not_found", "http_404": return "这台电脑暂不支持家庭邀请，请更新电脑端"
         case "invalid_request", "http_400": return "请检查显示名称和邀请链接"
         case "unauthorized": return "未能确认新成员的连接凭证，请在电脑上查看成员与设备"

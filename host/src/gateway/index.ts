@@ -130,7 +130,8 @@ export class Gateway implements Component {
     });
     app.get("/v2/sync-generation", auth, (c) => c.json({ generation: generation() }));
     app.route("/v2", phonePairingRoutes(ctx));
-    app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus));
+    const peerTransport = () => this.peerTransport;
+    app.route("/v2", memberInviteRoutes(ctx, identity, lanStatus, false, peerTransport));
     app.route("/v2", memberResourceRoutes(ctx, this.options.peerBehavior));
     app.route("/v2", soulRoutes(ctx));
     app.route("/v2", conversationRoutes(ctx, (request, turnId, cursor) => this.stream(request, ctx, turnId, cursor), this.options.groupSends));
@@ -204,7 +205,7 @@ export class Gateway implements Component {
           if (maintenance()) throw new Error("维护期间无法创建在线备份");
           return createBackup(ctx.config.dataDir, ctx.store, "manual", ctx.clock);
         },
-      }));
+      }, peerTransport));
       this.server = Bun.serve({ hostname, port: ctx.config.port ?? 8788, idleTimeout: 0,
         fetch: (request) => {
           const pathname = new URL(request.url).pathname;

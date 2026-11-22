@@ -1,17 +1,20 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { HostContext } from "../runtime/index.ts";
+import type { PeerTransport } from "../peer/index.ts";
 import { normalizeCode } from "../store/codes.ts";
 import { getHousehold, listMembers, MemberLimitError, removeMember } from "../store/identity.ts";
 import {
-  acceptMemberInvite, bootstrapMember, issueMemberInvite, listOpenMemberInvites,
-  MemberBootstrapError, MemberSyncPendingError, revokeMemberInvite,
+  acceptMemberInvite, bootstrapMember, issueMemberInvite, listOpenMemberInvites, memberInviteAdmission,
+  MemberBootstrapError, MemberSyncPendingError, prepareJoinedMemberInvite, revokeMemberInvite,
 } from "../store/invites.ts";
+import { MemberSeatAuthorityPendingError, MemberSeatUnavailableError } from "../store/member-seats.ts";
 import { AccessDeniedError } from "./access.ts";
 import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
 import { memberProfile, memberRecord } from "./dto.ts";
+import { askCreatorForSeat, refreshCreatorSeats } from "./member-seats.ts";
 
 const name = z.string().trim().min(1).max(100);
 const badRequest = { error: { code: "invalid_request" } };
@@ -21,6 +24,7 @@ export function memberInviteRoutes(
   identity: LanIdentity,
   lanStatus: () => { port: number },
   admin = false,
+  peerTransport: () => PeerTransport | undefined = () => undefined,
 ) {
   const app = new Hono<IdentityEnv>();
   app.onError((error, c) => {
@@ -32,6 +36,12 @@ export function memberInviteRoutes(
     }
     if (error instanceof MemberSyncPendingError) {
       return c.json({ error: { code: "peer_sync_pending" } }, 409);
+    }
+    if (error instanceof MemberSeatAuthorityPendingError) {
+      return c.json({ error: { code: "member_seat_authority_pending" } }, 503);
+    }
+    if (error instanceof MemberSeatUnavailableError) {
+      return c.json({ error: { code: "invite_code_invalid" } }, 401);
     }
     if (error instanceof AccessDeniedError) {
       return c.json({ error: { code: "forbidden" } }, 403);
@@ -50,9 +60,23 @@ export function memberInviteRoutes(
       if (!parsed.success) {
         return c.json(badRequest, 400);
       }
+      const admission = memberInviteAdmission(ctx.store.db, ctx.clock, parsed.data.code);
+      const confirmedSeat = admission?.seat;
+      if (confirmedSeat) {
+        try {
+          await askCreatorForSeat(ctx, peerTransport, "confirm", confirmedSeat.memberId);
+        } catch (error) {
+          if (error instanceof MemberSeatUnavailableError) revokeMemberInvite(ctx.store.db, ctx.clock, {
+            householdId: ctx.householdId, inviteId: confirmedSeat.inviteId,
+          });
+          throw error;
+        }
+      } else if (admission?.localAuthority) {
+        await refreshCreatorSeats(ctx, peerTransport);
+      }
       const result = acceptMemberInvite(ctx.store.db, ctx.clock, {
         code: parsed.data.code, displayName: parsed.data.display_name,
-        deviceName: parsed.data.device_name, maxMembers: ctx.config.maxMembers,
+        deviceName: parsed.data.device_name, maxMembers: ctx.config.maxMembers, confirmedSeat,
       });
       return result ? c.json({
         member: memberRecord(result.member), device_id: result.deviceId, device_token: result.token, household: result.household,
@@ -79,6 +103,8 @@ export function memberInviteRoutes(
       if (!parsed.success) {
         return c.json(badRequest, 400);
       }
+      if (getHousehold(ctx.store.db, ctx.householdId)?.originHostId === ctx.hostId
+        && listMembers(ctx.store.db, ctx.householdId).length === 0) await refreshCreatorSeats(ctx, peerTransport);
       return c.json({ member: memberRecord(bootstrapMember(ctx.store.db, ctx.clock, {
         householdId: ctx.householdId, displayName: parsed.data.display_name, maxMembers: ctx.config.maxMembers,
       })) });
@@ -106,11 +132,23 @@ export function memberInviteRoutes(
     if (!parsed.success) {
       return c.json(badRequest, 400);
     }
-    const invite = issueMemberInvite(ctx.store.db, ctx.clock, {
+    const input = {
       householdId: admin ? ctx.householdId : c.get("actor").householdId,
       invitedByMemberId: admin ? undefined : c.get("actor").memberId,
       displayName: parsed.data.display_name, maxMembers: ctx.config.maxMembers,
-    });
+    };
+    const localAuthority = getHousehold(ctx.store.db, input.householdId)?.originHostId === ctx.hostId;
+    if (localAuthority) await refreshCreatorSeats(ctx, peerTransport);
+    const invite = localAuthority ? issueMemberInvite(ctx.store.db, ctx.clock, input)
+      : prepareJoinedMemberInvite(ctx.store.db, ctx.clock, input);
+    if (invite.seatMemberId) {
+      try {
+        await askCreatorForSeat(ctx, peerTransport, "reserve", invite.seatMemberId);
+      } catch (error) {
+        revokeMemberInvite(ctx.store.db, ctx.clock, { householdId: input.householdId, inviteId: invite.inviteId });
+        throw error;
+      }
+    }
     const params = new URLSearchParams({
       v: "2", h: identity.hosts().join(","), p: String(lanStatus().port),
       c: invite.code.replace(/-/g, ""), fp: identity.fingerprint,

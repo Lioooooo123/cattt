@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_PEER_PROTOCOL } from "../src/peer/protocol.ts";
 import { openStore } from "../src/store/index.ts";
 import { listWorkerReports } from "../src/store/ticket-worker.ts";
 
@@ -86,7 +87,7 @@ test("编译产物脱离 drizzle 目录运行，HTTPS mock 聊天、隔离计算
     };
     const peer = await json("/host/peer-identity", admin);
     expect(peer).toMatchObject({
-      host_id: (health as { host_id: string }).host_id, protocol_version: 8, address: { port: peerPort },
+      host_id: (health as { host_id: string }).host_id, protocol_version: DEFAULT_PEER_PROTOCOL.version, address: { port: peerPort },
     });
     const member = await json("/host/members", admin, { display_name: "甲" });
     const pairing = await json("/host/pairing-codes", admin, { member_id: member.member.id });

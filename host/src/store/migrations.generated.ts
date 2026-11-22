@@ -356,5 +356,17 @@ export const migrations: MigrationMeta[] = [
     "bps": true,
     "folderMillis": 1795307693958,
     "hash": "cdb119b31a101851818e95fd614322756348e0d0e918bcce8f3b81f984d4b854"
+  },
+  {
+    "sql": [
+      "CREATE TABLE `member_seat_grants` (\n\t`member_id` text PRIMARY KEY NOT NULL,\n\t`household_id` text NOT NULL,\n\t`peer_host_id` text NOT NULL,\n\t`expires_at` integer,\n\t`confirmed_at` integer,\n\t`released_at` integer,\n\tFOREIGN KEY (`household_id`) REFERENCES `households`(`id`) ON UPDATE no action ON DELETE no action\n);\n",
+      "\nCREATE TABLE `member_seat_legacy_peers` (\n\t`peer_host_id` text PRIMARY KEY NOT NULL,\n\t`household_id` text NOT NULL,\n\tFOREIGN KEY (`household_id`) REFERENCES `households`(`id`) ON UPDATE no action ON DELETE no action\n);\n",
+      "\nALTER TABLE `member_invites` ADD `seat_member_id` text;\n",
+      "\n-- An older peer may have committed a member the creator never pulled.\nINSERT OR IGNORE INTO member_seat_legacy_peers (peer_host_id, household_id)\nSELECT p.host_id, p.household_id FROM peers p\nJOIN households h ON h.id = p.household_id\nJOIN host_meta m ON m.key = 'host_id' AND m.value = h.origin_host_id;\n",
+      "\n-- Existing origin invitations already participate in its local transactions.\n-- An older joined-host invitation has no household grant and must be reissued.\nUPDATE member_invites SET revoked_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)\nWHERE used_at IS NULL AND revoked_at IS NULL AND household_id IN (\n  SELECT h.id FROM households h\n  JOIN host_meta m ON m.key = 'host_id' AND m.value <> h.origin_host_id\n);\n"
+    ],
+    "bps": true,
+    "folderMillis": 1795328144014,
+    "hash": "b8ad26ba8b6cb470b154a6572faf4405b7c9f81f83d5d72fff4222f97f3724a1"
   }
 ];

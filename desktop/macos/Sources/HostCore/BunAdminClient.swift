@@ -25,6 +25,7 @@ public enum BunAdminError: Error, LocalizedError, Equatable {
             case "peer_connection_failed": return "无法完成对端握手。请确认两台 Mac 在同一局域网、地址正确，且对方已核对完整指纹并批准。"
             case "peer_not_active": return "这台 Mac 当前没有有效结对，请刷新状态或重新批准并连接。"
             case "peer_sync_pending": return "请等创建家庭的 Mac 同步首位成员和群聊，再生成邀请。"
+            case "member_seat_authority_pending": return "请让创建家庭的 Mac 和已配对的 Mac 上线，等成员名额核对完成后重试。"
             case "members_already_initialized": return "首位成员已建立，或当前 Mac 加入了已有家庭。"
             case "member_limit": return "家庭没有空余名额。若有待接受的邀请，可以先撤销。"
             case "invalid_request": return "宿主拒绝了请求，请核对当前家庭、成员归属和输入。"

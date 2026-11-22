@@ -9,6 +9,7 @@ import { requireActor } from "./middleware.ts";
 import type { IdentityEnv } from "./middleware.ts";
 import type { LanIdentity } from "./tls.ts";
 import { memberInviteRoutes } from "./invites.ts";
+import type { PeerTransport } from "../peer/index.ts";
 import { memberProfile } from "./dto.ts";
 
 const badRequest = { error: { code: "invalid_request" } };
@@ -49,6 +50,7 @@ export function hostAdminRoutes(
     list(): unknown;
     create(): Promise<{ id: string }>;
   },
+  peerTransport?: () => PeerTransport | undefined,
 ) {
   const app = new Hono();
   const expected = createHash("sha256").update(identity.adminToken).digest();
@@ -61,7 +63,7 @@ export function hostAdminRoutes(
     await next();
   });
   const lan = () => ({ ...lanStatus(), hosts: identity.hosts() });
-  app.route("/", memberInviteRoutes(ctx, identity, lanStatus, true));
+  app.route("/", memberInviteRoutes(ctx, identity, lanStatus, true, peerTransport));
   if (peerAdmin) {
     app.route("/", peerAdmin);
   }

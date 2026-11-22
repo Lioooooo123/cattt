@@ -212,7 +212,21 @@ test("两个独立编译宿主在 mTLS 上同步、断线重启、换世代、�
     expect(localExecution(b)).toEqual(localBefore);
     expect(inspect(b, (db) => db.query("SELECT count(*) AS n FROM messages WHERE turn_id IS NULL").get())).toEqual({ n: 2 });
 
+    const cancelled = await json(b, "/host/invites", "POST", { display_name: "乙" });
+    expect(await http(a, "/host/invites", "POST")).toEqual({
+      status: 409, body: { error: { code: "member_limit" } },
+    });
+    await json(b, `/host/invites/${cancelled.invite_id}`, "DELETE");
     const { code } = await json(b, "/host/invites", "POST", { display_name: "乙" });
+    await json(a, `/host/peers/${b.hostId}/sync`, "PUT", { paused: true });
+    await a.stop();
+    expect(await http(b, "/v2/invites/accept", "POST", {
+      code, display_name: "乙", device_name: "乙手机",
+    })).toEqual({
+      status: 503, body: { error: { code: "member_seat_authority_pending" } },
+    });
+    expect(localExecution(b)).toEqual(localBefore);
+    a = await launch("甲", aHttp!, aPeer!);
     const { member: second, device_token: tokenB } = await json(b, "/v2/invites/accept", "POST", {
       code, display_name: "乙", device_name: "乙手机",
     });
@@ -221,6 +235,10 @@ test("两个独立编译宿主在 mTLS 上同步、断线重启、换世代、�
       expect(members.map((m: { home_host_id: string }) => m.home_host_id).sort()).toEqual([a.hostId, b.hostId].sort());
     };
     expect(second.home_host_id).toBe(b.hostId);
+    expect(await http(a, "/host/invites", "POST")).toEqual({
+      status: 409, body: { error: { code: "member_limit" } },
+    });
+    await json(a, `/host/peers/${b.hostId}/sync`, "PUT", { paused: false });
     await caughtUp(a, b);
     await verifyHomes(a, tokenA);
     await verifyHomes(b, tokenB);

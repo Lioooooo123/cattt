@@ -4,6 +4,7 @@ import { z } from "zod";
 import { peerWorldPresence } from "../world/presence.ts";
 import { parseHlc } from "../clock/index.ts";
 import { CertificateError, initializePeerIdentity, validatePeerCertificates } from "../identity/peer-tls.ts";
+import { memberSeatPeerHandler } from "../identity/member-seats.ts";
 import { BlobStorage } from "../files/blobs.ts";
 import { createPeerBlobPull, peerBlobHandler } from "../replication/peer-blobs.ts";
 import { join } from "node:path";
@@ -141,6 +142,8 @@ export async function startPeerService(ctx: HostContext, options: {
   });
 
   app.use(peerOperations.lease.path, limitBody(4096));
+  app.use(peerOperations.memberSeats.path, limitBody(4096));
+  const handleMemberSeats = memberSeatPeerHandler(ctx, () => transport);
   for (const operation of Object.keys(peerOperations) as PeerOperation[]) {
     const route = peerOperations[operation];
     app.on(route.method, route.path, (c) => {
@@ -161,6 +164,7 @@ export async function startPeerService(ctx: HostContext, options: {
       const handler = operation === "typedChanges" ? handleTypedChanges
         : operation === "lease" ? (protocol.version >= PUBLICATION_PEER_VERSION ? publication.receive : undefined)
         : operation === "blob" ? handleBlob
+        : operation === "memberSeats" ? handleMemberSeats
         : operation === "worldPresence" ? (_request: Request, actor: PeerActor) => peerWorldPresence(ctx, actor)
         : options.handlers?.[operation];
       return handler ? handler(c.req.raw, {

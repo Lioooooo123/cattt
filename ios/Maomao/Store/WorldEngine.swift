@@ -306,7 +306,7 @@ final class WorldEngine: ObservableObject {
         onHome=home;self.foreground=foreground;worldEnabled=enabled
         displayLink?.isPaused = !enabled || !foreground
         simulation.setPaused(!enabled || !foreground || manuallyPaused)
-        yard3D?.setActive(enabled && foreground && !manuallyPaused)
+        yard3D?.setActive(home && enabled && foreground && !manuallyPaused)
         lastTick=ProcessInfo.processInfo.systemUptime
         notifyState()
     }
@@ -348,7 +348,7 @@ final class WorldEngine: ObservableObject {
     func requestDrink() { if sharedMode && !sharedDriver { return }; if uses3D { if intent3D.drink() { dispatch3D(); notifyState() }; return }; if simulation.requestDrink() {notifyState()} }
     func togglePause() {
         interruptAgentMove(reason: "world_paused")
-        manuallyPaused.toggle();yard3D?.setActive(worldEnabled && foreground && !manuallyPaused);simulation.setPaused(manuallyPaused || !foreground || !worldEnabled)
+        manuallyPaused.toggle();yard3D?.setActive(onHome && worldEnabled && foreground && !manuallyPaused);simulation.setPaused(manuallyPaused || !foreground || !worldEnabled)
         lastTick=ProcessInfo.processInfo.systemUptime;notifyState()
     }
     func setSeed(_ value:UInt64) {intent3D.seed(value);simulation.seed(value)}
@@ -393,7 +393,7 @@ final class WorldEngine: ObservableObject {
         intent3D.autonomous = !runtimeQuiet
         simulation.autonomous = !runtimeQuiet
         simulation.setPaused(!foreground || !worldEnabled)
-        yard3D?.setActive(foreground && worldEnabled)
+        yard3D?.setActive(onHome && foreground && worldEnabled)
         notifyState()
     }
 }

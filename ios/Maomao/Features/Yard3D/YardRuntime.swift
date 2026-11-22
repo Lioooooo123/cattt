@@ -19,10 +19,13 @@ final class YardRuntime {
     private var sharedWater: Bool?
     private var mailboxHasMail = false
     private var pageReuseID = UUID()
-    private var active = false
+    private(set) var active = false
+    private var requestedActive = false
+    private var presented = false
     private var lastFacts = ""
     #if DEBUG
     private(set) var factsChecks = 0
+    var visibilityContext: [String: Any] = [:]
     #endif
     private var lastAtmosphere = ""
     private var coverTask: Task<Void, Never>?
@@ -37,6 +40,11 @@ final class YardRuntime {
     }
     init() {
         subscription = web.messages.sink { [weak self] in self?.receive($0) }
+        web.onPresentation = { [weak self] value in
+            guard let self else { return }
+            presented = value
+            updateActivity()
+        }
     }
     func start(intent: YardIntent.Request, slot: String, weather: String) {
         guard !started, !shared || web.sharedWorld != nil else { return }
@@ -85,8 +93,21 @@ final class YardRuntime {
     }
 
     func setActive(_ value: Bool) {
+        requestedActive = value
+        updateActivity()
+    }
+    private func updateActivity() {
+        let value = requestedActive && presented
+        #if DEBUG
+        receive(visibilityContext.merging(["type": "lifecycleTrace", "reason": "nativeActive", "active": value, "requestedActive": requestedActive,
+                 "window": web.webView.window != nil, "width": web.webView.bounds.width,
+                 "height": web.webView.bounds.height, "alpha": web.webView.alpha]) { _, new in new })
+        #endif
+        guard active != value else { return }
         active = value
-        Task { await web.setActive(value); if value { flush(); if !web.surfaceReady { armWatchdog() } } }
+        watchdog?.cancel()
+        if value { armWatchdog() }
+        Task { await web.setActive(value); if active { flush() } }
     }
     func intent(_ value: YardIntent.Request) {
         if !shared { web.homeIntent = value.json }
@@ -145,7 +166,7 @@ final class YardRuntime {
     }
     private func receive(_ message: [String: Any]) {
         let type = message["type"] as? String
-        if let type, ["cat", "tap", "firstFrame", "visualReady", "restored", "processTerminated", "contextLost", "error", "unavailable", "paused", "resumed"].contains(type) {
+        if let type, ["lifecycleTrace", "cat", "tap", "firstFrame", "visualReady", "restored", "processTerminated", "contextLost", "error", "unavailable", "paused", "resumed"].contains(type) {
             var event = message.filter { !["report", "snapshot", "runId"].contains($0.key) }
             event["uptime"] = ProcessInfo.processInfo.systemUptime
             events.append(event); if events.count > 200 { events.removeFirst() }
@@ -200,6 +221,7 @@ final class YardRuntime {
     }
     private func armWatchdog() {
         watchdog?.cancel()
+        guard active, started, !web.surfaceReady else { return }
         watchdog = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard !Task.isCancelled, let self, web.needsWatchdogFailure(active: active) else { return }

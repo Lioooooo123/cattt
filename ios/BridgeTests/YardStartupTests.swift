@@ -17,7 +17,7 @@ struct YardStartupTests {
         assert(sent.isEmpty && queued.count == 2)
         page.sentActive(true)
         assert(!page.allowsLifecycle(ready: true, active: true))
-        assert(!page.allowsLifecycle(ready: true, active: false))
+        assert(page.allowsLifecycle(ready: true, active: false))
         page.sentActive(false)
         assert(page.allowsLifecycle(ready: true, active: true))
         assert(!page.allowsLifecycle(ready: false, active: true))

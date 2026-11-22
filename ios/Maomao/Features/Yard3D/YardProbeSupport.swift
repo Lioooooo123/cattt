@@ -49,7 +49,7 @@ struct YardVisualGate {
     func allowsCommands(ready: Bool) -> Bool { ready && !isVisible }
 
     func allowsLifecycle(ready: Bool, active: Bool) -> Bool {
-        ready && (!isVisible || (active && commandedActive == false))
+        ready && (!isVisible || (commandedActive != nil && commandedActive != active))
     }
 
     func needsWatchdogFailure(active: Bool) -> Bool { active && isVisible }

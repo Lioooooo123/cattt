@@ -27,9 +27,29 @@ private final class YardMessageProxy: NSObject, WKScriptMessageHandler {
 }
 
 @MainActor
+private final class YardMountedWebView: WKWebView {
+    var onPresentation: ((Bool) -> Void)?
+    private var presented = false
+
+    override func didMoveToWindow() { super.didMoveToWindow(); updatePresentation() }
+    override func layoutSubviews() { super.layoutSubviews(); updatePresentation() }
+
+    private func updatePresentation() {
+        let value = window != nil && bounds.width > 0 && bounds.height > 0
+        guard value != presented else { return }
+        presented = value
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            onPresentation?(presented)
+        }
+    }
+}
+
+@MainActor
 final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate {
     static let scheme = "maomao"
     let webView: WKWebView
+    var onPresentation: ((Bool) -> Void)?
     let messages = PassthroughSubject<[String: Any], Never>()
     @Published private(set) var ready = false
     @Published private(set) var surfaceReady = false
@@ -84,8 +104,9 @@ final class YardWebController: NSObject, ObservableObject, WKNavigationDelegate 
         let configuration = WKWebViewConfiguration()
         configuration.setURLSchemeHandler(YardSchemeHandler(), forURLScheme: Self.scheme)
         configuration.allowsInlineMediaPlayback = true
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = YardMountedWebView(frame: .zero, configuration: configuration)
         super.init()
+        (webView as? YardMountedWebView)?.onPresentation = { [weak self] in self?.onPresentation?($0) }
         proxy.owner = self
         configuration.userContentController.add(proxy, name: "maomao")
         webView.navigationDelegate = self

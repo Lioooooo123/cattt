@@ -140,6 +140,10 @@ struct RootView: View {
     }
 
     private func updateWorldVisibility() {
+        #if DEBUG
+        store.world.yard3D?.visibilityContext = ["screen": String(describing: store.screen), "phase": String(describing: scenePhase),
+                                                "onboarding": store.onboarding != nil, "opacity": store.screen == .home ? 1.0 : 0.001]
+        #endif
         let enabled = store.onboarding == nil && !store.yardProbeVisible
         let foreground = scenePhase == .active
         store.world.setVisibility(home: store.screen == .home && enabled, foreground: foreground, enabled: enabled)

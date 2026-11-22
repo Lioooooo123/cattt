@@ -73,6 +73,12 @@ async function boot() {
   let reviewHeading: number | null = null;
   let initialized = false, appActive = !inApp(), contextOK = true, disposed = false;
   let raf = 0, running = false, previous: number | null = null;
+  let rafTicks = 0;
+  const lifecycleTrace = (reason: string) => {
+    if (params.has('review')) post({ type: 'lifecycleTrace', reason, rafTicks, initialized, appActive,
+      hidden: document.hidden, visibility: document.visibilityState, running, contextOK, disposed,
+      width: canvas.clientWidth, height: canvas.clientHeight });
+  };
   let firstFrame = false, visualReady = false, visualReadyPending = false, frameIndex = 0, reportAt = 0;
   let contextTestTimer: ReturnType<typeof setTimeout> | undefined;
   let scaleTestTimer: ReturnType<typeof setInterval> | undefined;
@@ -178,6 +184,7 @@ async function boot() {
 
   function syncRunning(reason: string) {
     const shouldRun = initialized && appActive && !document.hidden && contextOK && !disposed;
+    lifecycleTrace(`syncRunning:${reason}:${shouldRun}`);
     if (shouldRun === running) return;
     running = shouldRun;
     if (!running) {
@@ -194,6 +201,16 @@ async function boot() {
   }
 
   function frame(now: number) {
+    rafTicks++;
+    lifecycleTrace('raf');
+    try { drawFrame(now); }
+    catch (error) {
+      cancelAnimationFrame(raf); raf = 0;
+      post({ type: 'error', message: String(error), stack: error instanceof Error ? error.stack : undefined });
+    }
+  }
+
+  function drawFrame(now: number) {
     raf = 0;
     if (!running || disposed) return;
     raf = requestAnimationFrame(frame);

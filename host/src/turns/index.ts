@@ -10,6 +10,7 @@ import { PublicationLeaseError } from "../publication/types.ts";
 import { ConversationNotFoundError } from "../store/conversations.ts";
 import { takeYardChatTurn } from "./yard-chat.ts";
 import { configuredReplier } from "./chat-replier.ts";
+import { batchReplyDeltas } from "./reply-deltas.ts";
 import type { Replier, ReplyPublicationGuard } from "./types.ts";
 import { ModelReplyError } from "../llm/errors.ts";
 
@@ -20,17 +21,6 @@ interface RunnerOptions {
   leaseTtlMs?: number;
   staleMs?: number;
   historyLimit?: number;
-}
-
-function nextWithAbort<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason);
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) {
-      abort();
-    }
-    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
-  });
 }
 
 export class TurnRunner implements Component {
@@ -123,7 +113,6 @@ export class TurnRunner implements Component {
     const ctx = this.ctx!;
     const events = new ChatEvents(ctx);
     let failure = "interrupted";
-    let iterator: AsyncIterator<string> | undefined;
     let guard: ReplyPublicationGuard | undefined;
     const budget = setTimeout(() => { failure = "budget_exceeded"; abort.abort(new Error(failure)); }, this.options.budgetMs);
     const heartbeat = setInterval(() => {
@@ -158,11 +147,13 @@ export class TurnRunner implements Component {
         if (input.conversation.publisher_host_id !== ctx.hostId || input.ticketSource.revision !== sourceRevision) {
           throw new ConversationNotFoundError();
         }
-        iterator = this.replier!.reply({
-          ...input, turnId: id, yardTurn, signal: abort.signal,
+        const attemptAbort = new AbortController();
+        const signal = AbortSignal.any([abort.signal, attemptAbort.signal]);
+        const iterator = this.replier!.reply({
+          ...input, turnId: id, yardTurn, signal,
           ticketSource: { ...input.ticketSource, retryActor: yardTurn?.sourceId === input.trigger.id ? yardTurn.actor : undefined },
           assertCurrentTurn(db) {
-            abort.signal.throwIfAborted();
+            signal.throwIfAborted();
             assertLeaseHeld(db, ctx.clock, fence.name, fence.holder, fence.epoch);
             const current = getTurnRow(db, id);
             if (current?.status !== "generating" || current.cancelReason !== null
@@ -172,27 +163,21 @@ export class TurnRunner implements Component {
           },
           assertPublication: () => assertPublisher(ctx.store.db), beforePublish: (check) => { guard = check; },
         })[Symbol.asyncIterator]();
+        let drained = false;
         try {
-          for (;;) {
-            abort.signal.throwIfAborted();
-            const next = await nextWithAbort(Promise.resolve(iterator.next()), abort.signal);
-            abort.signal.throwIfAborted();
-            if (next.done) {
-              break;
-            }
-            if (typeof next.value !== "string") {
-              throw new TypeError("Replier 必须返回文本块");
-            }
+          for await (const text of batchReplyDeltas(iterator, signal)) {
+            signal.throwIfAborted();
             const applied = events.write((db, append) => {
               assertPublisher(db);
               guard?.check(db);
-              return appendDelta(db, ctx.clock, id, next.value, fence, append, ctx.publication, ctx.config.groupPublicationAuthority);
+              return appendDelta(db, ctx.clock, id, text, fence, append, ctx.publication, ctx.config.groupPublicationAuthority);
             });
             if (!applied) {
               finish("stopped");
               return;
             }
           }
+          drained = true;
           const row = getTurnRow(ctx.store.db, id)!;
           finish(row.draftText.length ? "completed" : "failed");
           return;
@@ -203,7 +188,9 @@ export class TurnRunner implements Component {
             || !row || !active(row) || row.firstTokenAt !== null || row.cancelReason !== null) {
             throw error;
           }
-          void iterator.return?.().catch(() => {});
+        } finally {
+          if (!drained) { attemptAbort.abort(); }
+          try { void iterator.return?.().catch(() => {}); } catch {}
         }
       }
     } catch (error) {
@@ -233,9 +220,6 @@ export class TurnRunner implements Component {
     } finally {
       clearTimeout(budget);
       clearInterval(heartbeat);
-      try {
-        void iterator?.return?.().catch(() => {});
-      } catch {}
       releaseLease(ctx.store.db, ctx.clock, fence.name, fence.holder, fence.epoch);
     }
   }

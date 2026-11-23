@@ -115,7 +115,24 @@ export class Renderer {
   }
 
   async prepare(scene: THREE.Scene, camera: THREE.Camera) {
-    await prepareScene(this.gl, scene, camera, this.composer?.readBuffer ?? this.gl.getRenderTarget());
+    await prepareScene(this.gl, scene, camera, this.composer?.readBuffer ?? this.gl.getRenderTarget(), this.postMaterials());
+  }
+
+  /** 各后处理通道的全屏材质，按最后落到屏幕还是离屏目标分开（色调映射与输出色彩空间不同）。 */
+  private postMaterials() {
+    const offscreen: THREE.Material[] = [], screen: THREE.Material[] = [];
+    if (!this.composer) return { offscreen, screen };
+    const passes = this.composer.passes.filter(pass => pass.enabled);
+    passes.forEach((pass, index) => {
+      const last = index === passes.length - 1;
+      for (const value of Object.values(pass).flat()) {
+        if (!(value instanceof THREE.Material) || value instanceof THREE.MeshBasicMaterial) continue;
+        // 泛光通道里只有叠回的那一步可能直接上屏，其余都画进它自己的离屏目标。
+        const toScreen = last && (!(pass instanceof UnrealBloomPass) || value === pass.blendMaterial);
+        (toScreen ? screen : offscreen).push(value);
+      }
+    });
+    return { offscreen, screen };
   }
 
   render(scene: THREE.Scene, camera: THREE.Camera, time = 0) {

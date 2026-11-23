@@ -27,6 +27,8 @@ sh tools/check_all.sh
 xcodebuild -project ios/Maomao.xcodeproj -scheme Maomao -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/maomao-build build
 # 后端集成测试（要本机 PG）
 cd server && pnpm test
+# 自有评测（Bun 宿主，离线套件；真实模型与对比见 host/eval/README.md）
+(cd host && bun run eval run --suite all --mode scripted)
 # 提交前检查（钩子会自动跑；每台机器先设一次 git config core.hooksPath .githooks）
 python3 tools/repo_check.py
 ```

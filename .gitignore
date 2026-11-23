@@ -1,4 +1,5 @@
 # macOS and local editor state
+host/eval-runs/
 .DS_Store
 .claude/*
 !.claude/skills/

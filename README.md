@@ -132,7 +132,11 @@ pnpm --dir web typecheck
 pnpm --dir web test:app
 pnpm --dir web build
 pnpm --dir server typecheck
+# 自有评测（Bun 宿主，离线套件）
+(cd host && bun run eval run --suite all --mode scripted)
 ```
+
+`bun run eval` 也支持真实模型、可选语义裁判和运行对比，见 [评测说明](host/eval/README.md)。
 
 iOS 增删源文件后，在 `ios/` 目录运行 `python3 generate_project.py` 更新工程；小院网页由 Xcode 构建阶段自动打包。版本号、跳过网页构建与归档命令见 [iOS 构建说明](ios/README.md#release-与-testflight-归档准备)。
 

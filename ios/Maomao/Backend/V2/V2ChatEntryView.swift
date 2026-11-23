@@ -218,7 +218,6 @@ private struct V2ConversationView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding(20)
                 }
-                .scrollDismissesKeyboard(.interactively)
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: chat.messages[conversation.id]?.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -243,6 +242,7 @@ private struct V2ConversationView: View {
                     PrimaryButton(height: Metrics.minTap, horizontalPadding: 16, enabled: canSend, shadow: false) {
                         Task { await chat.sendDraft(in: conversation.id) }
                     } label: { Text("发送").font(Typo.sans(14)) }
+                    .fixedSize(horizontal: true, vertical: false)
                     .disabled(!canSend)
                     .accessibilityIdentifier("v2Send")
                 }
@@ -250,7 +250,7 @@ private struct V2ConversationView: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(draftLength > 4000 ? "内容较长，请分成几条发送" : "快到单条消息的长度上限了")
                         Spacer(minLength: 8)
-                        Text("\(draftLength) / 4000").monospacedDigit()
+                        Text("\(draftLength) / 4000").monospacedDigit().fixedSize()
                     }
                     .font(Typo.sans(12))
                     .foregroundStyle(draftLength > 4000 ? Palette.accent : Palette.ink3)

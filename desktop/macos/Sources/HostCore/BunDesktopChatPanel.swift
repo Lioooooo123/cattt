@@ -195,7 +195,7 @@ private struct DesktopV2ConversationView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(text.utf16.count > 4000 ? "内容较长，请分成几条发送" : "快到单条消息的长度上限了")
                     Spacer(minLength: 8)
-                    Text("\(text.utf16.count) / 4000").monospacedDigit()
+                    Text("\(text.utf16.count) / 4000").monospacedDigit().fixedSize()
                 }
                 .font(.caption)
                 .foregroundStyle(text.utf16.count > 4000 ? CompanionPalette.accent : CompanionPalette.secondary)

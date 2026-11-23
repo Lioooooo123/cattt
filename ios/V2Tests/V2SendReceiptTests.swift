@@ -53,6 +53,52 @@ final class V2SendReceiptTests: XCTestCase {
                            })
     }
 
+    @MainActor func testDraftsStayWithTheirConversationAndClearOnlyAfterQueueing() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mock = ReceiptMock([])
+        let store = makeStore(mock.client, directory, online: false)
+        store.drafts["c"] = "hello"
+        store.drafts["group"] = "留给我们仨的话"
+
+        await store.sendDraft(in: "c")
+
+        XCTAssertEqual(store.drafts["c"], "")
+        XCTAssertEqual(store.drafts["group"], "留给我们仨的话")
+        XCTAssertEqual(store.pending.map(\.text), ["hello"])
+        XCTAssertEqual(store.pending.first?.conversationID, "c")
+        XCTAssertTrue(mock.methods.isEmpty)
+        store.deactivate()
+        XCTAssertTrue(store.drafts.isEmpty, "Member-scoped drafts must not survive disconnect")
+    }
+
+    @MainActor func testOverLimitDraftIsNotClearedOrQueued() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let mock = ReceiptMock([])
+        let store = makeStore(mock.client, directory, online: false)
+        // Emoji occupy two UTF-16 units, matching the API's existing length limit.
+        let text = String(repeating: "🐈", count: 2001)
+        store.drafts["c"] = text
+        await store.sendDraft(in: "c")
+        XCTAssertEqual(store.drafts["c"], text)
+        XCTAssertTrue(store.pending.isEmpty)
+        XCTAssertTrue(mock.methods.isEmpty)
+    }
+
+    @MainActor func testFailedLocalSaveRestoresDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("not a directory".utf8).write(to: directory)
+        let mock = ReceiptMock([])
+        let store = makeStore(mock.client, directory, online: false)
+        store.drafts["c"] = "hello"
+        await store.sendDraft(in: "c")
+        XCTAssertEqual(store.drafts["c"], "hello")
+        XCTAssertTrue(store.pending.isEmpty)
+        XCTAssertNotNil(store.error)
+    }
+
     @MainActor func testOfflineBeforePostingLeavesAnUnsentEntryAcrossRestart() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

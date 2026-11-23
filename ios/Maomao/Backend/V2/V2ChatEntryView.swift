@@ -8,31 +8,25 @@ struct V2ChatEntryView: View {
         NavigationStack {
             ZStack {
                 PageBackground().ignoresSafeArea()
-                VStack(spacing: 20) {
-                    if let error = chat.error { Text(error).font(Typo.sans(14)).foregroundStyle(Palette.ink2) }
-                    if chat.loading { ProgressView("正在连接家里的电脑…") }
-                    ListContainer {
-                        ForEach(chat.conversations) { conversation in
-                            Button { selected = conversation } label: {
-                                HStack(spacing: 16) {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(conversation.title).font(Typo.serif(19)).foregroundStyle(Palette.ink)
-                                        Text(subtitle(conversation)).font(Typo.sans(14)).foregroundStyle(Palette.ink2).lineLimit(2)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    Icons.chevronRight(color: Palette.ink2).frame(width: 20, height: 20)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("一起聊聊，或单独和团子说说话。")
+                            .font(Typo.sans(15)).foregroundStyle(Palette.ink2)
+                        if let error = chat.error { connectionNotice(error) }
+                        if chat.conversations.isEmpty {
+                            emptyState
+                        } else {
+                            ListContainer {
+                                ForEach(Array(chat.conversations.enumerated()), id: \.element.id) { index, conversation in
+                                    conversationRow(conversation)
+                                    if index < chat.conversations.count - 1 { ListDivider(leading: 20) }
                                 }
-                                .padding(20).frame(minHeight: 88)
-                                .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                            if conversation.kind == .group { Divider().padding(.horizontal, 20) }
+                            }
                         }
                     }
-                    if chat.conversations.isEmpty && !chat.loading {
-                        TextLink(text: "重新连接") { Task { await chat.load() } }
-                    }
-                    Spacer()
-                }.padding(20)
+                    .padding(20)
+                }
+                .refreshable { await chat.load() }
             }
             .navigationTitle("聊会儿").navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Palette.bg, for: .navigationBar)
@@ -50,6 +44,66 @@ struct V2ChatEntryView: View {
         }
         .tint(Palette.ink)
         .preferredColorScheme(.light)
+    }
+
+    private func conversationRow(_ conversation: V2.Conversation) -> some View {
+        Button { selected = conversation } label: {
+            HStack(spacing: 12) {
+                Image(systemName: conversation.kind == .group ? "person.2.fill" : "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: IconSize.sm))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: Metrics.iconSlotMd, height: Metrics.iconSlotMd)
+                    .background(Palette.chip, in: RoundedRectangle(cornerRadius: Metrics.radiusSm))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(conversation.title).font(Typo.serif(19)).foregroundStyle(Palette.ink)
+                    if let draft = chat.drafts[conversation.id], !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("草稿 · " + draft).font(Typo.sans(14)).foregroundStyle(Palette.accent).lineLimit(2)
+                    } else {
+                        Text(subtitle(conversation)).font(Typo.sans(14)).foregroundStyle(Palette.ink2).lineLimit(2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Icons.chevronRight(color: Palette.ink2).frame(width: IconSize.md, height: IconSize.md)
+                    .accessibilityHidden(true)
+            }
+            .padding(20).frame(minHeight: 88)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("v2Conversation-" + conversation.id)
+    }
+
+    private func connectionNotice(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("聊天暂时没有同步好", systemImage: "wifi.exclamationmark")
+                .font(Typo.sans(15)).foregroundStyle(Palette.ink)
+            Text(error).font(Typo.sans(14)).foregroundStyle(Palette.ink2)
+            Button { Task { await chat.load() } } label: {
+                Label(chat.loading ? "正在连接…" : "重新连接", systemImage: "arrow.clockwise")
+                    .font(Typo.sans(14)).frame(minHeight: Metrics.minTap)
+            }
+            .disabled(chat.loading)
+            .tint(Palette.accent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+        .background(Palette.card, in: RoundedRectangle(cornerRadius: Metrics.radiusCard))
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            if chat.loading {
+                ProgressView("正在连接家里的电脑…")
+            } else if chat.error == nil {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: IconSize.md)).foregroundStyle(Palette.ink3)
+                    .accessibilityHidden(true)
+                Text("聊天还没有同步过来").font(Typo.serif(19)).foregroundStyle(Palette.ink)
+                Text("电脑连接好后，下拉刷新，\n就能看到我们仨和你与团子的聊天。")
+                    .font(Typo.sans(14)).foregroundStyle(Palette.ink2).multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
     private func selectNotificationConversation() {
         guard let id = chat.notificationConversationID,
@@ -70,7 +124,13 @@ private struct V2ConversationView: View {
     @State private var ticketSelection: V2TicketEditor.Selection?
     @State private var relayError: String?
     @State private var relayConfirmation: RelayConfirmation?
-    @State private var draft = ""
+    private var draft: Binding<String> {
+        Binding(get: { chat.drafts[conversation.id, default: ""] },
+                set: { chat.drafts[conversation.id] = $0 })
+    }
+    private var draftLength: Int {
+        draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).utf16.count
+    }
     @State private var usageMessage: V2.Message?
     @State private var attachmentConversation: V2.Conversation?
     private var outboxRows: [V2Outbox.Entry] { chat.visibleOutbox(conversation.id) }
@@ -158,6 +218,7 @@ private struct V2ConversationView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }.padding(20)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: chat.messages[conversation.id]?.last?.id) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
@@ -174,16 +235,26 @@ private struct V2ConversationView: View {
             VStack(spacing: 8) {
                 if let error = relayError ?? chat.error { Text(error).font(Typo.sans(12)).foregroundStyle(Palette.ink2) }
                 HStack(alignment: .bottom, spacing: 12) {
-                    TextField("说点什么…", text: $draft, axis: .vertical)
+                    TextField(conversation.kind == .group ? "和大家说点什么…" : "和团子说点什么…", text: draft, axis: .vertical)
                         .font(Typo.sans(16)).foregroundStyle(Palette.ink).lineLimit(1...5).padding(12)
                         .background(Palette.card, in: RoundedRectangle(cornerRadius: Metrics.radiusControl))
+                        .layoutPriority(1)
                         .accessibilityIdentifier("v2Composer")
-                    PrimaryButton(height: 44, horizontalPadding: 16, enabled: canSend, shadow: false) {
-                        let text = draft; draft = ""
-                        Task {
-                            if !(await chat.send(text, conversation: conversation.id)), draft.isEmpty { draft = text }
-                        }
+                    PrimaryButton(height: Metrics.minTap, horizontalPadding: 16, enabled: canSend, shadow: false) {
+                        Task { await chat.sendDraft(in: conversation.id) }
                     } label: { Text("发送").font(Typo.sans(14)) }
+                    .disabled(!canSend)
+                    .accessibilityIdentifier("v2Send")
+                }
+                if draftLength >= 3600 {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(draftLength > 4000 ? "内容较长，请分成几条发送" : "快到单条消息的长度上限了")
+                        Spacer(minLength: 8)
+                        Text("\(draftLength) / 4000").monospacedDigit()
+                    }
+                    .font(Typo.sans(12))
+                    .foregroundStyle(draftLength > 4000 ? Palette.accent : Palette.ink3)
+                    .accessibilityElement(children: .combine)
                 }
             }.padding(.horizontal, 16).padding(.vertical, 10).background(Palette.bg)
         }
@@ -284,8 +355,7 @@ private struct V2ConversationView: View {
     }
 
     private var canSend: Bool {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !text.isEmpty && text.utf16.count <= 4000
+        draftLength > 0 && draftLength <= 4000
     }
     @ViewBuilder private func deliveryStatus(_ entry: V2Outbox.Entry) -> some View {
         if entry.accepted == nil {

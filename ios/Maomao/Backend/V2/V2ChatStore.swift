@@ -15,6 +15,8 @@ final class V2ChatStore: ObservableObject {
     @Published var members: [String: String] = [:]
     @Published var pending: [V2Outbox.Entry] = []
     @Published var failures: [String: String] = [:]
+    /// Keep unsent text across navigation, scoped to this member's connection.
+    @Published var drafts: [String: String] = [:]
     @Published var error: String?
     @Published var loading = false
     @Published var notificationConversationID: String?
@@ -61,6 +63,7 @@ final class V2ChatStore: ObservableObject {
 
     func deactivate() {
         isActive = false
+        drafts.removeAll()
         resources.deactivate()
         catDiary.deactivate()
         work.deactivate()
@@ -148,6 +151,16 @@ final class V2ChatStore: ObservableObject {
 
         for entry in pending where entry.conversationID == id && entry.rejection == nil {
             await transmit(entry)
+        }
+    }
+
+    func sendDraft(in conversation: String) async {
+        let text = drafts[conversation, default: ""]
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isActive, !trimmed.isEmpty, trimmed.utf16.count <= 4000 else { return }
+        drafts[conversation] = ""
+        if !(await send(text, conversation: conversation)), isActive, drafts[conversation, default: ""].isEmpty {
+            drafts[conversation] = text
         }
     }
 

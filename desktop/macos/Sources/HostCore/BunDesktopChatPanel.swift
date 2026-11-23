@@ -142,9 +142,14 @@ private struct DesktopV2ConversationView: View {
                     if chat.history[id] == nil {
                         ProgressView("正在读取聊天记录…").frame(maxWidth: .infinity, minHeight: 120)
                     } else if messages.isEmpty, queued.isEmpty, active == nil {
-                        Text("院子里的团子在等你。")
-                            .foregroundStyle(CompanionPalette.secondary)
-                            .frame(maxWidth: .infinity, minHeight: 120)
+                        VStack(spacing: 8) {
+                            Text(conversation.kind == .group ? "我们仨的聊天，从这里开始" : "有些话，想单独和团子说")
+                                .font(.headline).foregroundStyle(CompanionPalette.ink)
+                            Text(conversation.kind == .group ? "你、TA 和团子，都在这里。" : "说说今天的小事，也可以只是打个招呼。")
+                                .font(.callout).foregroundStyle(CompanionPalette.secondary)
+                        }
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, minHeight: 120)
                     }
                     ForEach(messages) { message in
                         DesktopV2Bubble(author: chat.authorName(message.author), text: message.text,
@@ -186,11 +191,18 @@ private struct DesktopV2ConversationView: View {
                     .disabled(chat.replying.contains(id))
                     .accessibilityIdentifier("desktop-chat-reply")
             }
-            if text.utf16.count > 4000 {
-                Text("每条消息最多 4000 个字符").font(.caption).foregroundStyle(CompanionPalette.accent)
+            if text.utf16.count >= 3600 {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(text.utf16.count > 4000 ? "内容较长，请分成几条发送" : "快到单条消息的长度上限了")
+                    Spacer(minLength: 8)
+                    Text("\(text.utf16.count) / 4000").monospacedDigit()
+                }
+                .font(.caption)
+                .foregroundStyle(text.utf16.count > 4000 ? CompanionPalette.accent : CompanionPalette.secondary)
+                .accessibilityElement(children: .combine)
             }
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("说点什么…", text: draft, axis: .vertical)
+                TextField(conversation.kind == .group ? "和大家说点什么…" : "和团子说点什么…", text: draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...5)
                     .padding(.horizontal, 12)
@@ -202,7 +214,7 @@ private struct DesktopV2ConversationView: View {
                         .disabled(active.stopping)
                         .accessibilityIdentifier("desktop-chat-stop")
                 }
-                composerButton("发送给团子", symbol: "arrow.up") { chat.send(id) }
+                composerButton(conversation.kind == .group ? "发送到我们仨" : "发送给团子", symbol: "arrow.up") { chat.send(id) }
                     .disabled(text.isEmpty || text.utf16.count > 4000)
                     .keyboardShortcut(.return, modifiers: .command)
                     .accessibilityIdentifier("desktop-chat-send")

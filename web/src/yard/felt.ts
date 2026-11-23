@@ -126,7 +126,7 @@ export function feltify(root: THREE.Object3D, skip: string[]) {
       const rope = source.name.startsWith('rope');
       const name = source.name;
       const options: FeltOptions = rope ? { scale: 65, bump: .38, mottle: .14 }
-        : name === 'cap' ? { scale: 130, bump: .07, mottle: .055, sheen: 0, surface: 'cap' }
+        : name === 'cap' ? { scale: 115, bump: .13, mottle: .07, sheen: .22, surface: 'cap' }
         : name.startsWith('wood') ? { scale: 120, bump: .2, mottle: .10, sheen: 0, surface: 'wood' }
         : name.startsWith('stone') ? { scale: 48, bump: .28, mottle: .18, sheen: 0, surface: 'stone' }
         : ['cream', 'gill', 'spot'].includes(name) ? { scale: 95, bump: .1, mottle: .06, sheen: 0, surface: 'plaster' }
@@ -134,7 +134,7 @@ export function feltify(root: THREE.Object3D, skip: string[]) {
         : name.startsWith('leaf') ? { scale: 80, bump: .22, mottle: .10, sheen: .25 }
         : { scale: 105, bump: .24, mottle: .10, sheen: .4 };
       felt = feltMaterial(source.color, options);
-      if (name === 'cap') (felt as THREE.MeshStandardMaterial).roughness = .76;
+      if (name === 'cap') (felt as THREE.MeshStandardMaterial).roughness = .9;
       if (name.startsWith('bowl')) {
         // 釉陶保留柔和高光，与绳窝和布垫分开。
         (felt as THREE.MeshStandardMaterial).roughness = .34;

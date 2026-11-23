@@ -64,7 +64,9 @@ export function makeWater() {
         vec2 p = vWorld.xz;
         float shore = 1.0 - smoothstep(0.0, 0.3, vDepth);
         // 岸边偏暖、中心更深；不把整面池水涂成同一层蓝漆。
-        vec3 base = mix(uBase, vec3(0.18, 0.25, 0.12), shore * 0.72);
+        float night = 1.0 - smoothstep(0.18, 0.65, uLight);
+        vec3 deep = mix(uBase, vec3(0.08, 0.23, 0.28), night * 0.65);
+        vec3 base = mix(deep, vec3(0.18, 0.25, 0.12), shore * 0.72);
         float waveA = p.x * 8.0 + p.y * 5.0 + uTime * 0.48;
         float waveB = p.x * -4.5 + p.y * 11.0 - uTime * 0.35;
         vec3 normal = normalize(vec3(cos(waveA) * 0.028 + cos(waveB) * 0.018, 1.0,
@@ -80,9 +82,11 @@ export function makeWater() {
         col += uSunColor * glint * uSunStrength * (1.0 - uRain * 0.85) * (1.0 - shore);
         // 保留少量细水纹，退掉原先横贯全池的白色缝线。
         float crest = pow(0.5 + 0.5 * sin(waveA + sin(waveB) * 0.6), 28.0);
-        col += uSky * crest * 0.035 * uLight * (1.0 - shore);
-        float rings = ripples(p, 2.6, 0.03 + uRain * 0.48) + ripples(p + 3.7, 4.3, uRain * 0.32);
-        col += uSky * rings * (0.08 + 0.18 * uRain) * uLight;
+        vec3 rippleLight = mix(uSky, vec3(0.58, 0.72, 0.76), 0.65);
+        col += rippleLight * crest * 0.065 * uLight * (1.0 - shore);
+        float rings = ripples(p, 2.6, 0.06 + uRain * 0.48) + ripples(p + 3.7, 4.3, uRain * 0.32);
+        // 夜里天色已很暗，水纹再乘一次天色会消失；保留少量月色可读性。
+        col += rippleLight * rings * (0.12 + 0.20 * uRain) * mix(0.6, 1.0, uLight);
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

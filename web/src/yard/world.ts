@@ -289,7 +289,7 @@ export class World {
     // 水面不吃场景灯光，亮度自己按主光和补光的明度折算，夜里才暗得下来
     const luminance = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
     const lit = (sky.lightIntensity * luminance(sky.light) * 0.3 + sky.fillIntensity * luminance(sky.fill) * 0.55) * 0.8;
-    water.uLight!.value = THREE.MathUtils.clamp(lit, 0.16, 1.15);
+    water.uLight!.value = THREE.MathUtils.clamp(lit, 0.20, 1.15);
 
     this.leaves.update(still ? 0 : dt, t, 1 - sky.rain);
 

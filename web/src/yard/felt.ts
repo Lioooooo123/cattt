@@ -21,7 +21,7 @@ export interface FeltOptions {
   /** 绒光强度；0 = 不要绒光 */
   sheen?: number;
   /** 保留柔软造型，但木、石与灰泥不能都像同一块绒布。 */
-  surface?: 'felt' | 'wood' | 'stone' | 'plaster' | 'ground';
+  surface?: 'felt' | 'wood' | 'stone' | 'plaster' | 'ground' | 'cap';
 }
 
 const NOISE = /* glsl */ `
@@ -93,6 +93,11 @@ export function feltMaterial(color: THREE.ColorRepresentation, options: FeltOpti
           float meadow = feltNoise(vFeltPos * 0.72) * 0.65 + feltNoise(vFeltPos * 3.6) * 0.35;
           diffuseColor.rgb *= mix(0.76, 1.12, meadow);
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 0.96, 0.73), smoothstep(0.56, 0.8, meadow) * 0.48);` : ''}
+        ${surface === 'cap' ? `
+          // 伞盖保留柔软造型，但大色斑和细腻表皮不再像草坪的绒毛。
+          float skin = feltNoise(vFeltPos * vec3(3.2, 1.5, 3.2));
+          diffuseColor.rgb *= mix(0.88, 1.08, skin);
+          feltFine = mix(feltFine, skin, 0.35);` : ''}
         diffuseColor.rgb *= 1.0 - uFeltMottle * 0.5 + uFeltMottle * feltFine;`,
       )
       .replace(
@@ -121,12 +126,15 @@ export function feltify(root: THREE.Object3D, skip: string[]) {
       const rope = source.name.startsWith('rope');
       const name = source.name;
       const options: FeltOptions = rope ? { scale: 65, bump: .38, mottle: .14 }
+        : name === 'cap' ? { scale: 115, bump: .13, mottle: .07, sheen: .22, surface: 'cap' }
         : name.startsWith('wood') ? { scale: 120, bump: .2, mottle: .10, sheen: 0, surface: 'wood' }
         : name.startsWith('stone') ? { scale: 48, bump: .28, mottle: .18, sheen: 0, surface: 'stone' }
-        : name === 'cream' ? { scale: 95, bump: .12, mottle: .08, sheen: 0, surface: 'plaster' }
+        : ['cream', 'gill', 'spot'].includes(name) ? { scale: 95, bump: .1, mottle: .06, sheen: 0, surface: 'plaster' }
+        : name.startsWith('bowl') ? { scale: 140, bump: .035, mottle: .025, sheen: 0 }
         : name.startsWith('leaf') ? { scale: 80, bump: .22, mottle: .10, sheen: .25 }
         : { scale: 105, bump: .24, mottle: .10, sheen: .4 };
       felt = feltMaterial(source.color, options);
+      if (name === 'cap') (felt as THREE.MeshStandardMaterial).roughness = .9;
       if (name.startsWith('bowl')) {
         // 釉陶保留柔和高光，与绳窝和布垫分开。
         (felt as THREE.MeshStandardMaterial).roughness = .34;

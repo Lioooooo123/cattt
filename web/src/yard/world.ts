@@ -11,6 +11,7 @@ import { groundHeight } from './terrain';
 import { batchStaticProps } from './static-props';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GroundShadows } from './ground-shadows.ts';
+import { makeWater } from './water.ts';
 
 /**
  * 院子：Blender 出的物件 + 这里程序生成的地面、石子路、池塘、草、远山、云、天、雨、落叶、雾。
@@ -282,10 +283,13 @@ export class World {
     water.uTime!.value = t;
     water.uRain!.value = sky.rain;
     water.uSky!.value.copy(sky.top).lerp(sky.horizon, 0.45);
+    water.uSunDirection!.value.copy(direction);
+    water.uSunColor!.value.copy(sky.light);
+    water.uSunStrength!.value = sky.lightIntensity * .35;
     // 水面不吃场景灯光，亮度自己按主光和补光的明度折算，夜里才暗得下来
     const luminance = (c: THREE.Color) => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
     const lit = (sky.lightIntensity * luminance(sky.light) * 0.3 + sky.fillIntensity * luminance(sky.fill) * 0.55) * 0.8;
-    water.uLight!.value = THREE.MathUtils.clamp(lit, 0.16, 1.15);
+    water.uLight!.value = THREE.MathUtils.clamp(lit, 0.20, 1.15);
 
     this.leaves.update(still ? 0 : dt, t, 1 - sky.rain);
 
@@ -544,92 +548,6 @@ function ribbon(curve: THREE.Curve<THREE.Vector3>, width: number, material: THRE
 
 function pondCurve() {
   return new THREE.CatmullRomCurve3(POND.map((p) => new THREE.Vector3(p.x, 0, p.z)), true, 'centripetal');
-}
-
-/**
- * 水面：颜色跟着天走；几道缓慢漂移的白线（iOS 池塘上缝的那几针）；
- * 雨量控制涟漪环的多少，晴天只偶尔冒一两圈。
- */
-function makeWater() {
-  const outline = pondCurve().getPoints(72);
-  const center = outline.reduce((sum, p) => sum.add(p), new THREE.Vector3()).multiplyScalar(1 / outline.length);
-  const vertices = [center.x, 0, center.z];
-  const depths = [1];
-  const indices: number[] = [];
-  for (let i = 0; i < outline.length - 1; i++) {
-    const p = outline[i]!; vertices.push(p.x, 0, p.z); depths.push(0);
-    indices.push(0, (i + 1) % (outline.length - 1) + 1, i + 1);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-  geometry.setAttribute('depth', new THREE.Float32BufferAttribute(depths, 1));
-  geometry.setIndex(indices); geometry.computeVertexNormals();
-  const material = new THREE.ShaderMaterial({
-    fog: true,
-    uniforms: {
-      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-      uTime: { value: 0 },
-      uRain: { value: 0 },
-      uSky: { value: new THREE.Color('#70bee4') },
-      uLight: { value: 1 },
-      uBase: { value: new THREE.Color('#518e9a') },
-    },
-    vertexShader: /* glsl */ `
-      #include <fog_pars_vertex>
-      varying vec3 vWorld;
-      attribute float depth; varying float vDepth;
-      void main() {
-        vDepth = depth;
-        vec4 world = modelMatrix * vec4(position, 1.0);
-        vWorld = world.xyz;
-        vec4 mvPosition = viewMatrix * world;
-        gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }`,
-    fragmentShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_fragment>
-      uniform float uTime; uniform float uRain; uniform vec3 uSky; uniform float uLight; uniform vec3 uBase;
-      varying vec3 vWorld; varying float vDepth;
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      // 一格一个涟漪：格子里随机位置、随机相位，环向外扩、淡出
-      float ripples(vec2 p, float density, float amount) {
-        vec2 cell = floor(p * density);
-        float sum = 0.0;
-        for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-          vec2 c = cell + vec2(float(x), float(y));
-          float seed = hash(c);
-          if (seed > amount) continue;
-          vec2 center = (c + 0.2 + 0.6 * vec2(hash(c + 3.1), hash(c + 7.7))) / density;
-          float life = fract(uTime * (0.35 + seed * 0.3) + seed * 9.0);
-          float radius = life * 0.75 / density;
-          float d = abs(length(p - center) - radius);
-          sum += smoothstep(0.012, 0.0, d) * (1.0 - life) * (1.0 - life);
-        }
-        return sum;
-      }
-      void main() {
-        vec2 p = vWorld.xz;
-        float shore = 1.0 - smoothstep(0.0, 0.27, vDepth);
-        vec3 base = mix(uBase, vec3(0.28, 0.43, 0.32), shore * .55);
-        vec3 col = mix(base, uSky, 0.20 + (1.0 - shore) * .10) * uLight;
-        col *= .94 + .06 * sin(p.x * 2.0 + sin(p.y * 2.7 + uTime * .12));
-        // 缝线一样的波纹：几道断续的细白线慢慢横移
-        float band = sin(p.y * 22.0 + sin(p.x * 3.0 + uTime * 0.35) * 1.6);
-        float dash = smoothstep(0.35, 0.65, sin(p.x * 9.0 + p.y * 4.0 - uTime * 0.25 + band));
-        float thread = smoothstep(0.965, 1.0, band) * dash;
-        col += vec3(0.85) * thread * 0.18 * uLight;
-        float rings = ripples(p, 2.6, 0.06 + uRain * 0.48) + ripples(p + 3.7, 4.3, uRain * 0.32);
-        col += vec3(0.9) * rings * (0.16 + 0.25 * uLight);
-        gl_FragColor = vec4(col, 1.0);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }`,
-  });
-  const water = new THREE.Mesh(geometry, material);
-  water.position.y = 0.012;
-  return water;
 }
 
 function makeStones() {

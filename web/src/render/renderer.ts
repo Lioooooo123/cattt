@@ -23,7 +23,7 @@ export interface ResolutionScaleEvent {
  * ACES 用的是 three 内置的那套拟合（RRT + ODT），曝光自己传。
  */
 const FinishShader = {
-  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uVignette: { value: 0.32 }, uGrain: { value: 0.018 }, uExposure: { value: 1 } },
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uVignette: { value: 0.24 }, uGrain: { value: 0.008 }, uExposure: { value: 1 } },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,

@@ -1,17 +1,8 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
-import { peerWorldPresence } from "../world/presence.ts";
 import { parseHlc } from "../clock/index.ts";
 import { CertificateError, initializePeerIdentity, validatePeerCertificates } from "../identity/peer-tls.ts";
-import { memberSeatPeerHandler } from "../identity/member-seats.ts";
-import { BlobStorage } from "../files/blobs.ts";
-import { createPeerBlobPull, peerBlobHandler } from "../replication/peer-blobs.ts";
-import { join } from "node:path";
-import { createPublicationPeer } from "../publication/peer.ts";
-import { PUBLICATION_PEER_VERSION } from "../publication/types.ts";
-import { typedChangesHandler } from "../replication/peer-http.ts";
-import { createPeerPullScheduler } from "../replication/peer-scheduler.ts";
 import type { HostContext } from "../runtime/index.ts";
 import { getHousehold } from "../store/identity.ts";
 import {
@@ -35,6 +26,26 @@ export interface PeerTransport {
   request(peerHostId: string, operation: PeerOperation, options?: PeerRequestOptions): Promise<Response>;
 }
 
+export interface PeerServiceAccess {
+  transport: PeerTransport;
+  protocol: PeerProtocol;
+  fingerprint(): string;
+  compatiblePeers(): PeerRecord[];
+}
+
+export type PeerStateChange =
+  | { type: "paired"; hostId: string }
+  | { type: "updated" | "revoked" | "identity_rotated" | "activated" };
+
+export interface PeerServices {
+  handlers: PeerHandlers;
+  admin?: Hono;
+  syncStatus?(peer: PeerRecord, paired: boolean, compatible: boolean): unknown;
+  canRequest?(operation: PeerOperation, peer: PeerRecord): boolean;
+  onChange?(change: PeerStateChange): void;
+  stop?(): Promise<void>;
+}
+
 const approval = z.strictObject({ identity: peerDescriptor, confirmed_fingerprint: peerFingerprint });
 const maxApprovalBytes = 24 * 1024;
 const limitBody = (maxSize: number) => bodyLimit({
@@ -49,8 +60,7 @@ export async function startPeerService(ctx: HostContext, options: {
   port: number;
   hostname: string;
   advertisedHost: () => string;
-  handlers?: PeerHandlers;
-  storage?: BlobStorage;
+  configure(access: PeerServiceAccess): PeerServices;
   protocol?: PeerProtocol;
   report(error: unknown): void;
 }) {
@@ -62,11 +72,7 @@ export async function startPeerService(ctx: HostContext, options: {
     throw new RangeError("Peer 协议版本必须是正整数");
   }
   const identity = await initializePeerIdentity(ctx.config.dataDir, clock, ctx.hostId);
-  const handleTypedChanges = options.handlers?.typedChanges ?? typedChangesHandler(ctx);
-  const storage = options.storage ?? new BlobStorage(join(ctx.config.dataDir, "blobs"));
-  const handleBlob = options.handlers?.blob ?? peerBlobHandler(ctx, storage);
-  let publication: ReturnType<typeof createPublicationPeer>;
-  let scheduler: ReturnType<typeof createPeerPullScheduler>;
+  let services: PeerServices | undefined;
   const app = new Hono<{ Bindings: { fingerprint: string } }>();
   app.use("*", async (c, next) => {
     if (ctx.config.accessPaused?.()) {
@@ -99,7 +105,7 @@ export async function startPeerService(ctx: HostContext, options: {
       status: peer.revokedAt !== null ? "revoked" : active ? "paired" : "approved",
       access,
       approved_at: peer.approvedAt, confirmed_at: active ? peer.confirmedAt : null, revoked_at: peer.revokedAt,
-      sync: scheduler.status(peer, active, access !== null),
+      sync: services?.syncStatus?.(peer, active, access !== null),
     };
   };
 
@@ -136,14 +142,12 @@ export async function startPeerService(ctx: HostContext, options: {
       return errorResponse("peer_join_not_approved", 403);
     }
     confirmPeer(db, clock, peer, hello.protocol_version, identity.current().fingerprint);
-    scheduler.refresh(peer.hostId);
-    publication.refresh();
+    services?.onChange?.({ type: "paired", hostId: peer.hostId });
     return c.json(ownHello());
   });
 
   app.use(peerOperations.lease.path, limitBody(4096));
   app.use(peerOperations.memberSeats.path, limitBody(4096));
-  const handleMemberSeats = memberSeatPeerHandler(ctx, () => transport);
   for (const operation of Object.keys(peerOperations) as PeerOperation[]) {
     const route = peerOperations[operation];
     app.on(route.method, route.path, (c) => {
@@ -161,12 +165,7 @@ export async function startPeerService(ctx: HostContext, options: {
       if (operation === "blob" && !peerFingerprint.safeParse(c.req.param("sha256")).success) {
         return errorResponse("invalid_request", 400);
       }
-      const handler = operation === "typedChanges" ? handleTypedChanges
-        : operation === "lease" ? (protocol.version >= PUBLICATION_PEER_VERSION ? publication.receive : undefined)
-        : operation === "blob" ? handleBlob
-        : operation === "memberSeats" ? handleMemberSeats
-        : operation === "worldPresence" ? (_request: Request, actor: PeerActor) => peerWorldPresence(ctx, actor)
-        : options.handlers?.[operation];
+      const handler = services?.handlers[operation];
       return handler ? handler(c.req.raw, {
         hostId: peer.hostId, householdId: peer.householdId, fingerprint: peer.fingerprint,
         protocolVersion: peer.protocolVersion, access,
@@ -242,9 +241,7 @@ export async function startPeerService(ctx: HostContext, options: {
   admin.get("/peer-identity", descriptorResponse);
   admin.post("/peer-identity/rotate", async () => {
     await identity.rotate();
-    ctx.publication.clear();
-    publication.refresh();
-    scheduler.refresh();
+    services?.onChange?.({ type: "identity_rotated" });
     listener.reload(true);
     return descriptorResponse();
   });
@@ -261,7 +258,7 @@ export async function startPeerService(ctx: HostContext, options: {
     }
     const peer = verifiedApproval(input, ctx.householdId, otherHousehold ? input.identity.household_id : null);
     const saved = approvePeer(db, clock, peer);
-    scheduler.refresh();
+    services?.onChange?.({ type: "updated" });
     listener.reload();
     return c.json({ peer: publicRecord(saved) });
   });
@@ -301,15 +298,14 @@ export async function startPeerService(ctx: HostContext, options: {
     } else {
       approvePeer(db, clock, remote);
     }
-    scheduler.refresh();
+    services?.onChange?.({ type: "updated" });
     listener.reload();
     const reply = await exchangeHello(remote).catch(() => undefined);
     const saved = getPeer(db, remote.hostId);
     const paired = reply && saved?.fingerprint === remote.fingerprint
       && confirmPeer(db, clock, saved, reply.protocol_version, identity.current().fingerprint);
     if (paired) {
-      scheduler.refresh(paired.hostId);
-      publication.refresh();
+      services?.onChange?.({ type: "paired", hostId: paired.hostId });
     }
     return paired ? c.json({ peer: publicRecord(paired) }) : errorResponse("peer_connection_failed", 502);
   });
@@ -321,7 +317,7 @@ export async function startPeerService(ctx: HostContext, options: {
     }
     const peer = setPeerPullPaused(db, ctx.householdId, id.data, body.data.paused);
     if (!peer) return errorResponse("peer_not_active", 404);
-    scheduler.refresh();
+    services?.onChange?.({ type: "updated" });
     return c.json({ peer: publicRecord(peer) });
   });
   admin.delete("/peers/:id", (c) => {
@@ -330,8 +326,7 @@ export async function startPeerService(ctx: HostContext, options: {
       return errorResponse("invalid_request", 400);
     }
     revokePeer(db, clock, ctx.householdId, id.data);
-    publication.refresh();
-    scheduler.refresh();
+    services?.onChange?.({ type: "revoked" });
     listener.reload();
     return c.json({ ok: true });
   });
@@ -350,7 +345,7 @@ export async function startPeerService(ctx: HostContext, options: {
     async request(peerHostId, operation, requestOptions = {}) {
       const peer = getPeer(db, peerHostId);
       if (!peer || peer.householdId !== ctx.householdId || peer.revokedAt !== null || !isConfirmed(peer)
-        || (operation === "typedChanges" && peer.pullPaused)) {
+        || services?.canRequest?.(operation, peer) === false) {
         throw new Error("Peer 尚未结对或已撤销");
       }
       const route = peerOperations[operation];
@@ -370,19 +365,24 @@ export async function startPeerService(ctx: HostContext, options: {
       return response;
     },
   };
-  scheduler = createPeerPullScheduler(ctx, transport, () => currentPeers().filter((peer) =>
-    peer.revokedAt === null && isConfirmed(peer) && peerAccess(protocol, peer.protocolVersion) !== undefined),
-    createPeerBlobPull(ctx, storage, transport), options.report);
-  publication = createPublicationPeer(ctx, transport, () => identity.current().fingerprint,
-    (version) => protocol.version >= PUBLICATION_PEER_VERSION && peerAccess(protocol, version) === "read_write",
-    options.report);
-  admin.route("/", publication.admin);
-  const activate = () => { scheduler.refresh(); publication.refresh(); };
-  if (!ctx.config.accessPaused?.()) activate();
+  const activate = () => services?.onChange?.({ type: "activated" });
+  const stop = async () => {
+    await Promise.all([services?.stop?.(), listener.stop()]);
+  };
+  try {
+    services = options.configure({
+      transport, protocol,
+      fingerprint: () => identity.current().fingerprint,
+      compatiblePeers: () => currentPeers().filter((peer) =>
+        peer.revokedAt === null && isConfirmed(peer) && peerAccess(protocol, peer.protocolVersion) !== undefined),
+    });
+    if (services.admin) admin.route("/", services.admin);
+    if (!ctx.config.accessPaused?.()) activate();
+  } catch (error) {
+    await stop();
+    throw error;
+  }
   return {
-    admin, port: listener.port, transport, activate,
-    async stop() {
-      await Promise.all([publication.stop(), scheduler.stop(), listener.stop()]);
-    },
+    admin, port: listener.port, transport, activate, stop,
   };
 }

@@ -179,6 +179,35 @@ test("陌生宿主、未经确认的指纹与非空家庭无法加入", async ()
   expect(bHost.ctx.householdId).toBe(b.household_id);
 });
 
+test("暂停拉取只阻断本机复制请求，不阻断对端拉取或行为投递", async () => {
+  const aHost = await host("甲");
+  const bHost = await host("乙");
+  const { a, b } = await pair(aHost, bHost);
+  const fromA = aHost.gateway.peerTransport!;
+  const fromB = bHost.gateway.peerTransport!;
+  const snapshot = { query: { op: "snapshot", protocol_version: "1" } };
+  const setPaused = (paused: boolean) => bHost.admin(`/peers/${a.host_id}/sync`, "PUT", { paused });
+
+  const paused = await setPaused(true);
+  expect(paused.status).toBe(200);
+  expect(await paused.json()).toMatchObject({ peer: { status: "paired", sync: { status: "paused", paused: true } } });
+  await expect(fromB.request(a.host_id, "typedChanges", snapshot)).rejects.toThrow();
+
+  const pull = await fromA.request(b.host_id, "typedChanges", snapshot);
+  expect(pull.status).toBe(200);
+  expect(await pull.json()).toMatchObject({ source: { sourceHostId: b.host_id } });
+  const behavior = await fromB.request(a.host_id, "inbox", { body: '{"id":1}' });
+  expect(behavior.status).toBe(200);
+  expect(await behavior.json()).toMatchObject({ hostId: b.host_id, payload: { id: 1 } });
+
+  const resumed = await setPaused(false);
+  expect(resumed.status).toBe(200);
+  expect(await resumed.json()).toMatchObject({ peer: { sync: { paused: false } } });
+  const resumedPull = await fromB.request(a.host_id, "typedChanges", snapshot);
+  expect(resumedPull.status).toBe(200);
+  expect(await resumedPull.json()).toMatchObject({ source: { sourceHostId: a.host_id } });
+});
+
 test("未知版本拒绝，明确兼容的不同版本只能读同步资源", async () => {
   const aHost = await host("甲", { version: 1, readOnlyVersions: [2] });
   const bHost = await host("乙", { version: 1, readOnlyVersions: [2] });

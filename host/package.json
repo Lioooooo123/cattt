@@ -4,6 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.4.5",
   "scripts": {
+    "eval": "bun eval/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate && bun run scripts/embed-migrations.ts",

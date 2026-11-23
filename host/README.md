@@ -88,6 +88,8 @@ Gateway 回环监听默认为 `127.0.0.1:8788`，可通过 `CATTT_PORT` 设置�
 
 R1 的 `/v2/streams/:streamId/events` 占位接口已移除。R3-2 改为下述具有会话授权、快照恢复的正式轮次流，未知游标不再返回 410；R1 的底层 ChatEvents 仍以 unknown 通知调用方恢复。
 
+正式轮次流立即写入首段正文；后续小段从首个待写片段起等待最多 24 毫秒，累计到 256 个 UTF-16 单元时提前写出。每次写入仍在事务内复核来源许可和发布权，正常结束前写完余段，取消不发布未写入的文字。客户端以事件游标续读，不依赖模型原始分段。
+
 ## 身份、家庭和设备凭证
 
 R2-1 增加 households、hosts、members、devices。业务行均有 UUIDv7 id、origin_host_id、编码 HLC、rev、创建/更新时间和 deleted_at 墓碑；hosts.id 与 host_meta 的运行时 hostId 一致。启动时幂等建立本宿主的家庭与 host 行，householdId 进入组件上下文；重启不改名、不重建身份，也不自动创建成员或设备。家庭/宿主名称可由配置 householdName、hostName 或环境 CATTT_HOUSEHOLD_NAME、CATTT_HOST_NAME 指定，默认“我们的家”“我的 Mac”。

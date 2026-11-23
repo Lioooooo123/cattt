@@ -9,7 +9,7 @@ import type { Message, Turn } from "../src/conversations/types.ts";
 import { Gateway } from "../src/gateway/index.ts";
 import { startHost } from "../src/runtime/index.ts";
 import { businessRow } from "../src/store/business.ts";
-import { listConversations, sendMessage } from "../src/store/conversations.ts";
+import { ConversationNotFoundError, listConversations, sendMessage } from "../src/store/conversations.ts";
 import { readChatEvents } from "../src/store/chat-events.ts";
 import { resolveDeviceToken } from "../src/store/identity.ts";
 import { acquireLease, LeaseLostError } from "../src/store/leases.ts";
@@ -124,6 +124,61 @@ test("A、B 各自单聊生成 accepted/delta/done，持久猫回复与幂等原
     const retryCat = await f.request(`/v2/conversations/${direct.id}/messages/${cat.id}/reply`, token, { request_id: crypto.randomUUID() });
     expect(retryCat.status).toBe(404);
   }
+});
+
+test("首段不等后续生成，后续小片段合并后按 SSE 游标重放，尾段在终态前落库", async () => {
+  const f = await setup();
+  const sent = await f.send(f.directA.id, f.a.token);
+  await until(() => f.replier.calls.length === 1);
+  const { chunks } = f.replier.calls[0]!;
+  const row = () => getTurnRow(f.host.store.db, sent.turn.id)!;
+  chunks.push(""); chunks.push("开头");
+  await until(() => row().firstTokenAt !== null);
+  expect(row().draftText).toBe("开头");
+  const firstSeq = row().eventSeq;
+
+  const body = "甲😀乙".repeat(80);
+  for (let i = 0; i < 80; i++) { chunks.push("甲😀乙"); }
+  // The last batch is shorter than the size threshold and must flush even if the model stalls.
+  await until(() => row().draftText === "开头" + body);
+  expect(row().eventSeq - firstSeq).toBeLessThan(20);
+  chunks.push("尾"); chunks.push("声"); chunks.end();
+  expect((await f.terminal(sent.turn)).status).toBe("completed");
+
+  const all = await (await f.request(sent.turn.stream_url)).text();
+  const firstCursor = all.match(/id: (\S+)\nevent: delta\ndata: \{"text":"开头"\}/)![1]!;
+  const resumed = await (await f.request(sent.turn.stream_url + "?last_event_id=" + encodeURIComponent(firstCursor))).text();
+  const replay = [...resumed.matchAll(/event: delta\ndata: (.*)/g)].map(([, data]) => JSON.parse(data!).text).join("");
+  expect(replay).toBe(body + "尾声");
+  expect(resumed).toContain("event: done");
+  expect(row().draftText).toBe("开头" + replay);
+});
+
+test("权限在合并期间撤回时不发布缓冲内容，且中止等待模型的读操作", async () => {
+  const f = await setup();
+  const sent = await f.send(f.directA.id, f.a.token);
+  await until(() => f.replier.calls.length === 1);
+  const { chunks, input } = f.replier.calls[0]!;
+  let allowed = true;
+  input.beforePublish!({ knowledgeEvidence: [], check() {
+    if (!allowed) { throw new ConversationNotFoundError(); }
+  } });
+  chunks.push("开头");
+  await until(() => getTurnRow(f.host.store.db, sent.turn.id)!.firstTokenAt !== null);
+
+  let markRead!: () => void;
+  const read = new Promise<void>((resolve) => { markRead = resolve; });
+  const next = chunks.next.bind(chunks);
+  chunks.next = () => { markRead(); return next(); };
+  chunks.push("不能发布");
+  // Wait for the next model read, proving the new chunk has entered the buffer.
+  await read;
+  allowed = false;
+  expect((await f.terminal(sent.turn)).error_code).toBe("conversation_unavailable");
+  expect(input.signal.aborted).toBe(true);
+  const stream = await (await f.request(sent.turn.stream_url)).text();
+  expect(stream).not.toContain("不能发布");
+  expect(stream).not.toContain("event: done");
 });
 
 test("群聊 B 取代 A 首 token 前的轮次，新历史同时含两人的署名，迟到块无效", async () => {

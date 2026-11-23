@@ -44,16 +44,17 @@ function candidate(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function scripted(body: string, finishReason: "stop" | "length" | null = "stop") {
+function scripted(body: string | string[], finishReason: "stop" | "length" | null = "stop") {
   const requests: ModelRequest[] = [];
   const client: ModelClient = {
     provider: "mock",
     modelId: "scripted-extract",
     async *stream(request) {
       requests.push(request);
+      const text = typeof body === "string" ? body : body[requests.length - 1]!;
       yield { type: "reasoning-delta", delta: "内部推理" };
-      yield { type: "text-delta", delta: body.slice(0, 10) };
-      yield { type: "text-delta", delta: body.slice(10) };
+      yield { type: "text-delta", delta: text.slice(0, 10) };
+      yield { type: "text-delta", delta: text.slice(10) };
       if (finishReason) { yield { type: "finish", finishReason }; }
     },
   };
@@ -236,6 +237,57 @@ test("坏形状、伪造来源、重复候选和不完整流失败，可按同�
   const { client, requests } = scripted(output());
   await expect(extractMemoryForMessage({ ...input(), signal: abort.signal }, client)).rejects.toThrow("cancelled");
   expect(requests).toHaveLength(0);
+});
+
+test("非逐字引文只纠正一次，原始输出和结构化原因随请求传入", async () => {
+  for (const [field, quote, bad] of [
+    ["sourceQuote", "我喝奶:茶只要无糖", candidate({ sourceQuote: "我喝奶:茶只要无糖" })],
+    ["subjectEvidence.quote", "我:我", candidate({ subjectEvidence: { messageId: "m2", quote: "我:我" } })],
+  ] as const) {
+    const first = output([bad]);
+    const { client, requests } = scripted([first, output([candidate()])]);
+    await expect(extractMemoryForMessage(input(), client)).resolves.toMatchObject({
+      confirmed: [{ value: "无糖", subject: { kind: "member", memberId: "a" }, sourceMemberId: "a" }], pending: [],
+    });
+    expect(requests).toHaveLength(2);
+    expect(JSON.parse(requests[1]!.messages.at(-1)!.content)).toMatchObject({
+      previousOutput: first, correction: { kind: "non_verbatim_quote", field, quote },
+    });
+    expect(requests[1]!.messages.slice(0, -1)).toEqual(requests[0]!.messages);
+    expect(requests[1]!.extraBody).toEqual(requests[0]!.extraBody);
+  }
+});
+
+test("纠正后仍坏的引文保持 model_error，不进行第三次请求", async () => {
+  const { client, requests } = scripted(output([candidate({ sourceQuote: "我喝奶:茶只要无糖" })]));
+  await expect(extractMemoryForMessage(input(), client)).rejects.toMatchObject({ name: "ModelReplyError", code: "model_error" });
+  expect(requests).toHaveLength(2);
+});
+
+test("JSON、schema、值和否定错误不纠正，归属降级也不纠正", async () => {
+  for (const body of ["not json", output([candidate({ sourceMemberId: "b", sourceQuote: "奶:茶" })]),
+    output([candidate({ sourceQuote: "我喝奶茶" })]), output([candidate(), candidate()])]) {
+    const { client, requests } = scripted(body);
+    await expect(extractMemoryForMessage(input(), client)).rejects.toMatchObject({ code: "model_error" });
+    expect(requests).toHaveLength(1);
+  }
+  const { client, requests } = scripted(output([candidate({ subject: { kind: "member", memberId: "b" } })]));
+  await expect(extractMemoryForMessage(input(), client)).resolves.toMatchObject({ confirmed: [], pending: [{ reason: "subject" }] });
+  expect(requests).toHaveLength(1);
+  const negative = scripted(output([candidate({ sourceQuote: "我不喝奶茶", value: "奶茶" })]));
+  await expect(extractMemoryForMessage(input(message("m2", "我不喝奶茶。")), negative.client)).rejects.toMatchObject({ code: "model_error" });
+  expect(negative.requests).toHaveLength(1);
+});
+
+test("纠正结果仍接受完整归属校验，也可返回空候选", async () => {
+  for (const [fixed, expected] of [
+    [output(), { confirmed: [], pending: [] }],
+    [output([candidate({ subject: { kind: "member", memberId: "b" } })]), { confirmed: [], pending: [{ reason: "subject" }] }],
+  ] as const) {
+    const { client, requests } = scripted([output([candidate({ sourceQuote: "奶:茶无糖" })]), fixed]);
+    await expect(extractMemoryForMessage(input(), client)).resolves.toMatchObject(expected);
+    expect(requests).toHaveLength(2);
+  }
 });
 
 test("确认值保留原话的否定，共同主语确实指向这两位成员", async () => {

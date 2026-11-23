@@ -50,8 +50,8 @@ const PRESETS: Record<TimeSlot, Sky> = {
     fill: c('#dfe9f4'), ground: c('#a9b089'), fillIntensity: 1.35, windowLit: 0.3, sun: 0.7, glow: 0.7, moon: 0, stars: 0, rain: 0, mist: 0.55, catGlow: 0.04, exposure: 1,
   },
   day: {
-    top: c('#3fa9ea'), horizon: c('#bfe3f4'), light: c('#fff3df'), lightIntensity: 2.35, azimuth: -34, elevation: 52,
-    fill: c('#eaf4ff'), ground: c('#8eaa8b'), fillIntensity: 1.55, windowLit: 0, sun: 0, glow: 0, moon: 0, stars: 0, rain: 0, mist: 0.04, catGlow: 0, exposure: 1,
+    top: c('#65a5cf'), horizon: c('#c4dfeb'), light: c('#fff0da'), lightIntensity: 2.8, azimuth: -34, elevation: 46,
+    fill: c('#dceafa'), ground: c('#7c936d'), fillIntensity: 1.1, windowLit: 0, sun: 0, glow: 0, moon: 0, stars: 0, rain: 0, mist: 0.04, catGlow: 0, exposure: 1,
   },
   dusk: {
     top: c('#9a5f9a'), horizon: c('#f7a873'), light: c('#ffc49a'), lightIntensity: 1.25, azimuth: 62, elevation: 12,

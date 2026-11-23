@@ -10,20 +10,21 @@ import { ANCHORS, NODES, POND, PATHS, EDGES, YARD_BOUNDARY, type Ground } from '
 import { groundHeight } from './terrain';
 import { batchStaticProps } from './static-props';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GroundShadows } from './ground-shadows.ts';
 
 /**
  * 院子：Blender 出的物件 + 这里程序生成的地面、石子路、池塘、草、远山、云、天、雨、落叶、雾。
  * 配色取自 iOS 院子现行素材（毛毡草地、石子路、蓝池塘、青绿远山、奶油色的云）。
  */
 const COLORS = {
-  lawn: '#91ac62',
-  lawnPatch: '#79994f',
+  lawn: '#819960',
+  lawnPatch: '#607b46',
   cobble: '#bfb7a0',
-  pathBed: '#8a9369',
+  pathBed: '#77775a',
   stone: '#a79f8b',
   pad: '#4f9b3c',
-  blade: '#a0b878',
-  bladeTip: '#b1c38a',
+  blade: '#748e50',
+  bladeTip: '#a0ad70',
   hillNear: '#829d72',
   hillMid: '#799d91',
   hillFar: '#8ea9ac',
@@ -95,6 +96,7 @@ export class World {
   private mist: { mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>; x: number; speed: number; phase: number; weight: number }[] = [];
   private leaves: Leaves;
   private time = 0;
+  private groundShadows = new GroundShadows();
 
   constructor(grassRatio = 1) {
     this.scene.fog = new THREE.Fog('#cfe3ea', 16, 130);
@@ -117,6 +119,7 @@ export class World {
     this.sky = makeSky();
     this.scene.add(this.sky);
     this.scene.add(makeGround(), makeContactShadows(), makePaths(), makeStones(), makeLilyPads(), makeHills(), makeShorePlants());
+    this.scene.add(this.groundShadows.root);
     this.water = makeWater();
     this.scene.add(this.water, this.pondEffects.root);
     this.scene.add(makeGrass(this.grassUniforms, grassRatio));
@@ -228,6 +231,7 @@ export class World {
     const elevation = THREE.MathUtils.degToRad(sky.elevation);
     const direction = new THREE.Vector3(Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), Math.cos(azimuth) * Math.cos(elevation));
     this.sunLight.position.copy(direction).multiplyScalar(12);
+    this.groundShadows.update(direction, sky.lightIntensity, sky.rain);
     this.fillLight.color.copy(sky.fill);
     this.fillLight.groundColor.copy(sky.ground);
     this.fillLight.intensity = sky.fillIntensity;
@@ -419,7 +423,7 @@ function makeGround() {
     tint.toArray(colors, i * 3);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const ground = new THREE.Mesh(geometry, feltMaterial(COLORS.lawn, { scale: 65, mottle: 0.11, bump: 0.22, patch: COLORS.lawnPatch, sheen: 0 }));
+  const ground = new THREE.Mesh(geometry, feltMaterial(COLORS.lawn, { scale: 65, mottle: 0.15, bump: 0.2, patch: COLORS.lawnPatch, sheen: 0, surface: 'ground' }));
   ground.material.vertexColors = true;
   ground.position.z = -20;
   // iOS WebKit 在宽地面上会把定向光阴影贴图的边界画成硬矩形；局部接地阴影单独处理。
@@ -432,7 +436,7 @@ function makeContactShadows() {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const d = Math.hypot((x + .5) / size * 2 - 1, (y + .5) / size * 2 - 1);
-    const alpha = Math.round(90 * Math.max(0, 1 - d * d) ** 2);
+    const alpha = Math.round(145 * Math.max(0, 1 - d * d) ** 2);
     const i = (y * size + x) * 4;
     data[i] = 40; data[i + 1] = 59; data[i + 2] = 37; data[i + 3] = alpha;
   }
@@ -440,12 +444,14 @@ function makeContactShadows() {
   texture.needsUpdate = true;
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearFilter;
-  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false });
+  // 乘色只压暗已有的光照，夜里不会变成一块自发光的绿色。
+  const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: true });
   const group = new THREE.Group();
   const footprints: [number, number, number, number][] = [
-    [ANCHORS.house.x, ANCHORS.house.z, 2.5, 1.65],
-    [ANCHORS.tree.x, ANCHORS.tree.z, 1.8, 1.55],
-    [ANCHORS.bench.x, ANCHORS.bench.z, 1.6, .75],
+    [ANCHORS.house.x, ANCHORS.house.z, 2.9, 2.1],
+    [ANCHORS.tree.x, ANCHORS.tree.z, 2.1, 1.8],
+    [ANCHORS.bench.x, ANCHORS.bench.z, 1.7, .85],
+    [ANCHORS.bowl.x, ANCHORS.bowl.z, .33, .3],
   ];
   for (const [x, z, width, depth] of footprints) {
     const shadow = new THREE.Mesh(new THREE.PlaneGeometry(width, depth), material);
@@ -460,7 +466,7 @@ function makeContactShadows() {
 /** 石子路：路网每条边上铺一层浅色路基，上面排一粒粒压扁的石子（iOS 院子的石子路） */
 function makePaths() {
   const group = new THREE.Group();
-  const bed = feltMaterial(COLORS.pathBed, { scale: 70, mottle: 0.12, sheen: 0 });
+  const bed = feltMaterial(COLORS.pathBed, { scale: 70, mottle: 0.24, sheen: 0, surface: 'ground' });
   // 一条曲线一路铺装；采样节点与导航共用，石块间距按整段弧长统一。
   const runs = PATHS.map(run => ({points: run.nodes.map(id => NODES[id]!), width: run.width}));
   const beds: THREE.BufferGeometry[] = [];
@@ -483,19 +489,19 @@ function makePaths() {
       const side = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
       for (let j = 0; j < across; j++) {
         const p = curve.getPointAt(Math.min(1, u + (j ? .045 / length : 0)));
-        const offset = ((j + 0.5) / across - 0.5) * width * 0.92 + (rand() - 0.5) * 0.006;
+        const offset = ((j + 0.5) / across - 0.5) * width * 0.92 + (rand() - 0.5) * 0.024;
         const r = 0.052 + rand() * 0.014;
         const m = new THREE.Matrix4().compose(
           new THREE.Vector3(p.x + side.x * offset, 0.007 + rand() * .004, p.z + side.z * offset),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -Math.atan2(tangent.z, tangent.x) + (rand() - .5) * .12, 0)),
-          new THREE.Vector3(r, 0.013 + rand() * 0.002, width * (.18 + rand() * .035)),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler((rand() - .5) * .08, -Math.atan2(tangent.z, tangent.x) + (rand() - .5) * .65, 0)),
+          new THREE.Vector3(r * (.85 + rand() * .25), 0.014 + rand() * 0.006, width * (.15 + rand() * .065)),
         );
         stones.push(m);
-        tints.push(new THREE.Color(COLORS.cobble).offsetHSL(0, 0, (rand() - 0.5) * 0.04));
+        tints.push(new THREE.Color(COLORS.cobble).offsetHSL((rand() - .5) * .04, (rand() - .5) * .08, (rand() - 0.5) * 0.16));
       }
     }
   }
-  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 6), feltMaterial('#ffffff', { scale: 80, mottle: 0.14 }), stones.length);
+  const mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 9, 5), feltMaterial('#ffffff', { scale: 80, mottle: 0.22, bump: .24, sheen: 0, surface: 'stone' }), stones.length);
   stones.forEach((m, i) => {
     mesh.setMatrixAt(i, m);
     mesh.setColorAt(i, tints[i]!);
@@ -692,7 +698,7 @@ function makeLilyPads() {
  * 草丛那一处密、高，前后夹住团子；院子前沿一排给全景当近景；其余零星矮草。
  */
 function makeGrass(uniforms: { uTime: { value: number }; uWind: { value: number } }, ratio = 1) {
-  const blade = new THREE.PlaneGeometry(0.022, 1, 1, 4);
+  const blade = new THREE.PlaneGeometry(0.012, 1, 1, 4);
   blade.translate(0, 0.5, 0);
   const position = blade.attributes.position!;
   for (let i = 0; i < position.count; i++) {
@@ -711,7 +717,7 @@ function makeGrass(uniforms: { uTime: { value: number }; uWind: { value: number 
       new THREE.Quaternion().setFromEuler(new THREE.Euler((rand() - 0.5) * 0.25, rand() * 6.28, 0)),
       new THREE.Vector3(width * (0.8 + rand() * 0.6), height, height),
     ));
-    tints.push(new THREE.Color(COLORS.blade).offsetHSL((rand() - 0.5) * 0.03, 0, (rand() - 0.5) * 0.1));
+    tints.push(new THREE.Color(COLORS.blade).offsetHSL((rand() - 0.5) * 0.045, 0, (rand() - 0.5) * 0.13));
   };
   const clump = ANCHORS.grass;
   for (let i = 0; i < 2600; i++) {
@@ -745,7 +751,9 @@ function makeGrass(uniforms: { uTime: { value: number }; uWind: { value: number 
     if (nearPath(x, z)) continue;
     if (insidePolygon(x, z, pond, 0.12)) continue;
     // 院中只留低矮草叶，中央空地与猫的轮廓都能读清。
-    add(x, z, 0.022 + rand() * 0.035, 1);
+    // 同一个根部出几根细叶，疏密成簇，不再均匀撒白色三角纸屑。
+    const height = 0.025 + rand() * 0.035;
+    for (let j = 0; j < 3; j++) add(x + (rand() - .5) * .035, z + (rand() - .5) * .035, height * (.65 + rand() * .55), .7 + rand() * .5);
   }
 
   // 草叶片数多、近景重叠多，用最便宜的漫反射材质

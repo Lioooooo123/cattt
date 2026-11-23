@@ -20,6 +20,8 @@ export interface FeltOptions {
   patch?: THREE.ColorRepresentation;
   /** 绒光强度；0 = 不要绒光 */
   sheen?: number;
+  /** 保留柔软造型，但木、石与灰泥不能都像同一块绒布。 */
+  surface?: 'felt' | 'wood' | 'stone' | 'plaster' | 'ground';
 }
 
 const NOISE = /* glsl */ `
@@ -40,7 +42,7 @@ const NOISE = /* glsl */ `
 `;
 
 export function feltMaterial(color: THREE.ColorRepresentation, options: FeltOptions = {}) {
-  const { scale = 90, mottle = 0.16, bump = 0.32, patch, sheen = 0.5 } = options;
+  const { scale = 90, mottle = 0.16, bump = 0.32, patch, sheen = 0.5, surface = 'felt' } = options;
   const material =
     sheen > 0
       ? new THREE.MeshPhysicalMaterial({ color, roughness: 1, metalness: 0, sheen, sheenRoughness: 0.8, sheenColor: new THREE.Color('#ffe6cf') })
@@ -76,7 +78,21 @@ export function feltMaterial(color: THREE.ColorRepresentation, options: FeltOpti
         /* glsl */ `#include <color_fragment>
         vec3 feltP = vFeltPos * uFeltScale;
         feltFine = feltNoise(feltP) * 0.6 + feltNoise(feltP * 2.7) * 0.4;
-        ${patch ? 'diffuseColor.rgb = mix(diffuseColor.rgb, uFeltPatch, smoothstep(0.35, 0.75, feltNoise(vFeltPos * 1.3 + 7.0)) * 0.55);' : ''}
+        ${patch ? 'diffuseColor.rgb = mix(diffuseColor.rgb, uFeltPatch, smoothstep(0.25, 0.8, feltNoise(vFeltPos * 1.3 + 7.0)) * 0.8);' : ''}
+        ${surface === 'wood' ? `
+          // 顺着木件长轴拉开的纹理；低频弯曲打散重复条带。
+          float grain = feltNoise(vFeltPos * vec3(28.0, 2.2, 28.0) + feltNoise(vFeltPos * 3.0) * 2.0);
+          diffuseColor.rgb *= mix(0.72, 1.12, grain);
+          feltFine = mix(feltFine, grain, 0.45);` : ''}
+        ${surface === 'stone' || surface === 'plaster' ? `
+          float mineral = feltNoise(vFeltPos * ${surface === 'stone' ? '13.0' : '5.0'});
+          diffuseColor.rgb *= mix(0.8, 1.08, mineral);
+          feltFine = mix(feltFine, mineral, 0.3);` : ''}
+        ${surface === 'ground' ? `
+          // 米级斑驳与细纤维分开：避免草坪读成一整块均匀地毯。
+          float meadow = feltNoise(vFeltPos * 0.72) * 0.65 + feltNoise(vFeltPos * 3.6) * 0.35;
+          diffuseColor.rgb *= mix(0.76, 1.12, meadow);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.12, 0.96, 0.73), smoothstep(0.56, 0.8, meadow) * 0.48);` : ''}
         diffuseColor.rgb *= 1.0 - uFeltMottle * 0.5 + uFeltMottle * feltFine;`,
       )
       .replace(
@@ -88,7 +104,7 @@ export function feltMaterial(color: THREE.ColorRepresentation, options: FeltOpti
       );
   };
   // 同一个类、不同选项要编译成不同程序
-  material.customProgramCacheKey = () => `felt-${sheen > 0 ? 's' : 'n'}-${patch ? 'p' : 'n'}`;
+  material.customProgramCacheKey = () => `felt-${sheen > 0 ? 's' : 'n'}-${patch ? 'p' : 'n'}-${surface}`;
   return material;
 }
 
@@ -102,14 +118,20 @@ export function feltify(root: THREE.Object3D, skip: string[]) {
     if (skip.includes(source.name)) return;
     let felt = cache.get(source);
     if (!felt) {
-      const rope = source.name === 'rope';
+      const rope = source.name.startsWith('rope');
       const name = source.name;
       const options: FeltOptions = rope ? { scale: 65, bump: .38, mottle: .14 }
-        : name.startsWith('wood') ? { scale: 120, bump: .16, mottle: .12, sheen: .15 }
-        : name.startsWith('stone') ? { scale: 48, bump: .22, mottle: .12, sheen: 0 }
+        : name.startsWith('wood') ? { scale: 120, bump: .2, mottle: .10, sheen: 0, surface: 'wood' }
+        : name.startsWith('stone') ? { scale: 48, bump: .28, mottle: .18, sheen: 0, surface: 'stone' }
+        : name === 'cream' ? { scale: 95, bump: .12, mottle: .08, sheen: 0, surface: 'plaster' }
         : name.startsWith('leaf') ? { scale: 80, bump: .22, mottle: .10, sheen: .25 }
         : { scale: 105, bump: .24, mottle: .10, sheen: .4 };
       felt = feltMaterial(source.color, options);
+      if (name.startsWith('bowl')) {
+        // 釉陶保留柔和高光，与绳窝和布垫分开。
+        (felt as THREE.MeshStandardMaterial).roughness = .34;
+        if (felt instanceof THREE.MeshPhysicalMaterial) felt.sheen = 0;
+      }
       felt.name = source.name;
       felt.side = source.side;
       cache.set(source, felt);

@@ -134,7 +134,7 @@ export function feltify(root: THREE.Object3D, skip: string[]) {
         : name.startsWith('leaf') ? { scale: 80, bump: .22, mottle: .10, sheen: .25 }
         : { scale: 105, bump: .24, mottle: .10, sheen: .4 };
       felt = feltMaterial(source.color, options);
-      if (name === 'cap') felt.roughness = .76;
+      if (name === 'cap') (felt as THREE.MeshStandardMaterial).roughness = .76;
       if (name.startsWith('bowl')) {
         // 釉陶保留柔和高光，与绳窝和布垫分开。
         (felt as THREE.MeshStandardMaterial).roughness = .34;

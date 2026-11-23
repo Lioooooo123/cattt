@@ -25,10 +25,10 @@ import { memberChangesRoutes } from "../member-changes/routes.ts";
 import { memberResourceRoutes } from "../member-resources/routes.ts";
 import type { GroupSends } from "../group-sends/index.ts";
 import { actorDto, memberProfile } from "../identity/dto.ts";
-import { startPeerService } from "../peer/index.ts";
+import { startHostPeer } from "../runtime/peer.ts";
 import { relayRoutes } from "../relay/routes.ts";
 import type { PeerBehaviorChannel } from "../peer-behavior/index.ts";
-import type { PeerHandlers, PeerProtocol } from "../peer/index.ts";
+import type { PeerProtocol } from "../peer/index.ts";
 import { isPeerAddress } from "../peer/protocol.ts";
 
 export interface GatewayOptions {
@@ -38,7 +38,7 @@ export interface GatewayOptions {
   lanPort?: number;
   peerPort?: number;
   peerHostname?: string;
-  peerHandlers?: PeerHandlers;
+  peerHandlers?: Parameters<typeof startHostPeer>[1]["handlers"];
   peerProtocol?: PeerProtocol;
   tlsRefreshIntervalMs?: number;
   tls?: LanTlsOptions;
@@ -49,7 +49,7 @@ export class Gateway implements Component {
   private server: ReturnType<typeof Bun.serve> | undefined;
   private readonly streams = new Set<AbortController>();
   private readonly heartbeatIntervalMs: number;
-  private peerService: Awaited<ReturnType<typeof startPeerService>> | undefined;
+  private peerService: Awaited<ReturnType<typeof startHostPeer>> | undefined;
   private lanServer: ReturnType<typeof Bun.serve> | undefined;
   private readonly draining = new Set<ReturnType<typeof Bun.serve>>();
   private fileShutdown: AbortController | undefined;
@@ -181,7 +181,7 @@ export class Gateway implements Component {
           throw new RangeError("Peer HTTPS 端口必须是 0 至 65535 的整数");
         }
         const peerHostname = this.options.peerHostname ?? "0.0.0.0";
-        this.peerService = await startPeerService(ctx, {
+        this.peerService = await startHostPeer(ctx, {
           port: peerPort, hostname: peerHostname, storage: blobs,
           advertisedHost: () => [peerHostname, ...identity.hosts()].find(isPeerAddress) ?? "localhost",
           handlers: this.options.peerBehavior ? {

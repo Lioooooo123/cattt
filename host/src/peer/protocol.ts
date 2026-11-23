@@ -28,12 +28,7 @@ export interface PeerActor {
   readonly access: PeerAccess;
 }
 
-export interface PeerHandlers {
-  changes?: PeerHandler;
-  typedChanges?: PeerHandler;
-  blob?: PeerHandler;
-  inbox?: PeerHandler;
-}
+export type PeerHandlers = Partial<Record<PeerOperation, PeerHandler>>;
 type PeerHandler = (request: Request, actor: PeerActor) => Response | Promise<Response>;
 
 export const peerOperations = {

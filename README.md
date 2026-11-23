@@ -24,14 +24,14 @@
 | iOS 客户端 | Swift、SwiftUI、WKWebView，最低 iOS 17 |
 | macOS 电脑端 | SwiftPM、SwiftUI 菜单栏宿主与小院/聊天窗口、WKWebView，最低 macOS 14，Apple Silicon |
 | 3D 世界与展示页 | TypeScript、Three.js、Vite |
-| 服务端 | Node.js、TypeScript、Hono、自研模型客户端与 Agent 循环 |
-| 数据与后台执行 | PostgreSQL、Drizzle ORM、pg-boss |
-| 实时消息 | SSE、PostgreSQL LISTEN/NOTIFY |
+| 共享版宿主 | Bun、TypeScript、Hono、自研模型客户端与 Agent 循环 |
+| 数据与后台执行 | SQLite WAL、Drizzle ORM、持久作业队列 |
+| 设备与宿主通信 | API v2、SSE、两台 Mac 间的 mTLS 复制与行为投递 |
 | 模型与资源 | 本机 OpenAI 兼容模型（Ollama 等）/ 自带 key 的 DeepSeek / mock、Blender 3D 资源 |
 
-SwiftUI 承载原生页面，WKWebView 渲染小院，首页与聊天共享同一个世界。后端分为 API 和 worker 两个进程：API 处理聊天与最终回应，worker 执行后台托付、记忆提取和日记处理，再提交持久化汇报。API 发布前重新检查上下文、用户许可和安静时段。
+SwiftUI 承载原生页面，WKWebView 渲染小院，首页与聊天共享同一个世界。共享版每台 Mac 运行一个 Bun 宿主；手机访问所配对宿主，两台宿主分别持久化数据。组件职责、复制与行为通道见[共享版架构地图](docs/参考/共享版架构地图.md)。
 
-PostgreSQL 保存业务状态、执行检查点与汇报，pg-boss 投递后台工作；PG 表与 LISTEN/NOTIFY 用于聊天事件流和断线续传。Agent 的事项与执行分离设计参考了 [DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)，实现按 Cattt 的陪伴场景组织。
+下方旧版开发流程仍使用 `server/` 的 Node.js API/worker 两进程、PostgreSQL、pg-boss 与 LISTEN/NOTIFY。Agent 的事项与执行分离设计参考了 [DeepSeek Super-agent](https://github.com/deepseek-ai/dsh-superagent-prototype)，实现按 Cattt 的陪伴场景组织。
 
 ## 快速开始
 
@@ -63,9 +63,9 @@ open ios/Maomao.xcodeproj
 
 App 默认使用本地模拟，可先体验小院和界面。需要真实后端时，按下一节启动服务，再在 App 调试面板中切换到本机后端并填入开发 token。
 
-### 运行本机后端
+### 运行旧版本机后端
 
-电脑端应用打开小院与聊天窗口，聊天通过本机宿主的既有配对接口连接；试用、构建、备份恢复与烟测见 [macOS 客户端与宿主说明](desktop/macos/README.md)。应用随附 Node 22 与 PostgreSQL 17；服务端只依赖 PostgreSQL，不需要 Redis。
+旧版 macOS 应用曾随附 Node 22 与 PostgreSQL 17，服务端不需要 Redis。共享版试用、构建与备份恢复见 [macOS 客户端与宿主说明](desktop/macos/README.md)。
 
 以下为不使用宿主的源码开发流程，保留的 `server/docker-compose.yml` 只用于开发数据库：
 
